@@ -16,6 +16,12 @@ Escritorio remoto en Rust. Antes de tocar código, lee `docs/ARCHITECTURE.md` y
   ser enums **externamente etiquetados** (postcard no soporta `#[serde(tag=…)]`)
   y **solo se añaden variantes al final** (postcard codifica el índice de la
   variante; `crates/proto/tests/wire.rs` fija esos índices).
+- **Modo comunitario.** `crates/discovery` es la única puerta a la DHT, mDNS,
+  Nostr y UPnP. Todo lo que llega de esas fuentes es una *pista*: se verifica la
+  firma del `Record` y que la clave derive al ID antes de usarlo. Los tests que
+  tocan Internet van con `#[ignore]` (`cargo test -p cleandesk-discovery -- --ignored`).
+- **Compilación.** `.cargo/config.toml` es local (no versionado); apunta
+  `target-dir` a un disco NTFS con espacio. No lances dos `cargo` a la vez.
 - **Seguridad no negociable.** El servidor solo registra un ID derivado de la
   clave pública y firmado (`RegisterChallenge`/`RegisterProof`); el host limita
   intentos desatendidos (`AuthThrottle`) y libera teclas al cerrar; el

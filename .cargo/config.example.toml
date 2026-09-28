@@ -1,4 +1,4 @@
-# Build output goes to F: because C: has very little free space.
-# All target artifacts for this project are written under F:\cleandesk-target.
+# Build output goes to D: (NTFS). C: has very little free space and F: is a
+# Btrfs volume whose driver loses files under cargo's parallel writes.
 [build]
-target-dir = "F:/cleandesk-target"
+target-dir = "D:/cleandesk-target"

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CleanDesk Windows installer (WiX 3.x).
+
+  Build with installer/build-msi.ps1 (it runs cargo build -release, then
+  candle/light). Installs cleandesk.exe under Program Files, adds Start Menu
+  and Desktop shortcuts and an Add/Remove Programs entry. Upgrades are
+  handled by MajorUpgrade with a stable UpgradeCode; the ProductId is
+  regenerated on every build ("*").
+
+  The Windows service is not installed by the MSI on purpose: the app installs
+  it on demand from Ajustes → Sistema (UAC prompt), so users who only want the
+  interactive mode never get a background service.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="CleanDesk"
+           Language="3082"
+           Codepage="1252"
+           Version="$(var.Version)"
+           Manufacturer="CleanDesk"
+           UpgradeCode="8B1B0E52-6C1D-4F5B-9C8E-3A2D1E7F0C11">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="CleanDesk: escritorio remoto rápido, ligero y seguro"
+             Manufacturer="CleanDesk" />
+
+    <MajorUpgrade DowngradeErrorMessage="Ya hay instalada una versión más reciente de CleanDesk." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="cleandesk.ico" SourceFile="$(var.SourceDir)\installer\cleandesk.ico" />
+    <Property Id="ARPPRODUCTICON" Value="cleandesk.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/EnriqueGF/CleanDesk" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="CleanDesk" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ProgramMenuDir" Name="CleanDesk" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
+    </Directory>
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="MainExecutable" Guid="2F6C4A9E-1B3D-4E7A-8C5F-6D2E9A0B1C33" Win64="yes">
+        <File Id="cleandesk.exe"
+              Source="$(var.SourceDir)\target\release\cleandesk.exe"
+              KeyPath="yes" />
+        <!-- Inbound rules so LAN discovery, direct signaling and ICE work
+             without a manual firewall prompt. -->
+        <fire:FirewallException xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension"
+                                Id="FwDirect" Name="CleanDesk (señalización directa)"
+                                Port="7423" Protocol="tcp" Scope="any" IgnoreFailure="yes" />
+        <fire:FirewallException xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension"
+                                Id="FwIce" Name="CleanDesk (WebRTC)"
+                                Port="7424" Protocol="udp" Scope="any" IgnoreFailure="yes" />
+        <fire:FirewallException xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension"
+                                Id="FwMdns" Name="CleanDesk (mDNS)"
+                                Port="5353" Protocol="udp" Scope="localSubnet" IgnoreFailure="yes" />
+      </Component>
+      <Component Id="RelayExecutable" Guid="7A1E2D3C-4B5F-4A6E-9D8C-0F1E2D3C4B55" Win64="yes">
+        <File Id="cleandesk_relay_server.exe"
+              Source="$(var.SourceDir)\target\release\cleandesk-relay-server.exe"
+              KeyPath="yes" />
+      </Component>
+      <Component Id="SignalExecutable" Guid="C3D4E5F6-A7B8-4C9D-8E0F-1A2B3C4D5E66" Win64="yes">
+        <File Id="cleandesk_signal_server.exe"
+              Source="$(var.SourceDir)\target\release\cleandesk-signal-server.exe"
+              KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="ProgramMenuDir">
+      <Component Id="StartMenuShortcut" Guid="5E6F7A8B-9C0D-4E1F-A2B3-C4D5E6F7A877">
+        <Shortcut Id="StartMenuCleanDesk"
+                  Name="CleanDesk"
+                  Description="Escritorio remoto CleanDesk"
+                  Target="[INSTALLFOLDER]cleandesk.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="cleandesk.ico" />
+        <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\CleanDesk" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="9A0B1C2D-3E4F-4A5B-8C7D-6E5F4A3B2C88">
+        <Shortcut Id="DesktopCleanDesk"
+                  Name="CleanDesk"
+                  Target="[INSTALLFOLDER]cleandesk.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="cleandesk.ico" />
+        <RegistryValue Root="HKCU" Key="Software\CleanDesk" Name="Desktop" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Main" Title="CleanDesk" Level="1" Absent="disallow">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+    <Feature Id="Servers" Title="Servidor y relay (modo privado / comunitario)" Level="1000">
+      <ComponentRef Id="RelayExecutable" />
+      <ComponentRef Id="SignalExecutable" />
+    </Feature>
+
+    <UIRef Id="WixUI_FeatureTree" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.SourceDir)\installer\license.rtf" />
+  </Product>
+</Wix>

@@ -18,4 +18,9 @@ cleandesk-core.workspace = true
 cleandesk-codec.workspace = true
 cleandesk-transport.workspace = true
 cleandesk-crypto.workspace = true
+cleandesk-discovery.workspace = true
 bytes.workspace = true
+
+[dev-dependencies]
+cleandesk-host.workspace = true
+tracing-subscriber.workspace = true

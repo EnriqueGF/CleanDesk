@@ -37,9 +37,56 @@ pub struct Settings {
     /// Optional human-friendly alias for this device (spec §3), e.g.
     /// `pc-oficina.clean`.
     pub alias: Option<String>,
+    /// How this device finds and is found by peers.
+    #[serde(default)]
+    pub network: NetworkMode,
+    /// Trust-on-first-use pins: CleanDesk ID (numeric) → Ed25519 public key
+    /// (base64) seen in the first successful session. In community mode a
+    /// different key under the same ID is refused (see `cleandesk-discovery`).
+    #[serde(default)]
+    pub pinned_keys: std::collections::BTreeMap<u64, String>,
+}
+
+/// Rendezvous mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum NetworkMode {
+    /// No server: LAN mDNS, the BitTorrent DHT and public Nostr relays.
+    #[default]
+    Community,
+    /// A private CleanDesk Server (companies, closed networks).
+    Server { url: String },
+}
+
+impl NetworkMode {
+    pub fn is_community(&self) -> bool {
+        matches!(self, NetworkMode::Community)
+    }
+
+    pub fn server_url(&self) -> Option<&str> {
+        match self {
+            NetworkMode::Server { url } => Some(url),
+            NetworkMode::Community => None,
+        }
+    }
 }
 
 impl Settings {
+    /// The pinned key for `id`, if any.
+    pub fn pinned_key(&self, id: cleandesk_proto::CleanDeskId) -> Option<&str> {
+        self.pinned_keys.get(&id.value()).map(String::as_str)
+    }
+
+    /// Remember `key` for `id`. Returns `true` if it was new or changed.
+    pub fn pin_key(&mut self, id: cleandesk_proto::CleanDeskId, key: &str) -> bool {
+        self.pinned_keys.insert(id.value(), key.to_string()).as_deref() != Some(key)
+    }
+
+    /// Forget the pin for `id` (the user verified a legitimate identity change).
+    pub fn unpin_key(&mut self, id: cleandesk_proto::CleanDeskId) -> bool {
+        self.pinned_keys.remove(&id.value()).is_some()
+    }
+
     /// Hash `password` with Argon2id and store it as the unattended-access
     /// secret. Does **not** flip [`Self::unattended_enabled`] — callers
     /// decide separately when the feature should actually be live.

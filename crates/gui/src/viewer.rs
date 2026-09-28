@@ -568,8 +568,8 @@ fn stats_line(viewer: &ViewerState) -> String {
         Some(s) => {
             let kind = if s.direct { "Directa" } else { "Relay" };
             format!(
-                "Ping: {} ms  ·  FPS: {}  ·  {}×{}  ·  {} kb/s  ·  Códec: {}  ·  Conexión: {}  ·  Frames: {}",
-                s.rtt_ms, s.fps, s.width, s.height, s.bandwidth_kbps, s.codec, kind, viewer.frames_received
+                "Ping: {} ms  ·  FPS: {}  ·  {}×{}  ·  {} kb/s  ·  Códec: {}  ·  Conexión: {} vía {}  ·  Frames: {}",
+                s.rtt_ms, s.fps, s.width, s.height, s.bandwidth_kbps, s.codec, kind, viewer.session.via, viewer.frames_received
             )
         }
         None => "Estableciendo estadísticas…".to_string(),

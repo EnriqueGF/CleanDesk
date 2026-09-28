@@ -56,6 +56,8 @@ pub const ENV_BIND: &str = "CLEANDESK_RELAY_BIND";
 pub const ENV_PUBLIC_IP: &str = "CLEANDESK_RELAY_PUBLIC_IP";
 pub const ENV_REALM: &str = "CLEANDESK_RELAY_REALM";
 pub const ENV_USERS: &str = "CLEANDESK_RELAY_USERS";
+/// `1` enables community mode (public credentials + DHT announcement).
+pub const ENV_COMMUNITY: &str = "CLEANDESK_RELAY_COMMUNITY";
 pub const ENV_MIN_PORT: &str = "CLEANDESK_RELAY_MIN_PORT";
 pub const ENV_MAX_PORT: &str = "CLEANDESK_RELAY_MAX_PORT";
 
@@ -131,6 +133,9 @@ pub struct RelayConfig {
     pub realm: String,
     pub users: Vec<RelayUser>,
     pub port_range: Option<PortRange>,
+    /// Community mode: accept the public CleanDesk community credentials and
+    /// announce this relay on the BitTorrent DHT so any client can find it.
+    pub community: bool,
 }
 
 impl RelayConfig {
@@ -172,7 +177,22 @@ impl RelayConfig {
             None => IpAddr::V4(Ipv4Addr::LOCALHOST),
         };
         let realm = get(ENV_REALM).unwrap_or(DEFAULT_REALM).trim().to_owned();
-        let users = parse_users(get(ENV_USERS).unwrap_or(""))?;
+        let community = matches!(get(ENV_COMMUNITY).map(str::trim), Some("1" | "true" | "yes" | "on"));
+        let mut users = match get(ENV_USERS) {
+            Some(v) => parse_users(v)?,
+            None if community => Vec::new(),
+            None => parse_users("")?,
+        };
+        if community
+            && !users
+                .iter()
+                .any(|u| u.username == cleandesk_discovery::COMMUNITY_TURN_USER)
+        {
+            users.push(RelayUser {
+                username: cleandesk_discovery::COMMUNITY_TURN_USER.to_string(),
+                password: cleandesk_discovery::COMMUNITY_TURN_PASS.to_string(),
+            });
+        }
 
         let port_range = match (get(ENV_MIN_PORT), get(ENV_MAX_PORT)) {
             (None, None) => None,
@@ -194,6 +214,7 @@ impl RelayConfig {
             realm,
             users,
             port_range,
+            community,
         })
     }
 

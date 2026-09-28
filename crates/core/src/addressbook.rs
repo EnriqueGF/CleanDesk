@@ -31,6 +31,11 @@ pub struct DeviceEntry {
     /// authenticate to *that* host only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unattended_key: Option<Vec<u8>>,
+    /// The device's Ed25519 public key (base64) as seen in the last
+    /// successful session. In community mode this is what protects against
+    /// someone else appearing under the same ID (see `cleandesk-discovery`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_key: Option<String>,
 }
 
 /// Serde default for [`DeviceEntry::state`]: a device we have not heard
@@ -52,6 +57,7 @@ impl DeviceEntry {
             last_connection: None,
             state: DeviceState::Offline,
             unattended_key: None,
+            pinned_key: None,
         }
     }
 

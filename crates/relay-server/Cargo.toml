@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 cleandesk-proto.workspace = true
+cleandesk-discovery.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

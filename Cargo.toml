@@ -8,6 +8,7 @@ members = [
     "crates/codec",
     "crates/input",
     "crates/platform",
+    "crates/discovery",
     "crates/core",
     "crates/host",
     "crates/client",
@@ -34,6 +35,7 @@ cleandesk-capture = { path = "crates/capture" }
 cleandesk-codec = { path = "crates/codec" }
 cleandesk-input = { path = "crates/input" }
 cleandesk-platform = { path = "crates/platform" }
+cleandesk-discovery = { path = "crates/discovery" }
 cleandesk-core = { path = "crates/core" }
 cleandesk-host = { path = "crates/host" }
 cleandesk-client = { path = "crates/client" }

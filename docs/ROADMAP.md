@@ -45,9 +45,24 @@ historial básico.
       transferencias (§13).
 - [x] Calidad adaptativa `Auto` por RTT medido (§8); ancho de banda como siguiente señal.
 - [x] Panel de info de sesión (RTT/FPS/resolución/códec/ancho de banda, §26).
-- [ ] Servicio de Windows (§24): inicio con Windows, acceso pre-login,
-      reinicio remoto.
+- [x] Servicio de Windows (§24): inicio con Windows, acceso pre-login.
+- [ ] Reinicio remoto (§24).
 - [ ] Actualizaciones automáticas con verificación de integridad (§25).
+
+## Hito 2b — Modo comunitario ✅ (hecho)
+
+- [x] `discovery`: mDNS en LAN, DHT de BitTorrent (BEP 44) con registro firmado
+      bajo clave y bajo ID, señalización directa TCP con reto-respuesta mutuo,
+      señalización Nostr cifrada NIP-44, UPnP/IGD, directorio de relays por
+      `announce_peer`.
+- [x] `host` / `client`: `serve_community` / `connect_community` sobre el mismo
+      núcleo de sesión (`SignalOut`); trust-on-first-use de claves.
+- [x] `relay-server --community`: credenciales públicas y anuncio en la DHT.
+- [x] GUI: selector de modo de red, vía usada en el visor, alarma de cambio de
+      identidad.
+- [x] `platform`: inicio con Windows, servicio SCM con helper en la sesión de
+      consola, lock de presencia.
+- [x] Instalador MSI (WiX) con accesos directos y reglas de firewall.
 
 ## Hito 3 — Post-MVP (§31)
 

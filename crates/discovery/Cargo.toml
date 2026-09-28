@@ -1,0 +1,30 @@
+[package]
+name = "cleandesk-discovery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Serverless rendezvous: LAN mDNS, BitTorrent DHT (BEP 44), Nostr signaling, UPnP port mapping, community relay discovery."
+
+[dependencies]
+cleandesk-proto.workspace = true
+cleandesk-crypto.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+sha2.workspace = true
+ed25519-dalek.workspace = true
+futures-util.workspace = true
+tokio-tungstenite.workspace = true
+mainline = "8.0.0"
+nostr = { version = "0.45.5", default-features = false, features = ["std", "os-rng", "nip44"] }
+igd-next = { version = "0.17.1", features = ["aio_tokio"] }
+mdns-sd = "0.21.4"
+# Only to pin the process-level TLS provider: two providers (ring via
+# tungstenite, aws-lc via nostr deps) end up in the graph and rustls refuses
+# to guess.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

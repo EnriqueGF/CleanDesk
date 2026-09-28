@@ -1,6 +1,30 @@
 # Probar CleanDesk en local
 
-Requisitos: Rust estable (1.85+) y Visual Studio Build Tools (MSVC).
+Requisitos: Rust estable (1.85+) y Visual Studio Build Tools (MSVC). Para usar
+CleanDesk sin compilar, instala el MSI de la release de GitHub.
+
+## 0. Modo comunitario (por defecto): sin servidor
+
+Al abrir CleanDesk el equipo se anuncia solo:
+
+- en la **red local** por mDNS (`_cleandesk._tcp`), al instante;
+- en la **DHT de BitTorrent** con un registro firmado (bajo su clave y bajo su
+  ID), para que cualquier visor de Internet lo encuentre por el número;
+- en **relés Nostr públicos**, donde recibe la señalización cifrada (NIP-44)
+  cuando no es alcanzable directamente;
+- y si el router tiene **UPnP**, abre los puertos 7423/TCP (señalización
+  directa) y 7424/UDP (WebRTC) para que la conexión sea directa.
+
+El visor escribe el ID y CleanDesk prueba en orden: LAN → directo → Nostr, y
+usa STUN/relays comunitarios para atravesar NAT. La barra del visor indica la
+vía usada. Tras la primera conexión la clave del equipo queda fijada
+(trust-on-first-use); si alguien apareciera con el mismo ID y otra clave, la
+conexión se rechaza y puedes comprobar la huella en **Seguridad**.
+
+Para probarlo en una sola máquina abre dos instancias con `--data-dir`
+distintos (ver §2) y conecta por ID: se encontrarán por mDNS.
+
+Las secciones 1 a 3 describen el **modo servidor privado** (Ajustes → Red).
 
 ## 1. Arrancar el CleanDesk Server (señalización)
 
@@ -80,7 +104,22 @@ guarda en Favoritos junto con la **clave derivada** (Argon2id de la contraseña
 y el ID del host), nunca la contraseña en claro. Las tarjetas con 🔑 conectan
 directamente en modo desatendido; pulsa la llave para olvidarla.
 
-## 6. Relay TURN (cuando no hay ruta directa)
+## 6. Relay comunitario
+
+Cualquiera puede aportar un relay a la comunidad. Solo necesita una máquina con
+IP pública y UDP abierto:
+
+```powershell
+:CLEANDESK_RELAY_COMMUNITY = "1"      # credenciales públicas + anuncio en la DHT
+cargo run -p cleandesk-relay-server      # o cleandesk-relay-server.exe del MSI
+# UDP 7421 (TURN) y 7422 (nodo DHT). CLEANDESK_RELAY_PUBLIC_IP si la
+# autodetección por la DHT no acierta.
+```
+
+Los clientes en modo comunitario consultan la DHT al conectar y añaden los
+relays encontrados como TURN de último recurso.
+
+## 7. Relay TURN privado (cuando no hay ruta directa)
 
 Cuando ambos equipos están tras NAT simétricos, ICE no encuentra una ruta
 directa y la conexión caduca. Despliega el relay en una máquina con IP pública:

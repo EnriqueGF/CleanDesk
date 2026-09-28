@@ -20,5 +20,7 @@ cleandesk-codec.workspace = true
 cleandesk-input.workspace = true
 cleandesk-transport.workspace = true
 cleandesk-crypto.workspace = true
+cleandesk-discovery.workspace = true
+uuid.workspace = true
 bytes.workspace = true
 parking_lot.workspace = true

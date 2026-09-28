@@ -17,7 +17,7 @@ pub mod signaling;
 
 pub use error::TransportError;
 pub use peer::{Channel, IceConfig, PeerConnection, TurnServer};
-pub use signaling::{ChallengeSigner, SignalingClient};
+pub use signaling::{ChallengeSigner, QueueOut, SignalOut, SignalingClient};
 
 /// Crate version string, handy for diagnostics.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

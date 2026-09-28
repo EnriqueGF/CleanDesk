@@ -35,7 +35,10 @@ use cleandesk_proto::{
     session::{DeviceInfo, SessionId, SessionStats},
     PROTOCOL_VERSION,
 };
-use cleandesk_transport::{Channel, IceConfig, PeerConnection, SignalingClient};
+use cleandesk_transport::{Channel, IceConfig, PeerConnection, SignalOut, SignalingClient};
+
+pub mod community;
+pub use community::connect_community;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -109,12 +112,24 @@ pub enum ClientEvent {
 pub struct ClientSession {
     pub session: SessionId,
     pub granted: Permissions,
+    /// Which rendezvous path carried the signaling ("servidor", "LAN",
+    /// "directo", "nostr"), for the UI.
+    pub via: &'static str,
+    /// The host's Ed25519 public key (base64) when the path authenticated it
+    /// (community mode); the UI pins it in the address book.
+    pub peer_public_key: Option<String>,
     /// Decoded frames to render (bounded; stale frames are dropped under load).
     pub frames: mpsc::Receiver<DecodedImage>,
     /// Control-plane events.
     pub events: mpsc::Receiver<ClientEvent>,
     input_tx: mpsc::Sender<InputEvent>,
     control_tx: mpsc::UnboundedSender<SessionMessage>,
+}
+
+impl std::fmt::Debug for ClientSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientSession").field("session", &self.session).field("via", &self.via).finish()
+    }
 }
 
 impl ClientSession {
@@ -166,9 +181,20 @@ pub async fn connect(config: ClientConfig) -> Result<ClientSession> {
         .context("registering viewer")?;
     info!(%id, target = %config.target, "viewer registered; requesting connection");
 
-    let mut events_rx = signal.events()?;
-    let signal = Arc::new(signal);
+    let events_rx = signal.events()?;
+    let signal: Arc<dyn SignalOut> = Arc::new(signal);
+    connect_over(config, signal, events_rx, "servidor", None).await
+}
 
+/// The rendezvous-independent part of [`connect`]: request, wait for the
+/// host's answer, negotiate WebRTC over `signal`/`events_rx`, wire the session.
+pub(crate) async fn connect_over(
+    config: ClientConfig,
+    signal: Arc<dyn SignalOut>,
+    mut events_rx: mpsc::Receiver<SignalMessage>,
+    via: &'static str,
+    peer_public_key: Option<String>,
+) -> Result<ClientSession> {
     // Signal intended unattended auth to the server via a (non-secret) proof
     // placeholder; the real challenge/response happens over the control channel.
     let unattended = config.unattended_key.is_some() || config.unattended_password.is_some();
@@ -288,12 +314,21 @@ pub async fn connect(config: ClientConfig) -> Result<ClientSession> {
         });
     }
 
-    Ok(ClientSession { session, granted, frames: frames_rx, events: cev_rx, input_tx, control_tx })
+    Ok(ClientSession {
+        session,
+        granted,
+        via,
+        peer_public_key,
+        frames: frames_rx,
+        events: cev_rx,
+        input_tx,
+        control_tx,
+    })
 }
 
 /// Background: apply offer/answer/ICE from the server to the peer.
 async fn drive_signaling(
-    signal: Arc<SignalingClient>,
+    signal: Arc<dyn SignalOut>,
     peer: Arc<PeerConnection>,
     session: SessionId,
     mut events_rx: mpsc::Receiver<SignalMessage>,

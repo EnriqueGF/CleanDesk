@@ -76,8 +76,11 @@ pub struct CleanDeskApp {
     pub device: DeviceInfo,
     /// Nuestro propio CleanDesk ID (derivado de la identidad).
     pub id: CleanDeskId,
-    /// URL del servidor de señalización.
-    pub signal_url: String,
+    /// Servidor de señalización forzado desde la línea de órdenes (`--signal-url`);
+    /// si es `None` manda el modo de red de los ajustes.
+    pub signal_override: Option<String>,
+    /// Avisa al bucle del host de que el modo de red cambió y debe reiniciarse.
+    host_restart: Arc<tokio::sync::Notify>,
     /// Runtime de tokio propiedad de la app; vive tanto como la ventana.
     pub rt: Arc<Runtime>,
 
@@ -95,6 +98,9 @@ pub struct CleanDeskApp {
     pending_remember: Option<(CleanDeskId, [u8; 32])>,
     /// Aviso a mostrar en la ventana principal (error de conexión, desconexión…).
     pub notice: Option<String>,
+    /// Equipo cuya identidad cambió respecto a la clave fijada; el usuario
+    /// decide si confiar en la nueva (tras comprobar la huella).
+    pub identity_alarm: Option<CleanDeskId>,
     /// Pestaña activa de la lista de equipos.
     pub tab: DeviceTab,
     /// Ventana de ajustes visible.
@@ -143,7 +149,7 @@ impl CleanDeskApp {
         state: Arc<AppState>,
         device: DeviceInfo,
         rt: Arc<Runtime>,
-        signal_url: String,
+        signal_override: Option<String>,
         initial_target: Option<CleanDeskId>,
     ) -> Self {
         theme::apply(&cc.egui_ctx);
@@ -155,6 +161,7 @@ impl CleanDeskApp {
         let (host_events_tx, host_events_rx) = mpsc::unbounded_channel::<HostEvent>();
         let host_status = Arc::new(Mutex::new(HostStatus::Connecting));
         let host_control = HostControl::new();
+        let host_restart = Arc::new(tokio::sync::Notify::new());
         let presence = match cleandesk_platform::presence::PresenceLock::acquire(&state.data_dir()) {
             Ok(lock) => Some(lock),
             Err(e) => {
@@ -168,7 +175,8 @@ impl CleanDeskApp {
             rt.clone(),
             state.clone(),
             device.clone(),
-            signal_url.clone(),
+            signal_override.clone(),
+            host_restart.clone(),
             incoming_tx,
             host_events_tx,
             host_control.clone(),
@@ -180,7 +188,8 @@ impl CleanDeskApp {
             state,
             device,
             id,
-            signal_url,
+            signal_override,
+            host_restart,
             rt,
             connect: ConnectPhase::Idle,
             connect_input: String::new(),
@@ -189,6 +198,7 @@ impl CleanDeskApp {
             remember_password: false,
             pending_remember: None,
             notice: None,
+            identity_alarm: None,
             tab: DeviceTab::Recent,
             show_settings: false,
             show_security: false,
@@ -255,8 +265,9 @@ impl CleanDeskApp {
         self.notice = None;
 
         let quality = self.state.settings.read().quality;
+        let mode = self.network_mode();
         let mut config = ClientConfig::new(
-            self.signal_url.clone(),
+            mode.server_url().unwrap_or_default().to_string(),
             self.device.clone(),
             self.state.identity.clone(),
             target,
@@ -284,16 +295,41 @@ impl CleanDeskApp {
             config.unattended_key = Some(key);
         }
 
+        let pinned = self.state.settings.read().pinned_key(target).map(str::to_string);
         let (tx, rx) = oneshot::channel();
         let ctx = ctx.clone();
         self.rt.spawn(async move {
-            let result = cleandesk_client::connect(config).await;
+            let result = if mode.is_community() {
+                cleandesk_client::connect_community(config, pinned).await
+            } else {
+                cleandesk_client::connect(config).await
+            };
             let _ = tx.send(result);
             ctx.request_repaint();
         });
 
         info!(%target, "iniciando conexión saliente");
         self.connect = ConnectPhase::Connecting { target, rx };
+    }
+
+    /// Modo de red efectivo: `--signal-url` manda; si no, los ajustes.
+    pub fn network_mode(&self) -> cleandesk_core::config::NetworkMode {
+        match &self.signal_override {
+            Some(url) => cleandesk_core::config::NetworkMode::Server { url: url.clone() },
+            None => self.state.settings.read().network.clone(),
+        }
+    }
+
+    /// Reinicia el host de fondo (tras cambiar el modo de red).
+    pub fn restart_host(&self) {
+        self.host_restart.notify_one();
+    }
+
+    /// Olvida la clave fijada de `id` (el usuario verificó el cambio de identidad).
+    pub fn unpin_key(&self, id: CleanDeskId) {
+        if self.state.settings.write().unpin_key(id) {
+            self.save_settings();
+        }
     }
 
     /// Persiste ajustes en disco, registrando (sin propagar) cualquier error.
@@ -362,11 +398,21 @@ impl CleanDeskApp {
                 if let Some((id, key)) = self.pending_remember.take() {
                     self.remember_key(id, key);
                 }
+                // Trust on first use: recuerda la clave del equipo remoto.
+                if let Some(pk) = &session.peer_public_key {
+                    if self.state.settings.write().pin_key(target, pk) {
+                        self.save_settings();
+                    }
+                }
                 self.connect = ConnectPhase::Active(Box::new(ViewerState::new(session)));
             }
             Ok(Err(e)) => {
                 warn!(error = %e, "conexión fallida");
-                self.notice = Some(format!("No se pudo conectar: {}", friendly_error(&e)));
+                let text = friendly_error(&e);
+                if text.contains("identidad") {
+                    self.identity_alarm = Some(*target);
+                }
+                self.notice = Some(format!("No se pudo conectar: {text}"));
                 self.connect = ConnectPhase::Idle;
             }
             Err(oneshot::error::TryRecvError::Empty) => {
@@ -592,7 +638,8 @@ fn spawn_host(
     rt: Arc<Runtime>,
     state: Arc<AppState>,
     device: DeviceInfo,
-    signal_url: String,
+    signal_override: Option<String>,
+    restart: Arc<tokio::sync::Notify>,
     incoming_tx: mpsc::Sender<PendingRequest>,
     events_tx: mpsc::UnboundedSender<HostEvent>,
     control: Arc<HostControl>,
@@ -606,7 +653,15 @@ fn spawn_host(
             Arc::new(GuiApprover::new(incoming_tx));
 
         loop {
-            let mut config = HostConfig::new(signal_url.clone(), device.clone(), state.identity.clone());
+            let mode = match &signal_override {
+                Some(url) => cleandesk_core::config::NetworkMode::Server { url: url.clone() },
+                None => state.settings.read().network.clone(),
+            };
+            let mut config = HostConfig::new(
+                mode.server_url().unwrap_or_default().to_string(),
+                device.clone(),
+                state.identity.clone(),
+            );
             {
                 let settings = state.settings.read();
                 config.unattended_key = settings.unattended_key();
@@ -621,15 +676,22 @@ fn spawn_host(
             // Observamos el evento `Registered` para marcar el host en línea.
             let (probe_tx, mut probe_rx) = mpsc::unbounded_channel::<HostEvent>();
             let events_fanout = events_tx.clone();
-            let serve = cleandesk_host::serve(
-                HostConfig { events: Some(probe_tx), ..config },
-                approver.clone(),
-            );
+            let config = HostConfig { events: Some(probe_tx), ..config };
+            let serve: std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>> =
+                if mode.is_community() {
+                    Box::pin(cleandesk_host::serve_community(config, approver.clone()))
+                } else {
+                    Box::pin(cleandesk_host::serve(config, approver.clone()))
+                };
             tokio::pin!(serve);
 
             let result = loop {
                 tokio::select! {
                     r = &mut serve => break r,
+                    _ = restart.notified() => {
+                        info!("modo de red cambiado; reiniciando el host");
+                        break Ok(());
+                    }
                     Some(ev) = probe_rx.recv() => {
                         if matches!(ev, HostEvent::Registered(_)) {
                             set_status(&status, HostStatus::Online);

@@ -240,3 +240,31 @@ impl Drop for SignalingClient {
         self.writer.abort();
     }
 }
+
+/// Anything that can carry a [`SignalMessage`] to the other side of a
+/// rendezvous: the CleanDesk Server socket, a direct TCP link, a Nostr
+/// relay. Host and viewer code are written against this so every rendezvous
+/// mechanism reuses the same session logic.
+#[async_trait::async_trait]
+pub trait SignalOut: Send + Sync {
+    async fn send(&self, msg: SignalMessage) -> Result<()>;
+}
+
+#[async_trait::async_trait]
+impl SignalOut for SignalingClient {
+    async fn send(&self, msg: SignalMessage) -> Result<()> {
+        SignalingClient::send(self, msg).await
+    }
+}
+
+/// [`SignalOut`] backed by an unbounded queue drained by some other task
+/// (a direct link driver, a Nostr sender loop).
+pub struct QueueOut(pub tokio::sync::mpsc::UnboundedSender<SignalMessage>);
+
+#[async_trait::async_trait]
+impl SignalOut for QueueOut {
+    async fn send(&self, msg: SignalMessage) -> Result<()> {
+        self.0.send(msg).map_err(|_| TransportError::SignalingClosed)?;
+        Ok(())
+    }
+}

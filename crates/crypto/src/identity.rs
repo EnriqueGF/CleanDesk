@@ -69,6 +69,18 @@ impl Identity {
     pub fn sign_b64(&self, msg: &[u8]) -> String {
         B64.encode(self.sign(msg).to_bytes())
     }
+
+    /// A copy of the raw signing key, for libraries that sign with it
+    /// directly (the BitTorrent DHT BEP 44 records). Handle with care.
+    pub fn signing_key(&self) -> SigningKey {
+        self.signing.clone()
+    }
+
+    /// The 32-byte seed, for deriving *other* keys (e.g. the Nostr secp256k1
+    /// key) so the device has one identity across every rendezvous system.
+    pub fn seed(&self) -> [u8; 32] {
+        self.signing.to_bytes()
+    }
 }
 
 /// The CleanDesk ID that belongs to a raw 32-byte Ed25519 public key.

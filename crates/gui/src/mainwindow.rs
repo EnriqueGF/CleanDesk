@@ -51,8 +51,20 @@ pub fn show(app: &mut CleanDeskApp, ctx: &egui::Context) {
                 if let Some(notice) = app.notice.clone() {
                     ui.horizontal(|ui| {
                         ui.colored_label(theme::WARN, notice);
+                        if let Some(id) = app.identity_alarm {
+                            if ui
+                                .add(theme::danger_button("Confiar en la nueva identidad"))
+                                .on_hover_text("Solo si has comprobado la huella del equipo por otro canal")
+                                .clicked()
+                            {
+                                app.unpin_key(id);
+                                app.identity_alarm = None;
+                                app.notice = Some("Clave anterior olvidada; vuelve a conectar.".into());
+                            }
+                        }
                         if ui.small_button("✕").clicked() {
                             app.notice = None;
+                            app.identity_alarm = None;
                         }
                     });
                     ui.add_space(8.0);
@@ -158,10 +170,13 @@ fn footer(app: &CleanDeskApp, ctx: &egui::Context) {
         )
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                let (text, color) = match app.host_status() {
-                    HostStatus::Online => ("Red CleanDesk lista", theme::ACCENT),
-                    HostStatus::Connecting => ("Conectando con el servidor…", theme::WARN),
-                    HostStatus::Offline => ("Sin conexión con el servidor", theme::DANGER),
+                let community = app.network_mode().is_community();
+                let (text, color) = match (app.host_status(), community) {
+                    (HostStatus::Online, true) => ("Modo comunitario: anunciado (LAN · DHT · Nostr)", theme::ACCENT),
+                    (HostStatus::Online, false) => ("Red CleanDesk lista (servidor privado)", theme::ACCENT),
+                    (HostStatus::Connecting, true) => ("Anunciando en la red comunitaria…", theme::WARN),
+                    (HostStatus::Connecting, false) => ("Conectando con el servidor…", theme::WARN),
+                    (HostStatus::Offline, _) => ("Sin conexión; reintentando", theme::DANGER),
                 };
                 theme::status_dot(ui, color, text);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -170,12 +185,13 @@ fn footer(app: &CleanDeskApp, ctx: &egui::Context) {
                             .size(11.0)
                             .color(theme::TEXT_MUTED),
                     );
-                    ui.label(
-                        egui::RichText::new(&app.signal_url)
-                            .size(11.0)
-                            .color(theme::TEXT_MUTED),
-                    )
-                    .on_hover_text("Servidor de señalización (CLEANDESK_SIGNAL_URL)");
+                    let mode = app.network_mode();
+                    let label = match mode.server_url() {
+                        Some(url) => url.to_string(),
+                        None => "sin servidor".to_string(),
+                    };
+                    ui.label(egui::RichText::new(label).size(11.0).color(theme::TEXT_MUTED))
+                        .on_hover_text("Modo de red (Ajustes → Red)");
                 });
             });
         });
@@ -613,6 +629,9 @@ fn settings_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
         .collapsible(false)
         .default_width(380.0)
         .show(ctx, |ui| {
+            network_settings(app, ui);
+            ui.add_space(10.0);
+
             // --- Calidad por defecto ---
             theme::section_label(ui, "Calidad por defecto", true);
             ui.horizontal(|ui| {
@@ -812,6 +831,71 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
             Err(e) => app.notice = Some(format!("No se pudo cambiar el servicio: {e}")),
         }
         app.platform_checked_at = None;
+    }
+}
+
+
+/// Sub-sección "Red": modo comunitario (sin servidor) o servidor privado.
+fn network_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+    use cleandesk_core::config::NetworkMode;
+
+    theme::section_label(ui, "Red", true);
+    if let Some(url) = &app.signal_override {
+        ui.label(
+            egui::RichText::new(format!("Forzado por --signal-url: {url}"))
+                .size(11.0)
+                .color(theme::WARN),
+        );
+        return;
+    }
+
+    let current = app.state.settings.read().network.clone();
+    let mut community = current.is_community();
+    let mut url = current.server_url().unwrap_or("ws://127.0.0.1:7420").to_string();
+    let mut changed = false;
+
+    changed |= ui
+        .radio_value(&mut community, true, "Comunitario (sin servidor): LAN, DHT de BitTorrent y relés Nostr")
+        .changed();
+    changed |= ui
+        .radio_value(&mut community, false, "Servidor privado CleanDesk")
+        .changed();
+    if !community {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("URL:").color(theme::TEXT_DIM));
+            let resp = ui.add(egui::TextEdit::singleline(&mut url).hint_text("ws://servidor:7420").desired_width(240.0));
+            if resp.lost_focus() {
+                changed = true;
+            }
+        });
+    }
+    ui.label(
+        egui::RichText::new(if community {
+            "Tu equipo se anuncia firmado en la DHT y en tu red local; nadie tiene que mantener servidores. La primera conexión fija la clave del equipo remoto (huella en Seguridad)."
+        } else {
+            "Toda la señalización pasa por tu servidor; útil en empresas y redes cerradas."
+        })
+        .size(11.0)
+        .color(theme::TEXT_MUTED),
+    );
+
+    if changed {
+        let new_mode = if community {
+            NetworkMode::Community
+        } else {
+            let url = url.trim().to_string();
+            if !(url.starts_with("ws://") || url.starts_with("wss://")) {
+                app.notice = Some("La URL del servidor debe empezar por ws:// o wss://".into());
+                return;
+            }
+            NetworkMode::Server { url }
+        };
+        if new_mode != current {
+            app.state.settings.write().network = new_mode;
+            app.save_settings();
+            app.restart_host();
+            app.notice = Some("Modo de red actualizado; el host se reinicia.".into());
+        }
     }
 }
 

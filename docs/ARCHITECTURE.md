@@ -36,7 +36,9 @@ client     ← rol viewer: recibe→decodifica; captura→envía input
 gui        ← eframe/egui: ventana principal + visor de sesión
 app        ← binario: modos GUI / --host / --connect
 signal-server ← binario: CleanDesk Server (señalización)
-relay-server  ← binario: CleanDesk Relay (TURN fallback)
+relay-server  ← binario: CleanDesk Relay (TURN fallback; --community se anuncia en la DHT)
+platform   ← integración con el SO: inicio con Windows, servicio SCM, lock de presencia
+discovery  ← rendezvous sin servidor: mDNS, DHT BitTorrent (BEP 44), Nostr, UPnP
 ```
 
 Grafo de dependencias (simplificado):
@@ -48,6 +50,25 @@ app ─► gui ─► core ─► crypto ─► proto
         └─► client ─► codec, transport
 transport ─► proto     signal-server ─► proto, crypto
 ```
+
+## Modo comunitario (sin servidor)
+
+`cleandesk-discovery` sustituye al CleanDesk Server por infraestructura pública:
+
+| Necesidad | Mecanismo |
+|---|---|
+| Encontrar un equipo en la LAN | mDNS `_cleandesk._tcp` con ID, clave y puerto en el TXT |
+| Encontrar un equipo por ID en Internet | DHT mainline de BitTorrent: item mutable BEP 44 firmado con la clave del host, publicado bajo su clave y bajo una clave derivada del ID |
+| Intercambiar SDP/ICE si el host es alcanzable | enlace TCP directo (puerto 7423) con reto-respuesta Ed25519 mutuo |
+| Intercambiar SDP/ICE si no lo es | eventos efímeros (kind 27420) en relés Nostr públicos, cifrados NIP-44 y con firma de vinculación Ed25519↔Nostr |
+| Ser alcanzable tras el router | UPnP/IGD: mapeo de 7423/TCP y 7424/UDP; la IP externa se anuncia como candidato ICE 1:1 |
+| Plan B sin ruta directa | relays TURN comunitarios (`cleandesk-relay-server --community`) anunciados con `announce_peer` en un infohash conocido |
+
+El host publica cada 10 min un `Record` firmado {clave, clave Nostr, endpoints,
+hora}. El visor resuelve LAN → DHT por clave fijada → DHT por ID, verifica la
+firma y que la clave derive al ID, y prueba directo → Nostr. `host` y `client`
+no distinguen la vía: ambos trabajan sobre `SignalOut` + un canal de entrada, y
+el host convierte `ConnectRequest` en `IncomingRequest` acuñando la sesión.
 
 ## Flujo de conexión (resumen)
 

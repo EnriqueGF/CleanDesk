@@ -16,8 +16,13 @@ posible y **relay** cuando no lo es.
 
 ## Estado
 
-MVP en construcción. Consulta [docs/ROADMAP.md](docs/ROADMAP.md) para el detalle
-por hito y [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) para el diseño.
+Funcional. **Modo comunitario por defecto**: no hace falta que nadie monte
+servidores. Cada equipo se anuncia firmado en la red local (mDNS) y en la DHT de
+BitTorrent, la señalización viaja por relés Nostr públicos cifrada extremo a
+extremo, y UPnP + STUN + relays comunitarios atraviesan el NAT. El **modo
+servidor privado** (CleanDesk Server + Relay) sigue disponible para empresas.
+Consulta [docs/RUN.md](docs/RUN.md) para probarlo, [docs/ROADMAP.md](docs/ROADMAP.md)
+para el detalle por hito y [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) para el diseño.
 
 | Componente | Crate | Estado |
 |---|---|---|
@@ -32,7 +37,10 @@ por hito y [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) para el diseño.
 | Rol host / viewer | `crates/host`, `crates/client` | ✅ Implementado (anti fuerza bruta, keyframe bajo demanda, RTT/FPS/kbps, calidad Auto) |
 | GUI (egui) | `crates/gui` | ✅ Implementada (tema oscuro, tarjetas, favoritos, ajustes, visor multi-monitor) |
 | App / entry point | `crates/app` | ✅ GUI / `--host` / `--connect` / `--signal-url` / `--data-dir` (tests) |
-| Relay (TURN fallback) | `crates/relay-server` | ✅ Servidor TURN (RFC 5766) con credenciales (tests) |
+| Relay (TURN fallback) | `crates/relay-server` | ✅ Servidor TURN (RFC 5766); modo comunitario anunciado en la DHT (tests) |
+| Descubrimiento sin servidor | `crates/discovery` | ✅ mDNS, DHT BitTorrent (BEP 44), señalización Nostr NIP-44, UPnP (tests + e2e) |
+| Integración con Windows | `crates/platform` | ✅ Inicio con Windows, servicio SCM, lock de presencia |
+| Instalador | `installer/` | ✅ MSI (WiX) con accesos directos y reglas de firewall |
 
 ---
 

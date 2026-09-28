@@ -18,9 +18,11 @@
 //! * Unattended authentication is rate-limited per caller ([`AuthThrottle`])
 //!   and bounded in time ([`AUTH_TIMEOUT`]).
 
+pub mod community;
 mod media;
 mod throttle;
 
+pub use community::{serve_community, CommunityOptions};
 pub use media::MediaControl;
 pub use throttle::AuthThrottle;
 
@@ -39,7 +41,7 @@ use cleandesk_proto::{
     session::{DeviceInfo, SessionId, SessionStats},
     PROTOCOL_VERSION,
 };
-use cleandesk_transport::{Channel, IceConfig, PeerConnection, SignalingClient};
+use cleandesk_transport::{Channel, IceConfig, PeerConnection, SignalOut, SignalingClient};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -86,6 +88,8 @@ pub struct HostConfig {
     pub events: Option<mpsc::UnboundedSender<HostEvent>>,
     /// Optional handle through which the local user can end a session.
     pub control: Option<Arc<HostControl>>,
+    /// Options for [`serve_community`] (ignored by [`serve`]).
+    pub community: CommunityOptions,
 }
 
 impl HostConfig {
@@ -100,6 +104,7 @@ impl HostConfig {
             ice: IceConfig::from_env(),
             events: None,
             control: None,
+            community: CommunityOptions::default(),
         }
     }
 }
@@ -166,7 +171,7 @@ impl Approver for AutoAccept {
 
 /// What a finished session reports back to the main loop.
 #[derive(Debug)]
-enum SessionOutcome {
+pub(crate) enum SessionOutcome {
     AuthFailed { peer: cleandesk_proto::CleanDeskId },
     AuthSucceeded { peer: cleandesk_proto::CleanDeskId },
     Ended { session: SessionId, reason: String },
@@ -190,11 +195,9 @@ pub async fn serve(config: HostConfig, approver: Arc<dyn Approver>) -> Result<()
     emit(&config, HostEvent::Registered(id));
 
     let mut events = signal.events()?;
-    let signal = Arc::new(signal);
-    let (outcome_tx, mut outcome_rx) = mpsc::unbounded_channel::<SessionOutcome>();
+    let signal: Arc<dyn SignalOut> = Arc::new(signal);
     let control = config.control.clone().unwrap_or_default();
-    let mut throttle = AuthThrottle::default();
-    let mut active: Option<ActiveSession> = None;
+    let mut core = HostCore::new(config, approver);
 
     loop {
         tokio::select! {
@@ -204,33 +207,66 @@ pub async fn serve(config: HostConfig, approver: Arc<dyn Approver>) -> Result<()
                     // Another instance of this same identity registered (the GUI
                     // while we are the service helper, or vice versa). Stand down.
                     warn!(%detail, "registration replaced; stopping host loop");
-                    drop(active.take()); // tears the session down before we leave
+                    core.terminate();
                     return Err(HostError::Replaced.into());
                 }
-                handle_signal(msg, &config, &approver, &signal, &outcome_tx, &mut throttle, &mut active).await;
+                core.on_signal(msg, &signal).await;
             }
-            Some(outcome) = outcome_rx.recv() => {
-                match outcome {
-                    SessionOutcome::AuthFailed { peer } => throttle.record_failure(peer, Instant::now()),
-                    SessionOutcome::AuthSucceeded { peer } => throttle.record_success(peer),
-                    SessionOutcome::Ended { session, reason } => {
-                        if active.as_ref().is_some_and(|a| a.session == session) {
-                            active = None;
-                        }
-                        emit(&config, HostEvent::SessionEnded { session, reason });
-                    }
-                }
-            }
-            _ = control.terminate.notified() => {
-                if let Some(a) = active.take() {
-                    info!(session = %a.session, "session terminated by local user");
-                    emit(&config, HostEvent::SessionEnded { session: a.session, reason: "terminada por el host".into() });
-                }
-            }
+            Some(outcome) = core.outcome_rx.recv() => core.on_outcome(outcome),
+            _ = control.terminate.notified() => core.terminate(),
         }
     }
 
     Ok(())
+}
+
+/// The rendezvous-agnostic heart of the host: one active session, the auth
+/// throttle, and the bookkeeping shared by [`serve`] and [`serve_community`].
+pub(crate) struct HostCore {
+    pub(crate) config: HostConfig,
+    approver: Arc<dyn Approver>,
+    outcome_tx: mpsc::UnboundedSender<SessionOutcome>,
+    pub(crate) outcome_rx: mpsc::UnboundedReceiver<SessionOutcome>,
+    throttle: AuthThrottle,
+    active: Option<ActiveSession>,
+}
+
+impl HostCore {
+    pub(crate) fn new(config: HostConfig, approver: Arc<dyn Approver>) -> Self {
+        let (outcome_tx, outcome_rx) = mpsc::unbounded_channel();
+        Self { config, approver, outcome_tx, outcome_rx, throttle: AuthThrottle::default(), active: None }
+    }
+
+    /// Feed one signaling message that arrived over `out`'s link.
+    pub(crate) async fn on_signal(&mut self, msg: SignalMessage, out: &Arc<dyn SignalOut>) {
+        handle_signal(msg, &self.config, &self.approver, out, &self.outcome_tx, &mut self.throttle, &mut self.active).await;
+    }
+
+    pub(crate) fn on_outcome(&mut self, outcome: SessionOutcome) {
+        match outcome {
+            SessionOutcome::AuthFailed { peer } => self.throttle.record_failure(peer, Instant::now()),
+            SessionOutcome::AuthSucceeded { peer } => self.throttle.record_success(peer),
+            SessionOutcome::Ended { session, reason } => {
+                if self.active.as_ref().is_some_and(|a| a.session == session) {
+                    self.active = None;
+                }
+                emit(&self.config, HostEvent::SessionEnded { session, reason });
+            }
+        }
+    }
+
+    /// End the active session (local user pressed "Finalizar").
+    pub(crate) fn terminate(&mut self) {
+        if let Some(a) = self.active.take() {
+            info!(session = %a.session, "session terminated by local user");
+            emit(&self.config, HostEvent::SessionEnded { session: a.session, reason: "terminada por el host".into() });
+        }
+    }
+
+    /// The live session id, if any.
+    pub(crate) fn active_session(&self) -> Option<SessionId> {
+        self.active.as_ref().filter(|a| a.is_alive()).map(|a| a.session)
+    }
 }
 
 fn emit(config: &HostConfig, ev: HostEvent) {
@@ -244,7 +280,7 @@ async fn handle_signal(
     msg: SignalMessage,
     config: &HostConfig,
     approver: &Arc<dyn Approver>,
-    signal: &Arc<SignalingClient>,
+    signal: &Arc<dyn SignalOut>,
     outcome_tx: &mpsc::UnboundedSender<SessionOutcome>,
     throttle: &mut AuthThrottle,
     active: &mut Option<ActiveSession>,
@@ -387,7 +423,7 @@ impl Drop for ActiveSession {
 }
 
 /// Create the peer connection (offerer), send the offer, and spawn the session.
-async fn establish(signal: Arc<SignalingClient>, ctx: SessionCtx) -> Result<ActiveSession> {
+async fn establish(signal: Arc<dyn SignalOut>, ctx: SessionCtx) -> Result<ActiveSession> {
     let session = ctx.session;
     let mut peer = PeerConnection::new(ctx.config.ice.clone(), true).await?;
     let incoming = peer.incoming()?;

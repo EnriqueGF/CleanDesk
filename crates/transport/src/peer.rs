@@ -48,8 +48,8 @@ use tracing::{trace, warn};
 use webrtc::data_channel::{DataChannel, DataChannelEvent, RTCDataChannelInit, RTCDataChannelState};
 use webrtc::peer_connection::{
     PeerConnection as RtcPeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler,
-    RTCConfigurationBuilder, RTCIceCandidateInit, RTCIceServer, RTCPeerConnectionIceEvent,
-    RTCPeerConnectionState, RTCSessionDescription,
+    RTCConfigurationBuilder, RTCIceCandidateInit, RTCIceCandidateType, RTCIceServer,
+    RTCPeerConnectionIceEvent, RTCPeerConnectionState, RTCSessionDescription, SettingEngineBuilder,
 };
 
 /// Capacity of the trickled-ICE-candidate channel. Host/reflexive candidate
@@ -141,6 +141,12 @@ pub struct TurnServer {
 pub struct IceConfig {
     pub stun: Vec<String>,
     pub turn: Vec<TurnServer>,
+    /// Public IPs this machine is reachable at through a 1:1 NAT mapping
+    /// (UPnP). Advertised as server-reflexive candidates without STUN.
+    pub nat_1to1_ips: Vec<String>,
+    /// Fixed local UDP port for ICE (0 = ephemeral). Set together with
+    /// `nat_1to1_ips` so the router mapping and the socket agree.
+    pub udp_port: u16,
 }
 
 impl Default for IceConfig {
@@ -149,6 +155,8 @@ impl Default for IceConfig {
         Self {
             stun: vec![DEFAULT_STUN_URL.to_string()],
             turn: Vec::new(),
+            nat_1to1_ips: Vec::new(),
+            udp_port: 0,
         }
     }
 }
@@ -212,7 +220,9 @@ impl IceConfig {
     /// Translate into the `webrtc` ICE server list.
     fn ice_servers(&self) -> Vec<RTCIceServer> {
         let mut servers = Vec::with_capacity(1 + self.turn.len());
-        if !self.stun.is_empty() {
+        // With explicit 1:1 NAT addresses the reflexive address is already
+        // known, and the ICE agent refuses to combine both mechanisms.
+        if !self.stun.is_empty() && self.nat_1to1_ips.is_empty() {
             servers.push(RTCIceServer {
                 urls: self.stun.clone(),
                 ..Default::default()
@@ -369,10 +379,15 @@ impl PeerConnection {
         // Data channels ride SCTP-over-DTLS, so no media engine / RTP
         // interceptors are needed. Bind an ephemeral UDP socket on all
         // interfaces for host-candidate gathering.
+        let mut setting = SettingEngineBuilder::new();
+        if !config.nat_1to1_ips.is_empty() {
+            setting = setting.with_nat_1to1_ips(config.nat_1to1_ips.clone(), RTCIceCandidateType::Srflx);
+        }
         let pc = PeerConnectionBuilder::new()
             .with_configuration(rtc_config)
+            .with_setting_engine(setting.build())
             .with_handler(handler)
-            .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
+            .with_udp_addrs(vec![format!("0.0.0.0:{}", config.udp_port)])
             .build()
             .await
             .context("building webrtc peer connection")?;

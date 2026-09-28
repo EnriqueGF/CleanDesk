@@ -43,7 +43,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-const DEFAULT_SIGNAL_URL: &str = "ws://127.0.0.1:7420";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Mode {
@@ -59,7 +58,9 @@ enum Mode {
 #[derive(Debug, PartialEq, Eq)]
 struct Options {
     mode: Mode,
-    signal_url: String,
+    /// `--signal-url` / `CLEANDESK_SIGNAL_URL`: forces private-server mode.
+    /// `None` means "whatever the settings say" (community by default).
+    signal_url: Option<String>,
     data_dir: Option<PathBuf>,
     log_file: Option<PathBuf>,
     help: bool,
@@ -71,7 +72,7 @@ struct Options {
 fn parse_args(args: impl IntoIterator<Item = String>, env: impl Fn(&str) -> Option<String>) -> Result<Options> {
     let mut opts = Options {
         mode: Mode::Gui,
-        signal_url: env("CLEANDESK_SIGNAL_URL").unwrap_or_else(|| DEFAULT_SIGNAL_URL.to_string()),
+        signal_url: env("CLEANDESK_SIGNAL_URL"),
         data_dir: env("CLEANDESK_DATA_DIR").map(PathBuf::from),
         log_file: env("CLEANDESK_LOG_FILE").map(PathBuf::from),
         help: false,
@@ -89,7 +90,7 @@ fn parse_args(args: impl IntoIterator<Item = String>, env: impl Fn(&str) -> Opti
                 opts.mode = Mode::Connect(id);
             }
             "--signal-url" => {
-                opts.signal_url = args.next().context("--signal-url requires a URL")?;
+                opts.signal_url = Some(args.next().context("--signal-url requires a URL")?);
             }
             "--data-dir" => {
                 opts.data_dir = Some(PathBuf::from(args.next().context("--data-dir requires a path")?));
@@ -101,15 +102,18 @@ fn parse_args(args: impl IntoIterator<Item = String>, env: impl Fn(&str) -> Opti
             other => bail!("argumento desconocido: {other} (usa --help)"),
         }
     }
-    if !(opts.signal_url.starts_with("ws://") || opts.signal_url.starts_with("wss://")) {
-        bail!("la URL del servidor debe empezar por ws:// o wss:// (recibido: {})", opts.signal_url);
+    if let Some(url) = &opts.signal_url {
+        if !(url.starts_with("ws://") || url.starts_with("wss://")) {
+            bail!("la URL del servidor debe empezar por ws:// o wss:// (recibido: {url})");
+        }
     }
     Ok(opts)
 }
 
 fn print_help() {
     println!(
-        "CleanDesk {}\n\nUso:\n  cleandesk                       Abrir la interfaz gráfica\n  cleandesk --connect <ID>        Abrir la GUI y conectar a un CleanDesk ID\n  cleandesk --host                Ejecutar como host desatendido (sin GUI)\n  cleandesk --install-service     Instalar y arrancar el servicio de Windows (admin)\n  cleandesk --uninstall-service   Parar y eliminar el servicio (admin)\n\nOpciones:\n  --signal-url <ws://host:puerto> Servidor CleanDesk (o CLEANDESK_SIGNAL_URL)\n  --data-dir <ruta>               Carpeta de identidad/ajustes (o CLEANDESK_DATA_DIR)\n  --log-file <ruta>               Añadir el registro a un fichero (o CLEANDESK_LOG_FILE)\n\nVariables de entorno de red:\n  CLEANDESK_STUN_URLS, CLEANDESK_TURN_URLS, CLEANDESK_TURN_USER, CLEANDESK_TURN_PASS",
+        "CleanDesk {}\n\nUso:\n  cleandesk                       Abrir la interfaz gráfica\n  cleandesk --connect <ID>        Abrir la GUI y conectar a un CleanDesk ID\n  cleandesk --host                Ejecutar como host desatendido (sin GUI)\n  cleandesk --install-service     Instalar y arrancar el servicio de Windows (admin)\n  cleandesk --uninstall-service   Parar y eliminar el servicio (admin)\n\nOpciones:\n  --signal-url <ws://host:puerto> Usar un servidor CleanDesk privado (o CLEANDESK_SIGNAL_URL);
+                                  sin esta opción se usa el modo de los ajustes (comunitario por defecto)\n  --data-dir <ruta>               Carpeta de identidad/ajustes (o CLEANDESK_DATA_DIR)\n  --log-file <ruta>               Añadir el registro a un fichero (o CLEANDESK_LOG_FILE)\n\nVariables de entorno de red:\n  CLEANDESK_STUN_URLS, CLEANDESK_TURN_URLS, CLEANDESK_TURN_USER, CLEANDESK_TURN_PASS",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -143,7 +147,10 @@ fn device_info(app: &AppState) -> DeviceInfo {
 
 /// Install the tracing subscriber: stderr by default, a file when asked.
 fn init_logging(log_file: Option<&PathBuf>) -> Result<()> {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    // `mainline` logs every ICMP port-unreachable on its UDP socket as a
+    // warning (Windows surfaces them as WSAECONNRESET), which floods the log.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "info,mainline=error".into());
     match log_file {
         Some(path) => {
             if let Some(parent) = path.parent() {
@@ -221,7 +228,7 @@ fn main() -> Result<()> {
 
     let app = load_state(&opts.data_dir)?;
     let device = device_info(&app);
-    tracing::info!(id = %device.id, mode = ?opts.mode, signal = %opts.signal_url, version = env!("CARGO_PKG_VERSION"), "CleanDesk starting");
+    tracing::info!(id = %device.id, mode = ?opts.mode, signal = ?opts.signal_url, version = env!("CARGO_PKG_VERSION"), "CleanDesk starting");
 
     match opts.mode {
         Mode::Gui => cleandesk_gui::run(app, device, opts.signal_url, None),
@@ -237,7 +244,7 @@ const HEADLESS_POLL: Duration = Duration::from_secs(3);
 /// Headless unattended host: a blocking tokio runtime driving `host::serve`,
 /// reconnecting whenever the link drops, standing aside while the GUI runs,
 /// and picking up settings changes (new unattended password) from disk.
-fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_url: String) -> Result<()> {
+fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_override: Option<String>) -> Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -280,7 +287,15 @@ fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_url: String)
             };
             warned_config = false;
 
-            let mut config = HostConfig::new(signal_url.clone(), device.clone(), app.identity.clone());
+            let mode = match &signal_override {
+                Some(url) => cleandesk_core::config::NetworkMode::Server { url: url.clone() },
+                None => app.settings.read().network.clone(),
+            };
+            let mut config = HostConfig::new(
+                mode.server_url().unwrap_or_default().to_string(),
+                device.clone(),
+                app.identity.clone(),
+            );
             config.unattended_key = Some(unattended_key);
             config.quality = app.settings.read().quality;
             let stamp = app.app_data_modified();
@@ -299,7 +314,13 @@ fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_url: String)
                 }
             };
             let outcome = tokio::select! {
-                r = cleandesk_host::serve(config, approver.clone()) => match r {
+                r = async {
+                    if mode.is_community() {
+                        cleandesk_host::serve_community(config, approver.clone()).await
+                    } else {
+                        cleandesk_host::serve(config, approver.clone()).await
+                    }
+                } => match r {
                     Ok(()) => "signaling connection closed",
                     Err(e) if e.downcast_ref::<HostError>().is_some() => {
                         tracing::info!("registration taken over by another instance; standing by");
@@ -359,7 +380,7 @@ mod tests {
     fn defaults_to_gui_and_default_url() {
         let o = parse_args(args(&[]), no_env).unwrap();
         assert_eq!(o.mode, Mode::Gui);
-        assert_eq!(o.signal_url, DEFAULT_SIGNAL_URL);
+        assert_eq!(o.signal_url, None);
         assert_eq!(o.data_dir, None);
         assert_eq!(o.log_file, None);
         assert!(!o.help);
@@ -373,10 +394,10 @@ mod tests {
             _ => None,
         };
         let o = parse_args(args(&[]), env).unwrap();
-        assert_eq!(o.signal_url, "ws://env:1");
+        assert_eq!(o.signal_url.as_deref(), Some("ws://env:1"));
         assert_eq!(o.data_dir, Some(PathBuf::from("C:/env")));
         let o = parse_args(args(&["--signal-url", "wss://flag:2", "--data-dir", "D:/x", "--host"]), env).unwrap();
-        assert_eq!(o.signal_url, "wss://flag:2");
+        assert_eq!(o.signal_url.as_deref(), Some("wss://flag:2"));
         assert_eq!(o.data_dir, Some(PathBuf::from("D:/x")));
         assert_eq!(o.mode, Mode::Host);
     }

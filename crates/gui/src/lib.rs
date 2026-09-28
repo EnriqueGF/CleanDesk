@@ -32,13 +32,13 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///   historial), ya cargado por el binario.
 /// * `device` — información de este dispositivo tal como se anuncia en la
 ///   señalización.
-/// * `signal_url` — URL del servidor de señalización (`ws://…`).
+/// * `signal_override` — URL del servidor forzada por `--signal-url`; `None` usa los ajustes.
 /// * `initial_target` — si es `Some(id)`, se inicia automáticamente una conexión
 ///   saliente a ese ID al arrancar (lo usa `--connect`).
 pub fn run(
     app_state: Arc<AppState>,
     device: DeviceInfo,
-    signal_url: String,
+    signal_override: Option<String>,
     initial_target: Option<CleanDeskId>,
 ) -> anyhow::Result<()> {
     // Un único runtime multi-hilo para todo el trabajo asíncrono de la sesión.
@@ -61,7 +61,7 @@ pub fn run(
         "CleanDesk",
         options,
         Box::new(move |cc| {
-            let app = CleanDeskApp::new(cc, app_state, device, rt, signal_url, initial_target);
+            let app = CleanDeskApp::new(cc, app_state, device, rt, signal_override, initial_target);
             Ok(Box::new(app))
         }),
     );
