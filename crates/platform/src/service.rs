@@ -34,7 +34,7 @@ pub const SERVICE_NAME: &str = "CleanDesk";
 pub const DISPLAY_NAME: &str = "CleanDesk Remote Access";
 /// Description shown in `services.msc`.
 pub const DESCRIPTION: &str =
-    "Mantiene CleanDesk disponible para acceso desatendido antes de iniciar sesión y tras cerrarla.";
+    "Keeps CleanDesk available for unattended access before sign-in and after sign-out.";
 
 /// Installed state as reported by the SCM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,7 +223,7 @@ mod imp {
         let code = run_elevated(exe, &["--install-service", "--data-dir", &data_dir.to_string_lossy()])?;
         if code != 0 {
             return Err(PlatformError::Other(format!(
-                "la instalación devolvió el código {code}; revisa service.log en la carpeta de datos"
+                "installation exited with code {code}; see service-install.log in the data folder"
             )));
         }
         Ok(())
@@ -233,7 +233,7 @@ mod imp {
     pub fn request_uninstall(exe: &Path) -> Result<()> {
         let code = run_elevated(exe, &["--uninstall-service"])?;
         if code != 0 {
-            return Err(PlatformError::Other(format!("la desinstalación devolvió el código {code}")));
+            return Err(PlatformError::Other(format!("uninstall exited with code {code}")));
         }
         Ok(())
     }

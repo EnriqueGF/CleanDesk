@@ -1,129 +1,128 @@
-# CleanDesk — Hoja de Definiciones del Software
+# CleanDesk — Software Definition Sheet
 
-> Fuente de verdad del producto (definición aportada por el propietario del
-> proyecto). El código de `crates/proto` implementa estos conceptos.
+> Source of truth for the product (definition provided by the project owner).
+> The code in `crates/proto` implements these concepts.
 
-## 1. Producto
-Aplicación de acceso y control remoto de equipos por Internet o red local:
-visualizar pantalla remota, controlar teclado/ratón, transferir archivos y dar
-soporte sin presencia física. Inicialmente **Windows**, con arquitectura
-preparada para macOS y Linux.
+## 1. Product
+Application for remote access and control of machines over the Internet or a
+local network: view the remote screen, control keyboard/mouse, transfer files
+and provide support without being physically present. Initially **Windows**,
+with an architecture ready for macOS and Linux.
 
-## 2. Objetivo
-Rápida, ligera, segura, fácil, baja latencia, sin configuración de red compleja.
-Adecuada para soporte técnico y acceso personal. Descargar, ejecutar y recibir
-conexión en segundos.
+## 2. Goal
+Fast, lightweight, secure, easy, low latency, no complex network configuration.
+Suitable for technical support and personal access. Download, run and receive
+a connection within seconds.
 
-## 3. Identificación
-Cada instalación tiene un **CleanDesk ID** único (ej. `548 291 743`) y,
-opcionalmente, un alias (ej. `pc-oficina.clean`).
+## 3. Identification
+Each installation has a unique **CleanDesk ID** (e.g. `548 291 743`) and,
+optionally, an alias (e.g. `pc-oficina.clean`).
 
-## 4. Pantalla principal
-- *Este dispositivo:* ID, alias, estado de conexión, botón copiar ID, estado del
-  servicio.
-- *Conectar a dispositivo:* campo "Introducir CleanDesk ID" + botón "Conectar";
-  listado de conexiones recientes y dispositivos guardados.
+## 4. Main screen
+- *This device:* ID, alias, connection status, copy-ID button, service status.
+- *Connect to device:* "Enter CleanDesk ID" field + "Connect" button; list of
+  recent connections and saved devices.
 
-## 5. Solicitud de conexión
-El equipo remoto recibe: nombre del solicitante, ID, usuario, permisos
-solicitados. Opciones: **Aceptar** / **Rechazar**.
+## 5. Connection request
+The remote machine receives: requester's name, ID, user, requested
+permissions. Options: **Accept** / **Reject**.
 
-## 6. Permisos de sesión (modificables en vivo)
-Ver pantalla · controlar teclado · controlar ratón · portapapeles · transferir
-archivos · audio remoto · reiniciar equipo · reiniciar CleanDesk · acciones
-administrativas · bloquear teclado/ratón local.
+## 6. Session permissions (changeable live)
+View screen · control keyboard · control mouse · clipboard · transfer files ·
+remote audio · reboot machine · restart CleanDesk · administrative actions ·
+lock local keyboard/mouse.
 
-## 7. Control remoto
-Transmite: imagen de pantalla, ratón, teclado, estado del cursor, resolución,
-info de sesión. Optimiza calidad según la conexión.
+## 7. Remote control
+Transmits: screen image, mouse, keyboard, cursor state, resolution, session
+info. Optimizes quality according to the connection.
 
-## 8. Modos de calidad
-Automática · Máxima calidad · Equilibrado · Máximo rendimiento.
+## 8. Quality modes
+Automatic · Maximum quality · Balanced · Maximum performance.
 
-## 9. Acceso desatendido
-Configurable con contraseña; el que conecta se autentica con ella.
+## 9. Unattended access
+Configurable with a password; whoever connects authenticates with it.
 
-## 10. Dispositivos de confianza
-Permitir siempre, recordar permisos, no pedir confirmación, permitir desatendido.
+## 10. Trusted devices
+Always allow, remember permissions, do not ask for confirmation, allow
+unattended.
 
-## 11. Libreta de dispositivos
-Nombre, ID, alias, descripción, grupo, última conexión, estado online/offline.
+## 11. Device book
+Name, ID, alias, description, group, last connection, online/offline status.
 
-## 12. Historial de conexiones
-Dispositivo, usuario, inicio, fin, duración, tipo de conexión, estado.
+## 12. Connection history
+Device, user, start, end, duration, connection type, status.
 
-## 13. Transferencia de archivos
-Enviar/descargar, drag&drop, carpetas, progreso, cancelar. Canal cifrado.
+## 13. File transfer
+Send/download, drag&drop, folders, progress, cancel. Encrypted channel.
 
-## 14. Portapapeles compartido
-Texto y URLs (MVP); imágenes/archivos opcional. Desactivable por permisos.
+## 14. Shared clipboard
+Text and URLs (MVP); images/files optional. Can be disabled via permissions.
 
-## 15. Múltiples monitores
-Seleccionar/cambiar/ver todos; adaptar resolución y escala.
+## 15. Multiple monitors
+Select/switch/view all; adapt resolution and scale.
 
-## 16. Pantalla completa
-Ventana, pantalla completa, escalado automático, resolución original, "ajustar a
-ventana".
+## 16. Full screen
+Window, full screen, automatic scaling, original resolution, "fit to window".
 
-## 17. Chat en sesión
-Mensajes entre usuario remoto y local durante la sesión.
+## 17. In-session chat
+Messages between the remote and local user during the session.
 
-## 18. Seguridad
-Cifrado de comunicaciones, autenticación de dispositivos, IDs únicos, protección
-frente a conexiones no autorizadas, validación de sesiones, expiración de tokens,
-protección anti fuerza bruta, registro de accesos, confirmación visual de sesión
-activa. Credenciales desatendidas nunca en texto plano.
+## 18. Security
+Encrypted communications, device authentication, unique IDs, protection
+against unauthorized connections, session validation, token expiry,
+brute-force protection, access logging, visual confirmation of an active
+session. Unattended credentials never in plain text.
 
-## 19. Arquitectura de conexión
-- **CleanDesk Client:** captura, inputs, codificación, sesiones, ficheros.
-- **CleanDesk Server:** autenticación, registro, resolución de IDs, usuarios,
-  coordinación, señalización.
-- **CleanDesk Relay:** intermedio cuando no hay conexión directa.
-Flujo: `A → P2P → B`; si no es posible, `A → Relay → B`.
+## 19. Connection architecture
+- **CleanDesk Client:** capture, inputs, encoding, sessions, files.
+- **CleanDesk Server:** authentication, registration, ID resolution, users,
+  coordination, signaling.
+- **CleanDesk Relay:** intermediary when there is no direct connection.
+Flow: `A → P2P → B`; if not possible, `A → Relay → B`.
 
 ## 20. NAT Traversal
-UDP hole punching, STUN, ICE, TURN/Relay como fallback. Minimizar tráfico por los
-servidores.
+UDP hole punching, STUN, ICE, TURN/Relay as fallback. Minimize traffic through
+the servers.
 
-## 21–23. Usuarios, equipos, roles
-Uso sin cuenta para conexiones simples; cuentas para agenda sincronizada,
-favoritos, historial, equipos, desatendido centralizado. Equipos profesionales.
-Roles: Administrador, Técnico, Usuario.
+## 21–23. Users, teams, roles
+Use without an account for simple connections; accounts for a synchronized
+address book, favorites, history, teams, centralized unattended access.
+Professional teams. Roles: Administrator, Technician, User.
 
-## 24. Servicio en segundo plano (Windows)
-Inicio con Windows, acceso pre-login, desatendido, reinicio remoto, conexión tras
-cerrar sesión.
+## 24. Background service (Windows)
+Start with Windows, pre-login access, unattended, remote reboot, connection
+after logging off.
 
-## 25. Actualizaciones
-Consultar, descargar, verificar integridad, instalar; "Buscar actualizaciones".
+## 25. Updates
+Check, download, verify integrity, install; "Check for updates".
 
-## 26. Información de sesión
-Duración, latencia, FPS, resolución, códec, ancho de banda, tipo de conexión.
+## 26. Session information
+Duration, latency, FPS, resolution, codec, bandwidth, connection type.
 
-## 27. Barra de herramientas
-Pantallas, calidad, pantalla completa, transferencia, chat, permisos, reiniciar,
-info de conexión, desconectar.
+## 27. Toolbar
+Screens, quality, full screen, transfer, chat, permissions, reboot, connection
+info, disconnect.
 
-## 28. Finalización de sesión
-"Desconectar" cierra vídeo, inputs, transferencias y autenticación; se registra
-en historial.
+## 28. Ending a session
+"Disconnect" closes video, inputs, transfers and authentication; it is recorded
+in the history.
 
-## 29. Estados de dispositivo
-Online · Offline · En sesión · No disponible.
+## 29. Device states
+Online · Offline · In session · Unavailable.
 
 ## 30. MVP
-App Windows, ID, servidor de señalización, conexión 2 equipos, captura,
-streaming, control teclado/ratón, solicitud aceptar/rechazar, conexión cifrada,
-relay, acceso desatendido por contraseña, portapapeles básico, transferencia de
-archivos, historial básico.
+Windows app, ID, signaling server, 2-machine connection, capture, streaming,
+keyboard/mouse control, accept/reject request, encrypted connection, relay,
+password-based unattended access, basic clipboard, file transfer, basic
+history.
 
-## 31. Posteriores
-Cuentas, agenda en la nube, equipos, MFA, grabación, Wake-on-LAN, impresión
-remota, túneles TCP, terminal remota, API, webhooks, móvil, web, macOS, Linux,
-políticas empresariales, auditoría avanzada.
+## 31. Later
+Accounts, cloud address book, teams, MFA, recording, Wake-on-LAN, remote
+printing, TCP tunnels, remote terminal, API, webhooks, mobile, web, macOS,
+Linux, enterprise policies, advanced auditing.
 
-## 32. Resumen
-Plataforma de escritorio remoto para conectarse rápido y seguro a otros equipos
-mediante un identificador único, con visualización de pantalla, control remoto,
-transferencia de archivos y acceso desatendido, usando P2P siempre que sea
-posible y relay cuando no.
+## 32. Summary
+Remote desktop platform for connecting quickly and securely to other machines
+through a unique identifier, with screen viewing, remote control, file
+transfer and unattended access, using P2P whenever possible and a relay when
+not.

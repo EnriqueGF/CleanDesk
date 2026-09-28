@@ -23,6 +23,7 @@ use cleandesk_proto::{
 };
 use tracing::debug;
 
+use crate::i18n::{tr, trf};
 use crate::keymap::{key_to_vk, VK_CONTROL, VK_MENU, VK_SHIFT};
 use crate::mainwindow::{quality_label, QUALITY_PROFILES};
 use crate::theme;
@@ -178,14 +179,14 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                     .peer
                     .as_ref()
                     .map(|p| p.alias.clone().unwrap_or_else(|| p.hostname.clone()))
-                    .unwrap_or_else(|| "equipo remoto".into());
+                    .unwrap_or_else(|| tr("remote device").into());
                 theme::status_dot(ui, theme::ACCENT, "");
                 ui.label(egui::RichText::new(who).strong());
                 ui.separator();
 
                 // Selector de monitor (spec §15).
                 if viewer.monitors.len() > 1 {
-                    ui.label(egui::RichText::new("Pantalla:").color(theme::TEXT_DIM));
+                    ui.label(egui::RichText::new(tr("Screen:")).color(theme::TEXT_DIM));
                     let before = viewer.monitor;
                     egui::ComboBox::from_id_salt("viewer-monitor")
                         .selected_text(monitor_label(&viewer.monitors, viewer.monitor))
@@ -201,7 +202,7 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                 }
 
                 // Selector de calidad.
-                ui.label(egui::RichText::new("Calidad:").color(theme::TEXT_DIM));
+                ui.label(egui::RichText::new(tr("Quality:")).color(theme::TEXT_DIM));
                 let before = viewer.quality;
                 egui::ComboBox::from_id_salt("viewer-quality")
                     .selected_text(quality_label(viewer.quality))
@@ -217,22 +218,22 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                 ui.separator();
 
                 // Ajustar a ventana / pantalla completa.
-                ui.checkbox(&mut viewer.fit_to_window, "Ajustar");
+                ui.checkbox(&mut viewer.fit_to_window, tr("Fit"));
                 if ui
-                    .checkbox(&mut viewer.fullscreen, "Pantalla completa")
+                    .checkbox(&mut viewer.fullscreen, tr("Full screen"))
                     .changed()
                 {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(viewer.fullscreen));
                 }
-                if ui.button("⟳").on_hover_text("Refrescar imagen (pedir keyframe)").clicked() {
+                if ui.button("⟳").on_hover_text(tr("Refresh image (request a keyframe)")).clicked() {
                     viewer.session.request_keyframe();
                 }
 
                 ui.separator();
                 let chat_label = if viewer.unread_chat > 0 {
-                    format!("Chat ({})", viewer.unread_chat)
+                    trf("Chat ({n})", &[("n", &viewer.unread_chat.to_string())])
                 } else {
-                    "Chat".to_string()
+                    tr("Chat").to_string()
                 };
                 if ui.toggle_value(&mut viewer.show_chat, chat_label).changed() && viewer.show_chat {
                     viewer.unread_chat = 0;
@@ -240,7 +241,7 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
 
                 // Botón de desconexión, alineado a la derecha.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(theme::danger_button("Desconectar")).clicked() {
+                    if ui.add(theme::danger_button(tr("Disconnect"))).clicked() {
                         disconnect_requested = true;
                     }
                 });
@@ -254,7 +255,7 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                     && !viewer.granted.contains(Permissions::CONTROL_KEYBOARD)
                 {
                     ui.label(
-                        egui::RichText::new("· Solo visualización (sin control concedido)")
+                        egui::RichText::new(tr("· View only (no control granted)"))
                             .size(11.0)
                             .italics()
                             .color(theme::WARN),
@@ -264,7 +265,7 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
         });
 
     if disconnect_requested {
-        return ViewerOutcome::Disconnected(Some("Sesión finalizada.".into()));
+        return ViewerOutcome::Disconnected(Some(tr("Session ended.").into()));
     }
 
     // 4) Panel de chat opcional (spec §17).
@@ -289,7 +290,7 @@ fn monitor_label(monitors: &[MonitorInfo], index: u16) -> String {
             m.index + 1,
             m.width,
             m.height,
-            if m.primary { " (principal)" } else { "" }
+            if m.primary { tr(" (primary)") } else { "" }
         ),
         None => format!("{}", index + 1),
     }
@@ -310,7 +311,7 @@ fn drain_events(viewer: &mut ViewerState) -> Option<ViewerOutcome> {
                 viewer.stats = Some(s);
             }
             Ok(ClientEvent::Chat(text)) => {
-                viewer.chat_log.push(format!("Remoto: {text}"));
+                viewer.chat_log.push(format!("{} {text}", tr("Remote:")));
                 if !viewer.show_chat {
                     viewer.unread_chat += 1;
                 }
@@ -327,19 +328,20 @@ fn drain_events(viewer: &mut ViewerState) -> Option<ViewerOutcome> {
             Ok(ClientEvent::AuthResult(ok)) => {
                 if !ok {
                     return Some(ViewerOutcome::Disconnected(Some(
-                        "Autenticación rechazada por el equipo remoto.".into(),
+                        tr("Authentication rejected by the remote device.").into(),
                     )));
                 }
             }
             Ok(ClientEvent::Disconnected(reason)) => {
-                return Some(ViewerOutcome::Disconnected(Some(format!(
-                    "Desconectado: {reason}"
+                return Some(ViewerOutcome::Disconnected(Some(trf(
+                    "Disconnected: {reason}",
+                    &[("reason", crate::app::friendly_reason(&reason))],
                 ))));
             }
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => return None,
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                 return Some(ViewerOutcome::Disconnected(Some(
-                    "La sesión se cerró.".into(),
+                    tr("The session was closed.").into(),
                 )));
             }
         }
@@ -380,7 +382,7 @@ fn render_video_and_input(viewer: &mut ViewerState, ui: &mut egui::Ui) {
         ui.centered_and_justified(|ui| {
             ui.vertical_centered(|ui| {
                 ui.spinner();
-                ui.label(egui::RichText::new("Esperando imagen del equipo remoto…").color(theme::TEXT_DIM));
+                ui.label(egui::RichText::new(tr("Waiting for the remote device's image…")).color(theme::TEXT_DIM));
             });
         });
         return;
@@ -566,13 +568,26 @@ fn map_pointer_button(button: egui::PointerButton) -> Option<MouseButton> {
 fn stats_line(viewer: &ViewerState) -> String {
     match &viewer.stats {
         Some(s) => {
-            let kind = if s.direct { "Directa" } else { "Relay" };
+            let kind = if s.direct { tr("Direct") } else { tr("Relay") };
             format!(
-                "Ping: {} ms  ·  FPS: {}  ·  {}×{}  ·  {} kb/s  ·  Códec: {}  ·  Conexión: {} vía {}  ·  Frames: {}",
-                s.rtt_ms, s.fps, s.width, s.height, s.bandwidth_kbps, s.codec, kind, viewer.session.via, viewer.frames_received
+                "{}: {} ms  ·  FPS: {}  ·  {}×{}  ·  {} kb/s  ·  {}: {}  ·  {}: {} {} {}  ·  {}: {}",
+                tr("Ping"),
+                s.rtt_ms,
+                s.fps,
+                s.width,
+                s.height,
+                s.bandwidth_kbps,
+                tr("Codec"),
+                s.codec,
+                tr("Connection"),
+                kind,
+                tr("via"),
+                viewer.session.via,
+                tr("Frames"),
+                viewer.frames_received
             )
         }
-        None => "Estableciendo estadísticas…".to_string(),
+        None => tr("Gathering statistics…").to_string(),
     }
 }
 
@@ -583,7 +598,7 @@ fn show_chat_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
         .default_width(260.0)
         .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(egui::Margin::same(12)))
         .show(ctx, |ui| {
-            theme::section_label(ui, "Chat", true);
+            theme::section_label(ui, tr("Chat"), true);
             ui.separator();
 
             let input_row = 40.0;
@@ -601,14 +616,14 @@ fn show_chat_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut viewer.chat_input)
-                        .hint_text("Escribe un mensaje…")
+                        .hint_text(tr("Type a message…"))
                         .desired_width(ui.available_width() - 70.0),
                 );
-                let send = ui.add(theme::primary_button("Enviar")).clicked()
+                let send = ui.add(theme::primary_button(tr("Send"))).clicked()
                     || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
                 if send && !viewer.chat_input.trim().is_empty() {
                     let text = std::mem::take(&mut viewer.chat_input);
-                    viewer.chat_log.push(format!("Yo: {text}"));
+                    viewer.chat_log.push(format!("{} {text}", tr("Me:")));
                     viewer.session.send_chat(text);
                     resp.request_focus();
                 }

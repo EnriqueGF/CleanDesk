@@ -50,7 +50,7 @@ pub async fn connect_community(mut config: ClientConfig, pinned_key: Option<Stri
     let resolver = Resolver::new(dht.clone());
     let resolved = tokio::time::timeout(RESOLVE_TIMEOUT, resolver.resolve(config.target, pinned_key.as_deref()))
         .await
-        .map_err(|_| anyhow::anyhow!("no se encontró el equipo {} (tiempo agotado)", config.target))?
+        .map_err(|_| anyhow::anyhow!("device {} not found (timed out)", config.target))?
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     info!(target = %config.target, via = resolved.via, endpoints = resolved.endpoints.len(), "host resolved");
 
@@ -81,13 +81,13 @@ pub async fn connect_community(mut config: ClientConfig, pinned_key: Option<Stri
 
     // 3. Nostr.
     let Some(nostr_hex) = resolved.record.nostr.clone() else {
-        bail!("el equipo no es alcanzable directamente y no anuncia señalización Nostr");
+        bail!("the device is not reachable directly and announces no Nostr signaling");
     };
     let to = nostr_link::NostrPublicKey::from_hex(&nostr_hex).context("host nostr key")?;
     let relays = nostr_link::relays_from_env();
     let mut link = NostrLink::connect(config.identity.clone(), &relays)
         .await
-        .map_err(|e| anyhow::anyhow!("sin relés Nostr: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("no Nostr relays reachable: {e}"))?;
     let sender = link.sender();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<SignalMessage>();
     tokio::spawn(async move {

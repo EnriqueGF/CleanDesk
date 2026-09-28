@@ -99,12 +99,12 @@ fn parse_args(args: impl IntoIterator<Item = String>, env: impl Fn(&str) -> Opti
                 opts.log_file = Some(PathBuf::from(args.next().context("--log-file requires a path")?));
             }
             "--help" | "-h" => opts.help = true,
-            other => bail!("argumento desconocido: {other} (usa --help)"),
+            other => bail!("unknown argument: {other} (see --help)"),
         }
     }
     if let Some(url) = &opts.signal_url {
         if !(url.starts_with("ws://") || url.starts_with("wss://")) {
-            bail!("la URL del servidor debe empezar por ws:// o wss:// (recibido: {url})");
+            bail!("the server URL must start with ws:// or wss:// (got: {url})");
         }
     }
     Ok(opts)
@@ -112,8 +112,7 @@ fn parse_args(args: impl IntoIterator<Item = String>, env: impl Fn(&str) -> Opti
 
 fn print_help() {
     println!(
-        "CleanDesk {}\n\nUso:\n  cleandesk                       Abrir la interfaz gráfica\n  cleandesk --connect <ID>        Abrir la GUI y conectar a un CleanDesk ID\n  cleandesk --host                Ejecutar como host desatendido (sin GUI)\n  cleandesk --install-service     Instalar y arrancar el servicio de Windows (admin)\n  cleandesk --uninstall-service   Parar y eliminar el servicio (admin)\n\nOpciones:\n  --signal-url <ws://host:puerto> Usar un servidor CleanDesk privado (o CLEANDESK_SIGNAL_URL);
-                                  sin esta opción se usa el modo de los ajustes (comunitario por defecto)\n  --data-dir <ruta>               Carpeta de identidad/ajustes (o CLEANDESK_DATA_DIR)\n  --log-file <ruta>               Añadir el registro a un fichero (o CLEANDESK_LOG_FILE)\n\nVariables de entorno de red:\n  CLEANDESK_STUN_URLS, CLEANDESK_TURN_URLS, CLEANDESK_TURN_USER, CLEANDESK_TURN_PASS",
+        "CleanDesk {}\n\nUsage:\n  cleandesk                       Open the graphical interface\n  cleandesk --connect <ID>        Open the GUI and connect to a CleanDesk ID\n  cleandesk --host                Run as an unattended host (no GUI)\n  cleandesk --install-service     Install and start the Windows service (admin)\n  cleandesk --uninstall-service   Stop and remove the service (admin)\n\nOptions:\n  --signal-url <ws://host:port>   Use a private CleanDesk Server (or CLEANDESK_SIGNAL_URL);\n                                  without it the settings decide (community mode by default)\n  --data-dir <path>               Identity/settings folder (or CLEANDESK_DATA_DIR)\n  --log-file <path>               Append logs to a file (or CLEANDESK_LOG_FILE)\n\nNetwork environment variables:\n  CLEANDESK_STUN_URLS, CLEANDESK_TURN_URLS, CLEANDESK_TURN_USER, CLEANDESK_TURN_PASS, CLEANDESK_NOSTR_RELAYS",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -276,7 +275,7 @@ fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_override: Op
             let Some(unattended_key) = unattended_key else {
                 if !warned_config {
                     tracing::warn!(
-                        "acceso desatendido no configurado: define una contraseña en la GUI (Ajustes → Acceso desatendido); esperando…"
+                        "unattended access not configured: set a password in the GUI (Settings → Unattended access); waiting…"
                     );
                     warned_config = true;
                 }

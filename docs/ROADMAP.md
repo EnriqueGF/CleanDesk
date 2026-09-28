@@ -1,75 +1,75 @@
 # CleanDesk — Roadmap
 
-Basado en la hoja de definiciones (§30 MVP, §31 posteriores). Estado a fecha de
-arranque del proyecto.
+Based on the definition sheet (§30 MVP, §31 later). Status as of the project's
+start date.
 
-## Hito 0 — Cimientos ✅ (hecho)
+## Milestone 0 — Foundations ✅ (done)
 
-- [x] Workspace Cargo con 13 crates y perfiles de release.
-- [x] `proto`: CleanDesk ID, permisos, perfiles de calidad, mensajes de
-      señalización/sesión/media, framing length-delimited. **Tests verdes.**
-- [x] `crypto`: identidad Ed25519, Argon2id, tokens, reto-respuesta. **Tests verdes.**
-- [x] `signal-server`: registro, resolución de IDs, relay de señalización. Compila.
-- [x] Documentación: README, ARCHITECTURE, SECURITY, SPEC.
+- [x] Cargo workspace with 13 crates and release profiles.
+- [x] `proto`: CleanDesk ID, permissions, quality profiles,
+      signaling/session/media messages, length-delimited framing. **Tests green.**
+- [x] `crypto`: Ed25519 identity, Argon2id, tokens, challenge-response. **Tests green.**
+- [x] `signal-server`: registration, ID resolution, signaling relay. Compiles.
+- [x] Documentation: README, ARCHITECTURE, SECURITY, SPEC.
 
-## Hito 1 — MVP núcleo ✅ (hecho)
+## Milestone 1 — Core MVP ✅ (done)
 
-Objetivo: dos equipos Windows se conectan y hay control remoto real.
+Goal: two Windows machines connect and there is real remote control.
 
-- [x] `transport`: transporte WebRTC (data channels control/video/input) +
-      cliente de señalización WS. NAT traversal (STUN) y relay (TURN) fallback.
-- [x] `capture`: DXGI Desktop Duplication, enumeración de monitores, frames BGRA,
-      detección de tiles sucios.
-- [x] `codec`: trait `VideoEncoder`/`VideoDecoder` + impl tiles+zstd+JPEG
+- [x] `transport`: WebRTC transport (control/video/input data channels) +
+      WS signaling client. NAT traversal (STUN) and relay (TURN) fallback.
+- [x] `capture`: DXGI Desktop Duplication, monitor enumeration, BGRA frames,
+      dirty-tile detection.
+- [x] `codec`: `VideoEncoder`/`VideoDecoder` trait + tiles+zstd+JPEG impl
       (keyframe/delta).
-- [x] `input`: SendInput; mapeo de `InputEvent` (ratón absoluto normalizado,
-      teclado por virtual-key, scroll) y respeto de permisos.
-- [x] `core`: persistencia de identidad, config, agenda, historial, dispositivos
-      de confianza; máquina de estados de sesión; gestor de permisos.
-- [x] `host` + `client`: ensamblar los pipelines de captura/codificación/input.
-- [x] `gui`: ventana principal (ID propio, copiar ID, conectar, recientes) +
-      visor con barra de herramientas.
-- [x] `app`: cablear modos GUI / `--host` / `--connect`.
-- [x] `relay-server`: servidor TURN (RFC 5766) con credenciales de larga duración.
-- [x] E2E: solicitud → aceptar → vídeo + control → desconectar → historial.
+- [x] `input`: SendInput; `InputEvent` mapping (normalized absolute mouse,
+      keyboard by virtual-key, scroll) and permission enforcement.
+- [x] `core`: persistence of identity, config, address book, history, trusted
+      devices; session state machine; permission manager.
+- [x] `host` + `client`: assemble the capture/encoding/input pipelines.
+- [x] `gui`: main window (own ID, copy ID, connect, recents) + viewer with
+      toolbar.
+- [x] `app`: wire up GUI / `--host` / `--connect` modes.
+- [x] `relay-server`: TURN server (RFC 5766) with long-term credentials.
+- [x] E2E: request → accept → video + control → disconnect → history.
 
-Cubre §30: app Windows, ID, señalización, conexión 2 equipos, captura, streaming,
-control teclado/ratón, solicitud aceptar/rechazar, cifrado, relay, acceso
-desatendido por contraseña, portapapeles básico, transferencia de archivos,
-historial básico.
+Covers §30: Windows app, ID, signaling, 2-machine connection, capture,
+streaming, keyboard/mouse control, accept/reject request, encryption, relay,
+password-based unattended access, basic clipboard, file transfer, basic
+history.
 
-## Hito 2 — Robustez y UX
+## Milestone 2 — Robustness and UX
 
-- [x] Multi-monitor (selección/cambio, §15), pantalla completa/escalado (§16).
-- [ ] Portapapeles imágenes; chat en sesión (§17); progreso/cancelación de
-      transferencias (§13).
-- [x] Calidad adaptativa `Auto` por RTT medido (§8); ancho de banda como siguiente señal.
-- [x] Panel de info de sesión (RTT/FPS/resolución/códec/ancho de banda, §26).
-- [x] Servicio de Windows (§24): inicio con Windows, acceso pre-login.
-- [ ] Reinicio remoto (§24).
-- [ ] Actualizaciones automáticas con verificación de integridad (§25).
+- [x] Multi-monitor (select/switch, §15), full screen/scaling (§16).
+- [ ] Clipboard images; in-session chat (§17); transfer progress/cancellation
+      (§13).
+- [x] `Auto` adaptive quality by measured RTT (§8); bandwidth as the next signal.
+- [x] Session info panel (RTT/FPS/resolution/codec/bandwidth, §26).
+- [x] Windows service (§24): start with Windows, pre-login access.
+- [ ] Remote reboot (§24).
+- [ ] Automatic updates with integrity verification (§25).
 
-## Hito 2b — Modo comunitario ✅ (hecho)
+## Milestone 2b — Community mode ✅ (done)
 
-- [x] `discovery`: mDNS en LAN, DHT de BitTorrent (BEP 44) con registro firmado
-      bajo clave y bajo ID, señalización directa TCP con reto-respuesta mutuo,
-      señalización Nostr cifrada NIP-44, UPnP/IGD, directorio de relays por
-      `announce_peer`.
-- [x] `host` / `client`: `serve_community` / `connect_community` sobre el mismo
-      núcleo de sesión (`SignalOut`); trust-on-first-use de claves.
-- [x] `relay-server --community`: credenciales públicas y anuncio en la DHT.
-- [x] GUI: selector de modo de red, vía usada en el visor, alarma de cambio de
-      identidad.
-- [x] `platform`: inicio con Windows, servicio SCM con helper en la sesión de
-      consola, lock de presencia.
-- [x] Instalador MSI (WiX) con accesos directos y reglas de firewall.
+- [x] `discovery`: mDNS on the LAN, BitTorrent DHT (BEP 44) with a signed record
+      under key and under ID, direct TCP signaling with mutual
+      challenge-response, NIP-44 encrypted Nostr signaling, UPnP/IGD, relay
+      directory via `announce_peer`.
+- [x] `host` / `client`: `serve_community` / `connect_community` on top of the
+      same session core (`SignalOut`); trust-on-first-use for keys.
+- [x] `relay-server --community`: public credentials and DHT announcement.
+- [x] GUI: network mode selector, path used shown in the viewer, identity-change
+      alarm.
+- [x] `platform`: start with Windows, SCM service with a helper in the console
+      session, presence lock.
+- [x] MSI installer (WiX) with shortcuts and firewall rules.
 
-## Hito 3 — Post-MVP (§31)
+## Milestone 3 — Post-MVP (§31)
 
-- [ ] Cuentas, agenda en la nube, equipos y roles (§21–23).
-- [ ] MFA; PAKE para acceso desatendido (ver SECURITY.md).
-- [ ] Grabación de sesiones, Wake-on-LAN, impresión remota, túneles TCP,
-      terminal remota, API, webhooks.
-- [ ] Códec H.264/HEVC por hardware (NVENC) tras el trait de `codec`.
-- [ ] Compatibilidad macOS / Linux (capas de captura/input por plataforma).
-- [ ] Cliente web y app móvil.
+- [ ] Accounts, cloud address book, teams and roles (§21–23).
+- [ ] MFA; PAKE for unattended access (see SECURITY.md).
+- [ ] Session recording, Wake-on-LAN, remote printing, TCP tunnels, remote
+      terminal, API, webhooks.
+- [ ] Hardware H.264/HEVC codec (NVENC) behind the `codec` trait.
+- [ ] macOS / Linux support (per-platform capture/input layers).
+- [ ] Web client and mobile app.

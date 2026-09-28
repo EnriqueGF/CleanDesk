@@ -1,47 +1,47 @@
-# CleanDesk — Arquitectura
+# CleanDesk — Architecture
 
-## Objetivo de diseño
+## Design goal
 
-Escritorio remoto de **baja latencia**, **seguro** y **ligero**, con conexión
-**P2P por defecto** y **relay** solo como último recurso. Todo en Rust, con una
-frontera de contrato clara (`cleandesk-proto`) que comparten cliente, host,
-servidor y relay.
+A **low-latency**, **secure** and **lightweight** remote desktop, with a
+**P2P-by-default** connection and a **relay** only as a last resort. All in
+Rust, with a clear contract boundary (`cleandesk-proto`) shared by client, host,
+server and relay.
 
-## Planos de comunicación
+## Communication planes
 
-CleanDesk separa tres planos, cada uno con su serialización óptima:
+CleanDesk separates three planes, each with its optimal serialization:
 
-| Plano | Canal | Serialización | Contenido |
+| Plane | Channel | Serialization | Content |
 |---|---|---|---|
-| **Señalización** | WebSocket cliente↔servidor | JSON (`SignalMessage`) | registro, resolución de ID, solicitudes, relay de SDP/ICE |
-| **Control** | Data channel fiable P2P | postcard (`SessionMessage`) | permisos, chat, portapapeles, ficheros, stats |
-| **Media** | Data channels P2P | postcard (`VideoFrame`) / (`InputEvent`) | vídeo (host→viewer), input (viewer→host) |
+| **Signaling** | WebSocket client↔server | JSON (`SignalMessage`) | registration, ID resolution, requests, SDP/ICE relay |
+| **Control** | Reliable P2P data channel | postcard (`SessionMessage`) | permissions, chat, clipboard, files, stats |
+| **Media** | P2P data channels | postcard (`VideoFrame`) / (`InputEvent`) | video (host→viewer), input (viewer→host) |
 
-> `SignalMessage` usa etiquetado interno de serde (legible en JSON). Los mensajes
-> que viajan por **postcard** (binario, no autodescriptivo) usan etiquetado
-> **externo** — es un requisito de postcard, verificado por tests en `frame.rs`.
+> `SignalMessage` uses serde's internal tagging (readable in JSON). Messages
+> that travel over **postcard** (binary, not self-describing) use **external**
+> tagging — it is a postcard requirement, verified by tests in `frame.rs`.
 
-## Crates del workspace
+## Workspace crates
 
 ```
-proto      ← contrato: IDs, permisos, mensajes, framing, versión           (sin deps pesadas)
-crypto     ← identidad Ed25519, Argon2id, tokens, prueba reto-respuesta
-transport  ← WebRTC (ICE/STUN/TURN/DTLS) + cliente de señalización WS
-capture    ← DXGI Desktop Duplication (Windows), enumeración de monitores
-codec      ← trait VideoEncoder/Decoder + impl tiles+zstd+JPEG (MVP)
-input      ← SendInput (Windows), mapeo de InputEvent y códigos de tecla
-core       ← config, almacenamiento, agenda, historial, máquina de estados de sesión
-host       ← rol host: captura→codifica→envía; recibe→inyecta input
-client     ← rol viewer: recibe→decodifica; captura→envía input
-gui        ← eframe/egui: ventana principal + visor de sesión
-app        ← binario: modos GUI / --host / --connect
-signal-server ← binario: CleanDesk Server (señalización)
-relay-server  ← binario: CleanDesk Relay (TURN fallback; --community se anuncia en la DHT)
-platform   ← integración con el SO: inicio con Windows, servicio SCM, lock de presencia
-discovery  ← rendezvous sin servidor: mDNS, DHT BitTorrent (BEP 44), Nostr, UPnP
+proto      ← contract: IDs, permissions, messages, framing, version           (no heavy deps)
+crypto     ← Ed25519 identity, Argon2id, tokens, challenge-response proof
+transport  ← WebRTC (ICE/STUN/TURN/DTLS) + WS signaling client
+capture    ← DXGI Desktop Duplication (Windows), monitor enumeration
+codec      ← VideoEncoder/Decoder trait + tiles+zstd+JPEG impl (MVP)
+input      ← SendInput (Windows), InputEvent mapping and key codes
+core       ← config, storage, address book, history, session state machine
+host       ← host role: capture→encode→send; receive→inject input
+client     ← viewer role: receive→decode; capture→send input
+gui        ← eframe/egui: main window + session viewer
+app        ← binary: GUI / --host / --connect modes
+signal-server ← binary: CleanDesk Server (signaling)
+relay-server  ← binary: CleanDesk Relay (TURN fallback; --community announces itself in the DHT)
+platform   ← OS integration: start with Windows, SCM service, presence lock
+discovery  ← serverless rendezvous: mDNS, BitTorrent DHT (BEP 44), Nostr, UPnP
 ```
 
-Grafo de dependencias (simplificado):
+Dependency graph (simplified):
 
 ```
 app ─► gui ─► core ─► crypto ─► proto
@@ -51,61 +51,65 @@ app ─► gui ─► core ─► crypto ─► proto
 transport ─► proto     signal-server ─► proto, crypto
 ```
 
-## Modo comunitario (sin servidor)
+## Community mode (serverless)
 
-`cleandesk-discovery` sustituye al CleanDesk Server por infraestructura pública:
+`cleandesk-discovery` replaces the CleanDesk Server with public infrastructure:
 
-| Necesidad | Mecanismo |
+| Need | Mechanism |
 |---|---|
-| Encontrar un equipo en la LAN | mDNS `_cleandesk._tcp` con ID, clave y puerto en el TXT |
-| Encontrar un equipo por ID en Internet | DHT mainline de BitTorrent: item mutable BEP 44 firmado con la clave del host, publicado bajo su clave y bajo una clave derivada del ID |
-| Intercambiar SDP/ICE si el host es alcanzable | enlace TCP directo (puerto 7423) con reto-respuesta Ed25519 mutuo |
-| Intercambiar SDP/ICE si no lo es | eventos efímeros (kind 27420) en relés Nostr públicos, cifrados NIP-44 y con firma de vinculación Ed25519↔Nostr |
-| Ser alcanzable tras el router | UPnP/IGD: mapeo de 7423/TCP y 7424/UDP; la IP externa se anuncia como candidato ICE 1:1 |
-| Plan B sin ruta directa | relays TURN comunitarios (`cleandesk-relay-server --community`) anunciados con `announce_peer` en un infohash conocido |
+| Find a machine on the LAN | mDNS `_cleandesk._tcp` with ID, key and port in the TXT record |
+| Find a machine by ID on the Internet | BitTorrent mainline DHT: BEP 44 mutable item signed with the host's key, published under its key and under a key derived from the ID |
+| Exchange SDP/ICE when the host is reachable | direct TCP link (port 7423) with mutual Ed25519 challenge-response |
+| Exchange SDP/ICE when it is not | ephemeral events (kind 27420) on public Nostr relays, NIP-44 encrypted and with an Ed25519↔Nostr binding signature |
+| Be reachable behind the router | UPnP/IGD: mapping of 7423/TCP and 7424/UDP; the external IP is announced as a 1:1 ICE candidate |
+| Plan B with no direct route | community TURN relays (`cleandesk-relay-server --community`) announced with `announce_peer` on a well-known infohash |
 
-El host publica cada 10 min un `Record` firmado {clave, clave Nostr, endpoints,
-hora}. El visor resuelve LAN → DHT por clave fijada → DHT por ID, verifica la
-firma y que la clave derive al ID, y prueba directo → Nostr. `host` y `client`
-no distinguen la vía: ambos trabajan sobre `SignalOut` + un canal de entrada, y
-el host convierte `ConnectRequest` en `IncomingRequest` acuñando la sesión.
+Every 10 min the host publishes a signed `Record` {key, Nostr key, endpoints,
+time}. The viewer resolves LAN → DHT by pinned key → DHT by ID, verifies the
+signature and that the key derives to the ID, and tries direct → Nostr. `host`
+and `client` do not distinguish the path: both work on top of `SignalOut` + an
+inbound channel, and the host turns `ConnectRequest` into `IncomingRequest` by
+minting the session.
 
-## Flujo de conexión (resumen)
+## Connection flow (summary)
 
-1. Ambos clientes se registran en el **CleanDesk Server** (WS): envían su clave
-   pública Ed25519 y el ID derivado de ella, firman el nonce del servidor
-   (`RegisterChallenge` → `RegisterProof`) y reciben `Registered`. El servidor
-   rechaza IDs que no se deriven de la clave o firmas inválidas.
-2. El viewer envía `ConnectRequest{target}`. El servidor abre una sesión y
-   entrega `IncomingRequest` al host.
-3. El host muestra la solicitud (o valida acceso desatendido) y responde
+1. Both clients register with the **CleanDesk Server** (WS): they send their
+   Ed25519 public key and the ID derived from it, sign the server's nonce
+   (`RegisterChallenge` → `RegisterProof`) and receive `Registered`. The server
+   rejects IDs that do not derive from the key, and invalid signatures.
+2. The viewer sends `ConnectRequest{target}`. The server opens a session and
+   delivers `IncomingRequest` to the host.
+3. The host shows the request (or validates unattended access) and replies
    `Accept{granted}` / `Reject`.
-4. Los pares intercambian **SDP + ICE** vía `Signal` (el servidor solo
-   retransmite; no puede leer nada). ICE prueba rutas directas (host, srflx vía
-   STUN, y relay TURN como fallback).
-5. Se abren data channels: `control`, `video`, `input` (+ `files` bajo demanda).
-   `video` es no fiable/no ordenado (un frame tardío no vale nada); `control`,
-   `input` y `files` son fiables y ordenados (perder un *key-up* dejaría una
-   tecla atascada).
-   El cifrado es **DTLS** extremo a extremo, negociado entre los pares.
-6. El host captura → codifica → envía `VideoFrame`; el viewer decodifica y
-   pinta; el viewer envía `InputEvent`; el host los inyecta según permisos.
-7. Cualquiera pulsa **Desconectar** (o el host **Finalizar sesión**) → cierre
-   ordenado, liberación de teclas pulsadas y registro en historial.
+4. The peers exchange **SDP + ICE** via `Signal` (the server only forwards; it
+   cannot read anything). ICE tries direct routes (host, srflx via STUN, and
+   TURN relay as fallback).
+5. Data channels are opened: `control`, `video`, `input` (+ `files` on demand).
+   `video` is unreliable/unordered (a late frame is worthless); `control`,
+   `input` and `files` are reliable and ordered (losing a *key-up* would leave
+   a key stuck).
+   Encryption is end-to-end **DTLS**, negotiated between the peers.
+6. The host captures → encodes → sends `VideoFrame`; the viewer decodes and
+   paints; the viewer sends `InputEvent`; the host injects them according to
+   permissions.
+7. Either side presses **Disconnect** (or the host **End session**) → orderly
+   shutdown, release of pressed keys and a history entry.
 
-## Rendimiento
+## Performance
 
-- **Captura:** DXGI Desktop Duplication entrega solo frames con cambios; se
-  calcula además una rejilla de tiles sucios (64×64) para no recodificar lo que
-  no cambió.
-- **Códec:** MVP = tiles JPEG + zstd (keyframe / delta). El trait `VideoEncoder`
-  permite sustituirlo por H.264/HEVC (NVENC) sin tocar host/client.
-- **Adaptación:** `QualityProfile::Auto` ajusta FPS/calidad según el RTT medido
-  por `Ping`/`Pong` en el canal de control (`host::media::auto_params`). El host
-  limita el ritmo de captura al FPS objetivo y, si la cola de envío se llena,
-  descarta el frame y fuerza un keyframe (un delta perdido corrompería el lienzo).
-- **Recuperación de pérdidas:** el visor detecta huecos de secuencia, deltas sin
-  keyframe previo o errores de decodificación y pide `RequestKeyframe` (con
-  límite de uno cada 500 ms).
-- **Release profile:** LTO fino, `codegen-units=1`, `panic=abort`, símbolos
-  eliminados.
+- **Capture:** DXGI Desktop Duplication delivers only frames with changes; a
+  dirty-tile grid (64×64) is also computed so that what did not change is not
+  re-encoded.
+- **Codec:** MVP = JPEG tiles + zstd (keyframe / delta). The `VideoEncoder`
+  trait allows replacing it with H.264/HEVC (NVENC) without touching
+  host/client.
+- **Adaptation:** `QualityProfile::Auto` adjusts FPS/quality according to the
+  RTT measured by `Ping`/`Pong` on the control channel
+  (`host::media::auto_params`). The host limits the capture rate to the target
+  FPS and, if the send queue fills up, drops the frame and forces a keyframe (a
+  lost delta would corrupt the canvas).
+- **Loss recovery:** the viewer detects sequence gaps, deltas without a
+  preceding keyframe or decoding errors and requests `RequestKeyframe` (limited
+  to one every 500 ms).
+- **Release profile:** thin LTO, `codegen-units=1`, `panic=abort`, symbols
+  stripped.

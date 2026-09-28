@@ -14,6 +14,8 @@ use cleandesk_proto::{
 };
 use tokio::sync::{mpsc, oneshot};
 
+use crate::i18n::tr;
+
 /// Una solicitud de conexión pendiente de decisión, entregada a la interfaz.
 pub struct PendingRequest {
     /// Quién solicita la conexión.
@@ -94,26 +96,27 @@ impl Approver for GuiApprover {
     }
 }
 
-/// Los diez permisos de sesión (spec §6), con su etiqueta en español para el
-/// checklist del diálogo de aprobación y de la barra de permisos.
+/// Los diez permisos de sesión (spec §6) con su clave de texto (en inglés;
+/// traducir con `tr` al dibujar) para el checklist del diálogo de aprobación y
+/// la barra de permisos.
 pub const PERMISSION_ITEMS: &[(Permissions, &str)] = &[
-    (Permissions::VIEW_SCREEN, "Ver pantalla"),
-    (Permissions::CONTROL_KEYBOARD, "Controlar teclado"),
-    (Permissions::CONTROL_MOUSE, "Controlar ratón"),
-    (Permissions::CLIPBOARD, "Portapapeles"),
-    (Permissions::FILE_TRANSFER, "Transferir archivos"),
-    (Permissions::AUDIO, "Audio remoto"),
-    (Permissions::RESTART_MACHINE, "Reiniciar equipo"),
-    (Permissions::RESTART_CLEANDESK, "Reiniciar CleanDesk"),
-    (Permissions::ADMIN_ACTIONS, "Acciones administrativas"),
-    (Permissions::LOCK_LOCAL_INPUT, "Bloquear teclado/ratón local"),
+    (Permissions::VIEW_SCREEN, "View screen"),
+    (Permissions::CONTROL_KEYBOARD, "Control keyboard"),
+    (Permissions::CONTROL_MOUSE, "Control mouse"),
+    (Permissions::CLIPBOARD, "Clipboard"),
+    (Permissions::FILE_TRANSFER, "File transfer"),
+    (Permissions::AUDIO, "Remote audio"),
+    (Permissions::RESTART_MACHINE, "Restart machine"),
+    (Permissions::RESTART_CLEANDESK, "Restart CleanDesk"),
+    (Permissions::ADMIN_ACTIONS, "Admin actions"),
+    (Permissions::LOCK_LOCAL_INPUT, "Lock local keyboard/mouse"),
 ];
 
-/// Etiqueta legible del tipo de autenticación para el diálogo.
+/// Etiqueta legible (ya traducida) del tipo de autenticación para el diálogo.
 pub fn auth_label(auth: AuthKind) -> &'static str {
     match auth {
-        AuthKind::Interactive => "Interactiva",
-        AuthKind::UnattendedPassword => "Acceso desatendido",
-        AuthKind::Trusted => "Dispositivo de confianza",
+        AuthKind::Interactive => tr("Interactive"),
+        AuthKind::UnattendedPassword => tr("Unattended access"),
+        AuthKind::Trusted => tr("Trusted device"),
     }
 }

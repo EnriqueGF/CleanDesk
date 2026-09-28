@@ -11,9 +11,11 @@
 
 mod app;
 mod approval;
+mod i18n;
 mod keymap;
 mod mainwindow;
 mod theme;
+mod tray;
 mod viewer;
 
 use std::sync::Arc;
@@ -51,7 +53,8 @@ pub fn run(
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("CleanDesk")
-            .with_inner_size([1040.0, 700.0])
+            .with_icon(std::sync::Arc::new(tray::window_icon()))
+            .with_inner_size([960.0, 620.0])
             .with_min_inner_size([720.0, 480.0]),
         ..Default::default()
     };

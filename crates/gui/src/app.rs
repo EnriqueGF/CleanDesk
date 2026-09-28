@@ -24,6 +24,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 
 use crate::approval::{GuiApprover, PendingRequest};
+use crate::i18n::{self, tr, trf, Lang};
 use crate::mainwindow;
 use crate::theme;
 use crate::viewer::ViewerState;
@@ -101,6 +102,10 @@ pub struct CleanDeskApp {
     /// Equipo cuya identidad cambió respecto a la clave fijada; el usuario
     /// decide si confiar en la nueva (tras comprobar la huella).
     pub identity_alarm: Option<CleanDeskId>,
+    /// Icono de bandeja (None si el sistema no lo permite).
+    tray: Option<crate::tray::Tray>,
+    /// El usuario eligió "Salir": la siguiente petición de cierre se acepta.
+    quitting: bool,
     /// Pestaña activa de la lista de equipos.
     pub tab: DeviceTab,
     /// Ventana de ajustes visible.
@@ -153,6 +158,15 @@ impl CleanDeskApp {
         initial_target: Option<CleanDeskId>,
     ) -> Self {
         theme::apply(&cc.egui_ctx);
+        // Idioma de la interfaz: el guardado en ajustes o, si no hay, el del sistema.
+        let lang = state
+            .settings
+            .read()
+            .language
+            .as_deref()
+            .map(Lang::from_tag)
+            .unwrap_or_else(Lang::system);
+        i18n::set_lang(lang);
         let id = state.identity.derive_id();
         let alias_edit = state.settings.read().alias.clone().unwrap_or_default();
 
@@ -199,8 +213,17 @@ impl CleanDeskApp {
             pending_remember: None,
             notice: None,
             identity_alarm: None,
+            tray: match crate::tray::Tray::new(cc.egui_ctx.clone()) {
+                Ok(t) => Some(t),
+                Err(e) => {
+                    warn!(error = %e, "tray icon unavailable");
+                    None
+                }
+            },
+            quitting: false,
             tab: DeviceTab::Recent,
-            show_settings: false,
+            // `CLEANDESK_OPEN_SETTINGS=1` abre Ajustes al arrancar (capturas, soporte).
+            show_settings: std::env::var_os("CLEANDESK_OPEN_SETTINGS").is_some(),
             show_security: false,
             show_add_device: false,
             add_device_id: String::new(),
@@ -259,7 +282,7 @@ impl CleanDeskApp {
             return; // una sesión a la vez (MVP)
         }
         if target == self.id {
-            self.notice = Some("No puedes conectarte a tu propio ID.".into());
+            self.notice = Some(tr("You cannot connect to your own ID.").into());
             return;
         }
         self.notice = None;
@@ -286,7 +309,7 @@ impl CleanDeskApp {
                     }
                 }
                 Err(e) => {
-                    self.notice = Some(format!("No se pudo derivar la clave: {e}"));
+                    self.notice = Some(trf("Could not derive the key: {err}", &[("err", &e.to_string())]));
                     return;
                 }
             }
@@ -408,11 +431,12 @@ impl CleanDeskApp {
             }
             Ok(Err(e)) => {
                 warn!(error = %e, "conexión fallida");
-                let text = friendly_error(&e);
-                if text.contains("identidad") {
+                let raw = format!("{e:#}");
+                if is_identity_change(&raw) {
                     self.identity_alarm = Some(*target);
                 }
-                self.notice = Some(format!("No se pudo conectar: {text}"));
+                let text = friendly_error(&raw);
+                self.notice = Some(trf("Could not connect: {err}", &[("err", &text)]));
                 self.connect = ConnectPhase::Idle;
             }
             Err(oneshot::error::TryRecvError::Empty) => {
@@ -420,7 +444,7 @@ impl CleanDeskApp {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
             }
             Err(oneshot::error::TryRecvError::Closed) => {
-                self.notice = Some("La conexión se interrumpió antes de establecerse.".into());
+                self.notice = Some(tr("The connection was interrupted before it was established.").into());
                 self.connect = ConnectPhase::Idle;
             }
         }
@@ -473,7 +497,7 @@ impl CleanDeskApp {
                     }
                     if self.host_session.as_ref().is_some_and(|s| s.session == session) {
                         self.host_session = None;
-                        self.notice = Some(format!("Sesión entrante finalizada: {reason}"));
+                        self.notice = Some(trf("Incoming session ended: {reason}", &[("reason", friendly_reason(&reason))]));
                     }
                 }
             }
@@ -483,6 +507,9 @@ impl CleanDeskApp {
 
 impl eframe::App for CleanDeskApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 0) Bandeja: mostrar/salir, y cerrar = ocultar si así está configurado.
+        self.handle_tray(ctx);
+
         // 1) Avanzar la conexión saliente si está en curso.
         self.poll_connecting(ctx);
 
@@ -504,6 +531,34 @@ impl eframe::App for CleanDeskApp {
 }
 
 impl CleanDeskApp {
+    /// Procesa los eventos del icono de bandeja y la petición de cierre de la
+    /// ventana. Con `minimize_to_tray` activo, cerrar solo oculta la ventana;
+    /// "Salir" en el menú de la bandeja cierra de verdad.
+    fn handle_tray(&mut self, ctx: &egui::Context) {
+        use crate::tray::TrayAction;
+        if let Some(tray) = &self.tray {
+            match tray.poll() {
+                TrayAction::Show => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                TrayAction::Quit => {
+                    self.quitting = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                TrayAction::None => {}
+            }
+        }
+        if ctx.input(|i| i.viewport().close_requested()) {
+            let to_tray = self.tray.is_some() && self.state.settings.read().minimize_to_tray;
+            if to_tray && !self.quitting {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            }
+        }
+    }
+
     /// Muestra el diálogo modal de aprobación para la primera solicitud pendiente.
     fn show_approval_modal(&mut self, ctx: &egui::Context) {
         if self.pending.is_empty() {
@@ -527,35 +582,35 @@ impl CleanDeskApp {
             .frame(theme::card())
             .show(ctx, |ui| {
                 ui.set_width(380.0);
-                theme::section_label(ui, "Solicitud de conexión", true);
+                theme::section_label(ui, tr("Connection request"), true);
                 ui.add_space(6.0);
                 ui.label(egui::RichText::new(&name).size(18.0).strong());
                 ui.label(egui::RichText::new(id.to_string()).monospace().color(theme::TEXT_DIM));
                 if !os.is_empty() {
-                    ui.label(egui::RichText::new(format!("Sistema: {os}")).color(theme::TEXT_DIM));
+                    ui.label(egui::RichText::new(trf("System: {os}", &[("os", &os)])).color(theme::TEXT_DIM));
                 }
                 ui.label(
-                    egui::RichText::new(format!("Autenticación: {}", crate::approval::auth_label(auth)))
+                    egui::RichText::new(trf("Authentication: {auth}", &[("auth", crate::approval::auth_label(auth))]))
                         .color(theme::TEXT_DIM),
                 );
                 ui.add_space(8.0);
                 ui.separator();
-                theme::section_label(ui, "Permisos concedidos", false);
+                theme::section_label(ui, tr("Granted permissions"), false);
                 ui.add_space(4.0);
 
                 for (perm, label) in crate::approval::PERMISSION_ITEMS {
                     let mut on = self.pending_perms.contains(*perm);
-                    if ui.checkbox(&mut on, *label).changed() {
+                    if ui.checkbox(&mut on, tr(label)).changed() {
                         self.pending_perms.set(*perm, on);
                     }
                 }
 
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    if ui.add(theme::primary_button("Aceptar")).clicked() {
+                    if ui.add(theme::primary_button(tr("Accept"))).clicked() {
                         decision = Some(true);
                     }
-                    if ui.add(theme::danger_button("Rechazar")).clicked() {
+                    if ui.add(theme::danger_button(tr("Decline"))).clicked() {
                         decision = Some(false);
                     }
                 });
@@ -612,23 +667,44 @@ impl CleanDeskApp {
     }
 }
 
-/// Traduce los errores más comunes de conexión a un texto para el usuario.
-fn friendly_error(e: &anyhow::Error) -> String {
-    let s = format!("{e:#}");
-    if s.contains("TargetOffline") {
-        "el equipo remoto no está en línea.".into()
+/// ¿El error de conexión (`{e:#}`) indica que la clave fijada del equipo
+/// remoto ya no coincide? Acepta la redacción en inglés y en español de los
+/// crates de descubrimiento/cliente.
+fn is_identity_change(s: &str) -> bool {
+    (s.contains("identity") && s.contains("changed")) || (s.contains("identidad") && s.contains("cambiado"))
+}
+
+/// Traduce los errores más comunes de conexión (ya formateados con `{e:#}`) a
+/// un texto para el usuario. Los mensajes de otros crates se reconocen por
+/// subcadenas, en inglés y en español.
+fn friendly_error(s: &str) -> String {
+    if is_identity_change(s) {
+        tr("the remote device's identity has changed; verify its fingerprint before trusting the new key.").into()
+    } else if s.contains("not announced") || s.contains("no está anunciado") {
+        tr("the remote device is not announced (is it on, with CleanDesk running?).").into()
+    } else if s.contains("TargetOffline") {
+        tr("the remote device is offline.").into()
     } else if s.contains("Busy") {
-        "el equipo remoto ya tiene una sesión activa.".into()
+        tr("the remote device already has an active session.").into()
     } else if s.contains("UserDeclined") {
-        "el equipo remoto rechazó la conexión.".into()
+        tr("the remote device declined the connection.").into()
     } else if s.contains("AuthFailed") {
-        "contraseña de acceso desatendido incorrecta o no configurada.".into()
+        tr("wrong or unconfigured unattended-access password.").into()
     } else if s.contains("timed out waiting for the host") {
-        "el equipo remoto no respondió a tiempo.".into()
+        tr("the remote device did not respond in time.").into()
     } else if s.contains("connecting to CleanDesk Server") {
-        "no se pudo contactar con el servidor CleanDesk.".into()
+        tr("could not reach the CleanDesk server.").into()
     } else {
-        s
+        s.to_string()
+    }
+}
+
+/// Traduce los motivos de fin de sesión conocidos que emiten host/cliente.
+pub(crate) fn friendly_reason(reason: &str) -> &str {
+    if reason == "terminated by the host" || reason == "terminada por el host" {
+        tr("terminated by the host")
+    } else {
+        reason
     }
 }
 

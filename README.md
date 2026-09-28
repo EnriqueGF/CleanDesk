@@ -1,90 +1,126 @@
 # CleanDesk
 
-**CleanDesk** es una plataforma de escritorio remoto rápida, ligera y segura,
-escrita en **Rust**. Permite conectarse a otro equipo mediante un identificador
-único (**CleanDesk ID**) para ver la pantalla, controlar teclado y ratón,
-transferir archivos y dar soporte — usando **conexiones P2P** siempre que sea
-posible y **relay** cuando no lo es.
+**CleanDesk** is a fast, lightweight and secure remote desktop platform written
+in **Rust**. It lets you connect to another machine using a unique identifier
+(**CleanDesk ID**) to view its screen, control keyboard and mouse, transfer
+files and provide support — using **P2P connections** whenever possible and a
+**relay** when it is not.
 
-> **Origen (obra original):** CleanDesk es una implementación **propia e
-> independiente**, construida desde su [hoja de definiciones](docs/SPEC.md) sobre
-> protocolos y técnicas estándar de dominio público (WebRTC/ICE/STUN/TURN, DXGI
-> Desktop Duplication, SendInput). Identidad, protocolo, IDs y puertos son
-> propios de CleanDesk.
+> **Origin (original work):** CleanDesk is an **independent, in-house**
+> implementation, built from its [definition sheet](docs/SPEC.md) on top of
+> standard, public-domain protocols and techniques (WebRTC/ICE/STUN/TURN, DXGI
+> Desktop Duplication, SendInput). Identity, protocol, IDs and ports are
+> CleanDesk's own.
 
 ---
 
-## Estado
 
-Funcional. **Modo comunitario por defecto**: no hace falta que nadie monte
-servidores. Cada equipo se anuncia firmado en la red local (mDNS) y en la DHT de
-BitTorrent, la señalización viaja por relés Nostr públicos cifrada extremo a
-extremo, y UPnP + STUN + relays comunitarios atraviesan el NAT. El **modo
-servidor privado** (CleanDesk Server + Relay) sigue disponible para empresas.
-Consulta [docs/RUN.md](docs/RUN.md) para probarlo, [docs/ROADMAP.md](docs/ROADMAP.md)
-para el detalle por hito y [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) para el diseño.
+<p align="center">
+  <img src="docs/screenshots/main-window.png" alt="CleanDesk main window" width="820">
+</p>
 
-| Componente | Crate | Estado |
+## Why CleanDesk
+
+- **Peer-to-peer, no servers to run.** Type an ID and connect. Machines find
+  each other on the LAN (mDNS) or through the BitTorrent DHT, exchange the
+  WebRTC handshake directly or over public Nostr relays, and then talk
+  **directly to each other** over DTLS. Nobody in the project (or you) has to
+  host anything.
+- **End-to-end encrypted by design.** Video, input and control ride WebRTC
+  data channels (DTLS). Rendezvous systems only ever see signed hints; the
+  first session pins the remote key (trust on first use) and the fingerprint is
+  one click away.
+- **Fast and light.** Native Rust, DXGI Desktop Duplication, a tile-based codec
+  that only re-encodes what changed, adaptive quality driven by measured RTT.
+- **Unattended access done right.** Argon2id-hashed password, HMAC
+  challenge/response over the encrypted channel, per-caller lockout after
+  failed attempts, and a Windows service that keeps the host reachable before
+  sign-in.
+- **Works behind NAT.** UPnP port mapping when the router allows it, STUN hole
+  punching, and community TURN relays anyone can contribute with one
+  environment variable.
+- **Private mode for companies.** Point every client at your own CleanDesk
+  Server and Relay and nothing leaves your network.
+- **Multi-language.** English by default, follows the system language (Spanish
+  included), switchable in Settings.
+- **Lives in the tray.** Closing the window minimizes CleanDesk to the system
+  tray and the host keeps serving; quit from the tray menu (configurable).
+
+<p align="center">
+  <img src="docs/screenshots/settings.png" alt="Settings: network mode, unattended access, service" width="520">
+</p>
+
+## Status
+
+Functional. **Community mode by default**: nobody needs to run any servers.
+Each machine announces itself, signed, on the local network (mDNS) and in the
+BitTorrent DHT; signaling travels through public Nostr relays, end-to-end
+encrypted; and UPnP + STUN + community relays get through NAT. The **private
+server mode** (CleanDesk Server + Relay) remains available for businesses.
+See [docs/RUN.md](docs/RUN.md) to try it, [docs/ROADMAP.md](docs/ROADMAP.md)
+for the per-milestone detail and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
+
+| Component | Crate | Status |
 |---|---|---|
-| Protocolo compartido | `crates/proto` | ✅ Implementado (tests) |
-| Criptografía / identidad / auth | `crates/crypto` | ✅ Implementado (tests) |
-| Servidor de señalización | `crates/signal-server` | ✅ Registro con prueba de identidad, rate-limit, roles (tests + e2e) |
-| Transporte P2P (WebRTC) | `crates/transport` | ✅ Implementado (loopback test) |
-| Captura de pantalla (DXGI) | `crates/capture` | ✅ Implementado (captura real verificada) |
-| Códec de vídeo | `crates/codec` | ✅ Implementado (tests) |
-| Inyección de input | `crates/input` | ✅ Implementado (tests) |
-| Orquestación de sesión | `crates/core` | ✅ Implementado (tests) |
-| Rol host / viewer | `crates/host`, `crates/client` | ✅ Implementado (anti fuerza bruta, keyframe bajo demanda, RTT/FPS/kbps, calidad Auto) |
-| GUI (egui) | `crates/gui` | ✅ Implementada (tema oscuro, tarjetas, favoritos, ajustes, visor multi-monitor) |
+| Shared protocol | `crates/proto` | ✅ Implemented (tests) |
+| Cryptography / identity / auth | `crates/crypto` | ✅ Implemented (tests) |
+| Signaling server | `crates/signal-server` | ✅ Registration with proof of identity, rate limiting, roles (tests + e2e) |
+| P2P transport (WebRTC) | `crates/transport` | ✅ Implemented (loopback test) |
+| Screen capture (DXGI) | `crates/capture` | ✅ Implemented (real capture verified) |
+| Video codec | `crates/codec` | ✅ Implemented (tests) |
+| Input injection | `crates/input` | ✅ Implemented (tests) |
+| Session orchestration | `crates/core` | ✅ Implemented (tests) |
+| Host / viewer role | `crates/host`, `crates/client` | ✅ Implemented (brute-force protection, on-demand keyframe, RTT/FPS/kbps, Auto quality) |
+| GUI (egui) | `crates/gui` | ✅ Implemented (dark theme, cards, favorites, settings, multi-monitor viewer) |
 | App / entry point | `crates/app` | ✅ GUI / `--host` / `--connect` / `--signal-url` / `--data-dir` (tests) |
-| Relay (TURN fallback) | `crates/relay-server` | ✅ Servidor TURN (RFC 5766); modo comunitario anunciado en la DHT (tests) |
-| Descubrimiento sin servidor | `crates/discovery` | ✅ mDNS, DHT BitTorrent (BEP 44), señalización Nostr NIP-44, UPnP (tests + e2e) |
-| Integración con Windows | `crates/platform` | ✅ Inicio con Windows, servicio SCM, lock de presencia |
-| Instalador | `installer/` | ✅ MSI (WiX) con accesos directos y reglas de firewall |
+| Relay (TURN fallback) | `crates/relay-server` | ✅ TURN server (RFC 5766); community mode announced in the DHT (tests) |
+| Serverless discovery | `crates/discovery` | ✅ mDNS, BitTorrent DHT (BEP 44), Nostr NIP-44 signaling, UPnP (tests + e2e) |
+| Windows integration | `crates/platform` | ✅ Start with Windows, SCM service, presence lock |
+| Installer | `installer/` | ✅ MSI (WiX) with shortcuts and firewall rules |
 
 ---
 
-## Arquitectura en 3 componentes
+## Three-component architecture
 
 ```
                     ┌──────────────────────┐
-                    │   CleanDesk Server    │  registro + resolución de IDs
-                    │  (señalización WSS)   │  + relay de señalización WebRTC
+                    │   CleanDesk Server    │  ID registration + resolution
+                    │  (WSS signaling)      │  + WebRTC signaling relay
                     └──────────┬───────────┘
               signaling        │        signaling
         ┌──────────────────────┴──────────────────────┐
         │                                              │
  ┌──────▼───────┐   P2P (WebRTC/DTLS/SRTP)     ┌──────▼───────┐
- │  Cliente A   │◄────────────────────────────►│  Cliente B   │
- │  (viewer)    │      cuando es posible        │  (host)      │
+ │  Client A    │◄────────────────────────────►│  Client B    │
+ │  (viewer)    │      whenever possible        │  (host)      │
  └──────┬───────┘                              └──────┬───────┘
         │           ┌────────────────────┐            │
         └──────────►│  CleanDesk Relay   │◄───────────┘
-          fallback  │  (TURN, cifrado    │  fallback
-                    │   extremo a extremo)│
+          fallback  │  (TURN, end-to-end │  fallback
+                    │   encrypted)       │
                     └────────────────────┘
 ```
 
-## Compilar
+## Building
 
-Requisitos: Rust estable (1.85+) y Visual Studio Build Tools (MSVC).
+Requirements: stable Rust (1.85+) and Visual Studio Build Tools (MSVC).
 
-> Si quieres compilar en otra unidad, copia `.cargo/config.example.toml` a
-> `.cargo/config.toml` y ajusta `target-dir` (ese fichero no se versiona).
+> If you want to build on another drive, copy `.cargo/config.example.toml` to
+> `.cargo/config.toml` and adjust `target-dir` (that file is not versioned).
 
 ```powershell
-cargo build --workspace            # compilar todo
+cargo build --workspace            # build everything
 cargo test  --workspace            # tests
-cargo run -p cleandesk-signal-server   # arrancar el servidor de señalización
-cargo run -p cleandesk-app             # arrancar la app (GUI)
+cargo run -p cleandesk-signal-server   # start the signaling server
+cargo run -p cleandesk-app             # start the app (GUI)
 ```
 
-## Seguridad
+## Security
 
-Toda la comunicación es cifrada; la identidad de cada dispositivo es un par de
-claves Ed25519; la contraseña de acceso desatendido se guarda solo como hash
-Argon2id. Detalles y modelo de amenazas en [docs/SECURITY.md](docs/SECURITY.md).
+All communication is encrypted; each device's identity is an Ed25519 key pair;
+the unattended-access password is stored only as an Argon2id hash. Details and
+threat model in [docs/SECURITY.md](docs/SECURITY.md).
 
-## Licencia
+## License
 
 MIT OR Apache-2.0.

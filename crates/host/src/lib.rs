@@ -259,7 +259,7 @@ impl HostCore {
     pub(crate) fn terminate(&mut self) {
         if let Some(a) = self.active.take() {
             info!(session = %a.session, "session terminated by local user");
-            emit(&self.config, HostEvent::SessionEnded { session: a.session, reason: "terminada por el host".into() });
+            emit(&self.config, HostEvent::SessionEnded { session: a.session, reason: "terminated by the host".into() });
         }
     }
 
@@ -348,7 +348,7 @@ async fn handle_signal(
         SignalMessage::Reject { session, .. } => {
             if active.as_ref().is_some_and(|a| a.session == session) {
                 *active = None; // dropping aborts the session tasks
-                emit(config, HostEvent::SessionEnded { session, reason: "rechazada".into() });
+                emit(config, HostEvent::SessionEnded { session, reason: "rejected".into() });
             }
         }
 
@@ -474,7 +474,7 @@ async fn run_session_inner(
 ) -> String {
     if let Err(e) = peer.wait_connected_timeout(CONNECT_TIMEOUT).await {
         warn!(error = %e, "peer never connected");
-        return format!("sin conexión P2P: {e}");
+        return format!("no P2P connection: {e}");
     }
     info!("session connected");
 
@@ -520,11 +520,11 @@ async fn run_session_inner(
                 Err(_) => {
                     warn!("unattended auth timed out");
                     send_ctrl(&peer, &SessionMessage::Disconnect { reason: "auth timeout".into() }).await;
-                    break "tiempo de autenticación agotado".to_string();
+                    break "authentication timed out".to_string();
                 }
             }
         };
-        let Some((ch, bytes)) = next else { break "conexión cerrada".to_string() };
+        let Some((ch, bytes)) = next else { break "connection closed".to_string() };
         match ch {
             Channel::Input => {
                 if !authed {
@@ -556,7 +556,7 @@ async fn run_session_inner(
                             warn!("unattended authentication failed");
                             let _ = ctx.outcome_tx.send(SessionOutcome::AuthFailed { peer: ctx.peer.id });
                             send_ctrl(&peer, &SessionMessage::Disconnect { reason: "auth failed".into() }).await;
-                            break "autenticación fallida".to_string();
+                            break "authentication failed".to_string();
                         }
                     }
                     // Nothing else is honoured until the viewer is authenticated.
@@ -581,7 +581,7 @@ async fn run_session_inner(
                     }
                     SessionMessage::Disconnect { reason } => {
                         info!(%reason, "viewer disconnected");
-                        break format!("el visor cerró la sesión ({reason})");
+                        break format!("the viewer ended the session ({reason})");
                     }
                     SessionMessage::Heartbeat | SessionMessage::Hello { .. } => {}
                     other => debug!(?other, "unhandled control message"),

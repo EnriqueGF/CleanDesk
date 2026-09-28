@@ -205,7 +205,7 @@ mod tests {
             &id,
             Some("ab".repeat(32)),
             vec!["192.168.1.10:7423".parse().unwrap(), "203.0.113.5:7423".parse().unwrap()],
-            Some("Portátil".into()),
+            Some("Laptop".into()),
             1_000_000,
         );
         let bytes = r.to_json().unwrap();

@@ -1,161 +1,162 @@
-# Probar CleanDesk en local
+# Trying CleanDesk locally
 
-Requisitos: Rust estable (1.85+) y Visual Studio Build Tools (MSVC). Para usar
-CleanDesk sin compilar, instala el MSI de la release de GitHub.
+Requirements: stable Rust (1.85+) and Visual Studio Build Tools (MSVC). To use
+CleanDesk without building it, install the MSI from the GitHub release.
 
-## 0. Modo comunitario (por defecto): sin servidor
+## 0. Community mode (default): no server
 
-Al abrir CleanDesk el equipo se anuncia solo:
+When CleanDesk opens, the machine announces itself on its own:
 
-- en la **red local** por mDNS (`_cleandesk._tcp`), al instante;
-- en la **DHT de BitTorrent** con un registro firmado (bajo su clave y bajo su
-  ID), para que cualquier visor de Internet lo encuentre por el número;
-- en **relés Nostr públicos**, donde recibe la señalización cifrada (NIP-44)
-  cuando no es alcanzable directamente;
-- y si el router tiene **UPnP**, abre los puertos 7423/TCP (señalización
-  directa) y 7424/UDP (WebRTC) para que la conexión sea directa.
+- on the **local network** via mDNS (`_cleandesk._tcp`), instantly;
+- in the **BitTorrent DHT** with a signed record (under its key and under its
+  ID), so that any viewer on the Internet can find it by the number;
+- on **public Nostr relays**, where it receives encrypted signaling (NIP-44)
+  when it is not directly reachable;
+- and if the router has **UPnP**, it opens ports 7423/TCP (direct signaling)
+  and 7424/UDP (WebRTC) so that the connection is direct.
 
-El visor escribe el ID y CleanDesk prueba en orden: LAN → directo → Nostr, y
-usa STUN/relays comunitarios para atravesar NAT. La barra del visor indica la
-vía usada. Tras la primera conexión la clave del equipo queda fijada
-(trust-on-first-use); si alguien apareciera con el mismo ID y otra clave, la
-conexión se rechaza y puedes comprobar la huella en **Seguridad**.
+The viewer types the ID and CleanDesk tries, in order: LAN → direct → Nostr,
+and uses STUN/community relays to get through NAT. The viewer's bar shows the
+path used. After the first connection the machine's key is pinned
+(trust-on-first-use); if someone showed up with the same ID and a different
+key, the connection is rejected and you can check the fingerprint under
+**Security**.
 
-Para probarlo en una sola máquina abre dos instancias con `--data-dir`
-distintos (ver §2) y conecta por ID: se encontrarán por mDNS.
+To try it on a single machine, open two instances with different `--data-dir`
+values (see §2) and connect by ID: they will find each other via mDNS.
 
-Las secciones 1 a 3 describen el **modo servidor privado** (Ajustes → Red).
+Sections 1 to 3 describe the **private server mode** (Settings → Network).
 
-## 1. Arrancar el CleanDesk Server (señalización)
+## 1. Start the CleanDesk Server (signaling)
 
 ```powershell
 # Terminal 1
 cargo run -p cleandesk-signal-server
-# Escucha en 0.0.0.0:7420 (cambia con CLEANDESK_SIGNAL_PORT)
+# Listens on 0.0.0.0:7420 (change with CLEANDESK_SIGNAL_PORT)
 ```
 
-## 2. Arrancar dos instancias de la app
+## 2. Start two instances of the app
 
-Cada instancia se registra en el servidor y muestra su **CleanDesk ID**. Para
-ejecutar dos instancias en la misma máquina, dales carpetas de datos distintas
-(cada una tendrá su propia identidad y por tanto su propio ID):
+Each instance registers with the server and shows its **CleanDesk ID**. To run
+two instances on the same machine, give them different data folders (each will
+have its own identity and therefore its own ID):
 
 ```powershell
-# Terminal 2 (equipo A)
+# Terminal 2 (machine A)
 cargo run -p cleandesk-app -- --signal-url ws://127.0.0.1:7420 --data-dir C:\tmp\cd-a
 
-# Terminal 3 (equipo B) — en otra máquina de la LAN usa la IP del servidor
+# Terminal 3 (machine B) — on another machine on the LAN use the server's IP
 cargo run -p cleandesk-app -- --signal-url ws://127.0.0.1:7420 --data-dir C:\tmp\cd-b
 ```
 
-En A, escribe el **CleanDesk ID** de B en "Conexión remota" y pulsa
-**Conectar**. En B aparecerá la solicitud con los permisos pedidos: marca los que
-concedas y pulsa **Aceptar**. A verá el escritorio de B y podrá controlarlo según
-los permisos. B muestra un aviso ámbar mientras alguien está conectado, con un
-botón **Finalizar sesión**.
+On A, type B's **CleanDesk ID** under "Remote connection" and press
+**Connect**. On B the request will appear with the requested permissions: tick
+the ones you grant and press **Accept**. A will see B's desktop and will be
+able to control it according to the permissions. B shows an amber notice while
+someone is connected, with an **End session** button.
 
-> Conexión directa: `cargo run -p cleandesk-app -- --connect <ID>` abre la GUI y
-> conecta directamente a ese ID. `--help` lista todas las opciones.
+> Direct connection: `cargo run -p cleandesk-app -- --connect <ID>` opens the
+> GUI and connects directly to that ID. `--help` lists all the options.
 
-## 3. Acceso desatendido (sin que nadie acepte)
+## 3. Unattended access (without anyone accepting)
 
-En el equipo que hará de host, abre la GUI → ⚙ **Ajustes** → **Acceso
-desatendido**: escribe una contraseña (mínimo 6 caracteres) y marca *Permitir
-conexiones desatendidas*. Se guarda la clave derivada (Argon2id), nunca la
-contraseña en claro. Reinicia la app para que el host cargue la clave, o
-ejecútalo sin interfaz:
+On the machine that will act as host, open the GUI → ⚙ **Settings** →
+**Unattended access**: type a password (at least 6 characters) and tick *Allow
+unattended connections*. The derived key (Argon2id) is stored, never the
+password in the clear. Restart the app so the host loads the key, or run it
+headless:
 
 ```powershell
 cargo run -p cleandesk-app -- --host --signal-url ws://127.0.0.1:7420
 ```
 
-Desde el visor, marca **Acceso desatendido (con contraseña)** debajo del campo
-de ID, escribe la contraseña y conecta. El host la verifica por reto-respuesta
-(HMAC sobre la clave derivada) por el canal cifrado. Tras 3 intentos fallidos
-el host bloquea a ese ID 30 s, doblando el tiempo en cada fallo siguiente.
+From the viewer, tick **Unattended access (with password)** below the ID field,
+type the password and connect. The host verifies it by challenge-response (HMAC
+over the derived key) through the encrypted channel. After 3 failed attempts
+the host blocks that ID for 30 s, doubling the time on each subsequent failure.
 
-## 4. Servicio de Windows y arranque con la sesión
+## 4. Windows service and starting with the session
 
-En ⚙ **Ajustes → Sistema**:
+Under ⚙ **Settings → System**:
 
-- **Iniciar con Windows** añade CleanDesk a `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`: la GUI se abre al
-  iniciar sesión (sin permisos de administrador).
-- **Instalar como servicio** pide elevación (UAC) y registra el servicio
-  `CleanDesk` (arranque automático, reinicio ante fallos). El servicio corre en
-  la sesión 0, donde no hay escritorio, así que actúa de supervisor: lanza
-  `cleandesk.exe --host` dentro de la sesión de consola activa (pantalla de
-  inicio de sesión o escritorio del usuario) con `CreateProcessAsUser`, y lo
-  relanza cuando muere o cambia la sesión (inicio/cierre de sesión).
-- El host del servicio solo acepta **acceso desatendido**. Mientras la GUI está
-  abierta, el host del servicio se aparta (fichero `gui.lock` en la carpeta de
-  datos) y la GUI atiende las conexiones, incluidas las interactivas; al cerrar
-  la GUI el servicio retoma el registro en segundos.
-- Cambiar la contraseña desatendida en la GUI se aplica al host del servicio
-  automáticamente (vigila `appdata.json`).
-- Registros: `service.log`, `host.log` y `service-install.log` en la carpeta de
-  datos (`%APPDATA%\CleanDesk\CleanDesk\data` o `--data-dir`).
-- Manual: `cleandesk --install-service` / `cleandesk --uninstall-service` desde
-  una consola de administrador.
+- **Start with Windows** adds CleanDesk to `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`: the GUI opens at
+  logon (no administrator permissions required).
+- **Install as a service** asks for elevation (UAC) and registers the
+  `CleanDesk` service (automatic start, restart on failure). The service runs
+  in session 0, where there is no desktop, so it acts as a supervisor: it
+  launches `cleandesk.exe --host` inside the active console session (logon
+  screen or the user's desktop) with `CreateProcessAsUser`, and relaunches it
+  when it dies or the session changes (logon/logoff).
+- The service's host only accepts **unattended access**. While the GUI is
+  open, the service's host steps aside (`gui.lock` file in the data folder)
+  and the GUI handles the connections, including interactive ones; when the
+  GUI closes the service resumes registration within seconds.
+- Changing the unattended password in the GUI is applied to the service's host
+  automatically (it watches `appdata.json`).
+- Logs: `service.log`, `host.log` and `service-install.log` in the data folder
+  (`%APPDATA%\CleanDesk\CleanDesk\data` or `--data-dir`).
+- Manual: `cleandesk --install-service` / `cleandesk --uninstall-service` from
+  an administrator console.
 
-## 5. Recordar contraseña
+## 5. Remember password
 
-Al conectar con contraseña desatendida puedes marcar **Recordar**: el equipo se
-guarda en Favoritos junto con la **clave derivada** (Argon2id de la contraseña
-y el ID del host), nunca la contraseña en claro. Las tarjetas con 🔑 conectan
-directamente en modo desatendido; pulsa la llave para olvidarla.
+When connecting with an unattended password you can tick **Remember**: the
+machine is saved to Favorites together with the **derived key** (Argon2id of
+the password and the host ID), never the password in the clear. Cards with 🔑
+connect directly in unattended mode; press the key to forget it.
 
-## 6. Relay comunitario
+## 6. Community relay
 
-Cualquiera puede aportar un relay a la comunidad. Solo necesita una máquina con
-IP pública y UDP abierto:
+Anyone can contribute a relay to the community. All it takes is a machine with
+a public IP and open UDP:
 
 ```powershell
-:CLEANDESK_RELAY_COMMUNITY = "1"      # credenciales públicas + anuncio en la DHT
-cargo run -p cleandesk-relay-server      # o cleandesk-relay-server.exe del MSI
-# UDP 7421 (TURN) y 7422 (nodo DHT). CLEANDESK_RELAY_PUBLIC_IP si la
-# autodetección por la DHT no acierta.
+:CLEANDESK_RELAY_COMMUNITY = "1"      # public credentials + DHT announcement
+cargo run -p cleandesk-relay-server      # or cleandesk-relay-server.exe from the MSI
+# UDP 7421 (TURN) and 7422 (DHT node). CLEANDESK_RELAY_PUBLIC_IP if
+# autodetection via the DHT gets it wrong.
 ```
 
-Los clientes en modo comunitario consultan la DHT al conectar y añaden los
-relays encontrados como TURN de último recurso.
+Clients in community mode query the DHT when connecting and add the relays
+found as last-resort TURN.
 
-## 7. Relay TURN privado (cuando no hay ruta directa)
+## 7. Private TURN relay (when there is no direct route)
 
-Cuando ambos equipos están tras NAT simétricos, ICE no encuentra una ruta
-directa y la conexión caduca. Despliega el relay en una máquina con IP pública:
+When both machines are behind symmetric NATs, ICE finds no direct route and the
+connection times out. Deploy the relay on a machine with a public IP:
 
 ```powershell
-$env:CLEANDESK_RELAY_PUBLIC_IP = "203.0.113.7"       # IP pública del relay
+$env:CLEANDESK_RELAY_PUBLIC_IP = "203.0.113.7"       # public IP of the relay
 $env:CLEANDESK_RELAY_USERS     = "cleandesk:una-clave-larga"
 cargo run -p cleandesk-relay-server
 # UDP 7421 (CLEANDESK_RELAY_PORT); realm "cleandesk" (CLEANDESK_RELAY_REALM)
 ```
 
-Y en **cada** app (host y visor) indica el relay:
+And in **each** app (host and viewer) point to the relay:
 
 ```powershell
 $env:CLEANDESK_TURN_URLS = "turn:203.0.113.7:7421?transport=udp"
 $env:CLEANDESK_TURN_USER = "cleandesk"
 $env:CLEANDESK_TURN_PASS = "una-clave-larga"
-# Opcional: STUN propio en vez del público por defecto
+# Optional: your own STUN instead of the public default
 $env:CLEANDESK_STUN_URLS = "stun:203.0.113.7:7421"
 ```
 
-## Notas de red
+## Network notes
 
-- En la misma LAN, la conexión será **P2P directa** (candidatos ICE de host).
-- A través de Internet hará falta desplegar el **CleanDesk Server** en una IP
-  pública (puerto **7420/TCP**) y, para NAT restrictivas, el **CleanDesk
-  Relay** (puerto **7421/UDP**).
-- El transporte usa un STUN público por defecto solo para descubrir la IP
-  reflexiva; ningún dato de sesión pasa por él.
+- On the same LAN the connection will be **direct P2P** (host ICE candidates).
+- Across the Internet you will need to deploy the **CleanDesk Server** on a
+  public IP (port **7420/TCP**) and, for restrictive NATs, the **CleanDesk
+  Relay** (port **7421/UDP**).
+- The transport uses a public STUN by default only to discover the reflexive
+  IP; no session data passes through it.
 
-## Ejecutar los tests
+## Running the tests
 
 ```powershell
-cargo test --workspace                              # todo (~200 tests)
-cargo test -p cleandesk-signal-server --test e2e    # smoke end-to-end (servidor+host+viewer)
-cargo test -p cleandesk-signal-server --test protocol  # reglas de seguridad del servidor
-cargo test -p cleandesk-codec --test hostile        # frames hostiles al decodificador
+cargo test --workspace                              # everything (~200 tests)
+cargo test -p cleandesk-signal-server --test e2e    # end-to-end smoke (server+host+viewer)
+cargo test -p cleandesk-signal-server --test protocol  # server security rules
+cargo test -p cleandesk-codec --test hostile        # hostile frames against the decoder
 cargo clippy --workspace --all-targets -- -D warnings
 ```

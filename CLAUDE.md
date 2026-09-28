@@ -1,59 +1,60 @@
-# CleanDesk — Guía para agentes/IA
+# CleanDesk — Guide for agents/AI
 
-Escritorio remoto en Rust. Antes de tocar código, lee `docs/ARCHITECTURE.md` y
+Remote desktop in Rust. Before touching code, read `docs/ARCHITECTURE.md` and
 `docs/SPEC.md`.
 
-## Reglas del proyecto
+## Project rules
 
-- **Obra original.** CleanDesk es un producto **independiente y original**.
-  Implementa todo a partir del spec (`docs/SPEC.md`) y de fuentes estándar de
-  dominio público (WebRTC/ICE/STUN/TURN, DXGI, SendInput). Usa solo código propio
-  o de crates open-source con licencia compatible. No uses protocolos, nombres,
-  puertos ni identificadores ajenos, ni menciones otros productos en código,
-  comentarios o documentación.
-- **`cleandesk-proto` es el contrato.** No cambies tipos del wire sin actualizar
-  `PROTOCOL_VERSION` y los tests. Los mensajes que viajan por `postcard` deben
-  ser enums **externamente etiquetados** (postcard no soporta `#[serde(tag=…)]`)
-  y **solo se añaden variantes al final** (postcard codifica el índice de la
-  variante; `crates/proto/tests/wire.rs` fija esos índices).
-- **Modo comunitario.** `crates/discovery` es la única puerta a la DHT, mDNS,
-  Nostr y UPnP. Todo lo que llega de esas fuentes es una *pista*: se verifica la
-  firma del `Record` y que la clave derive al ID antes de usarlo. Los tests que
-  tocan Internet van con `#[ignore]` (`cargo test -p cleandesk-discovery -- --ignored`).
-- **Compilación.** `.cargo/config.toml` es local (no versionado); apunta
-  `target-dir` a un disco NTFS con espacio. No lances dos `cargo` a la vez.
-- **Seguridad no negociable.** El servidor solo registra un ID derivado de la
-  clave pública y firmado (`RegisterChallenge`/`RegisterProof`); el host limita
-  intentos desatendidos (`AuthThrottle`) y libera teclas al cerrar; el
-  decodificador acota dimensiones y descompresión. No relajes estos límites sin
-  un test que cubra el caso hostil.
-- **Dependencias:** usa `.workspace = true` para las ya declaradas en el
-  `Cargo.toml` raíz. Si necesitas una nueva, añádela al `Cargo.toml` de **tu
-  crate** con versión fija; evita editar `[workspace.dependencies]` si trabajas
-  en paralelo con otros agentes.
-- **Aislamiento por crate:** cada tarea toca su propio crate. No edites crates
-  ajenos salvo que se pida.
+- **Original work.** CleanDesk is an **independent, original** product.
+  Implement everything from the spec (`docs/SPEC.md`) and from standard,
+  public-domain sources (WebRTC/ICE/STUN/TURN, DXGI, SendInput). Use only our
+  own code or open-source crates with a compatible license. Do not use
+  third-party protocols, names, ports or identifiers, and do not mention other
+  products in code, comments or documentation.
+- **`cleandesk-proto` is the contract.** Do not change wire types without
+  updating `PROTOCOL_VERSION` and the tests. Messages that travel over
+  `postcard` must be **externally tagged** enums (postcard does not support
+  `#[serde(tag=…)]`) and **variants are only appended at the end** (postcard
+  encodes the variant index; `crates/proto/tests/wire.rs` pins those indices).
+- **Community mode.** `crates/discovery` is the only gateway to the DHT, mDNS,
+  Nostr and UPnP. Everything that arrives from those sources is a *hint*: the
+  `Record` signature is verified, and so is that the key derives to the ID,
+  before using it. Tests that touch the Internet are marked `#[ignore]`
+  (`cargo test -p cleandesk-discovery -- --ignored`).
+- **Building.** `.cargo/config.toml` is local (not versioned); point
+  `target-dir` at an NTFS disk with free space. Do not run two `cargo` at once.
+- **Non-negotiable security.** The server only registers an ID that is derived
+  from the public key and signed (`RegisterChallenge`/`RegisterProof`); the host
+  limits unattended attempts (`AuthThrottle`) and releases keys on close; the
+  decoder bounds dimensions and decompression. Do not relax these limits
+  without a test that covers the hostile case.
+- **Dependencies:** use `.workspace = true` for those already declared in the
+  root `Cargo.toml`. If you need a new one, add it to the `Cargo.toml` of
+  **your crate** with a pinned version; avoid editing
+  `[workspace.dependencies]` if you are working in parallel with other agents.
+- **Isolation per crate:** each task touches its own crate. Do not edit other
+  crates unless asked to.
 
-## Comandos
+## Commands
 
 ```bash
-cargo check -p <crate>        # rápido
-cargo test  -p <crate>        # tests del crate
+cargo check -p <crate>        # fast
+cargo test  -p <crate>        # crate tests
 cargo clippy --workspace      # lints
-cargo build --workspace       # build completo
-cargo run -p cleandesk-signal-server   # servidor de señalización
+cargo build --workspace       # full build
+cargo run -p cleandesk-signal-server   # signaling server
 ```
 
-## Estilo
+## Style
 
-- Comentarios en el mismo idioma y densidad que el crate donde escribes (el
-  código base documenta el *por qué*, no el *qué* obvio).
-- `thiserror` para errores de librería, `anyhow` en binarios.
-- Nada de `unwrap()`/`panic!` en rutas de red o de sesión; propaga errores.
-- Respeta SIEMPRE los permisos (`Permissions`) antes de inyectar input o exponer
-  datos. El host es la autoridad.
+- Comments in the same language and density as the crate you are writing in
+  (the code base documents the *why*, not the obvious *what*).
+- `thiserror` for library errors, `anyhow` in binaries.
+- No `unwrap()`/`panic!` on network or session paths; propagate errors.
+- ALWAYS respect permissions (`Permissions`) before injecting input or exposing
+  data. The host is the authority.
 
-## Atribución de commits
+## Commit attribution
 
-Los commits que genere la IA terminan con la línea de co-autoría indicada por el
-entorno de Claude Code en cada sesión.
+Commits generated by the AI end with the co-authorship line indicated by the
+Claude Code environment in each session.

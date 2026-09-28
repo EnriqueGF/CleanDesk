@@ -5,6 +5,7 @@
 use cleandesk_proto::{id::CleanDeskId, quality::QualityProfile};
 
 use crate::app::{CleanDeskApp, DeviceTab, HostStatus};
+use crate::i18n::{self, tr, trf, Lang};
 use crate::theme;
 
 /// Perfiles de calidad para el selector de ajustes (mismo orden que el visor).
@@ -15,12 +16,13 @@ pub const QUALITY_PROFILES: &[QualityProfile] = &[
     QualityProfile::Performance,
 ];
 
+/// Etiqueta (traducida) de un perfil de calidad.
 pub fn quality_label(profile: QualityProfile) -> &'static str {
     match profile {
-        QualityProfile::Auto => "Automática",
-        QualityProfile::Max => "Máxima calidad",
-        QualityProfile::Balanced => "Equilibrado",
-        QualityProfile::Performance => "Máximo rendimiento",
+        QualityProfile::Auto => tr("Automatic"),
+        QualityProfile::Max => tr("Best quality"),
+        QualityProfile::Balanced => tr("Balanced"),
+        QualityProfile::Performance => tr("Best performance"),
     }
 }
 
@@ -53,13 +55,13 @@ pub fn show(app: &mut CleanDeskApp, ctx: &egui::Context) {
                         ui.colored_label(theme::WARN, notice);
                         if let Some(id) = app.identity_alarm {
                             if ui
-                                .add(theme::danger_button("Confiar en la nueva identidad"))
-                                .on_hover_text("Solo si has comprobado la huella del equipo por otro canal")
+                                .add(theme::danger_button(tr("Trust the new identity")))
+                                .on_hover_text(tr("Only if you verified the device fingerprint through another channel"))
                                 .clicked()
                             {
                                 app.unpin_key(id);
                                 app.identity_alarm = None;
-                                app.notice = Some("Clave anterior olvidada; vuelve a conectar.".into());
+                                app.notice = Some(tr("Previous key forgotten; connect again.").into());
                             }
                         }
                         if ui.small_button("✕").clicked() {
@@ -110,7 +112,7 @@ fn header(app: &mut CleanDeskApp, ctx: &egui::Context) {
                 ui.painter().text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    "✦",
+                    "C",
                     egui::FontId::proportional(14.0),
                     theme::ACCENT,
                 );
@@ -130,26 +132,26 @@ fn header(app: &mut CleanDeskApp, ctx: &egui::Context) {
                     .inner_margin(egui::Margin::symmetric(10, 5))
                     .show(ui, |ui| {
                         let (text, color) = if app.host_session.is_some() {
-                            ("Sesión entrante activa", theme::WARN)
+                            (tr("Incoming session active"), theme::WARN)
                         } else if app.is_connecting() {
-                            ("Conectando…", theme::WARN)
+                            (tr("Connecting…"), theme::WARN)
                         } else {
-                            ("Nueva sesión", theme::ACCENT)
+                            (tr("New session"), theme::ACCENT)
                         };
                         theme::status_dot(ui, color, text);
                     });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .add(egui::Button::new("⚙ Ajustes").frame(false))
-                        .on_hover_text("Ajustes")
+                        .add(egui::Button::new(format!("⚙ {}", tr("Settings"))).frame(false))
+                        .on_hover_text(tr("Settings"))
                         .clicked()
                     {
                         app.show_settings = !app.show_settings;
                     }
                     if ui
-                        .add(egui::Button::new("🔒 Seguridad").frame(false))
-                        .on_hover_text("Identidad y huella del dispositivo")
+                        .add(egui::Button::new(format!("🔒 {}", tr("Security"))).frame(false))
+                        .on_hover_text(tr("Device identity and fingerprint"))
                         .clicked()
                     {
                         app.show_security = !app.show_security;
@@ -172,11 +174,11 @@ fn footer(app: &CleanDeskApp, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 let community = app.network_mode().is_community();
                 let (text, color) = match (app.host_status(), community) {
-                    (HostStatus::Online, true) => ("Modo comunitario: anunciado (LAN · DHT · Nostr)", theme::ACCENT),
-                    (HostStatus::Online, false) => ("Red CleanDesk lista (servidor privado)", theme::ACCENT),
-                    (HostStatus::Connecting, true) => ("Anunciando en la red comunitaria…", theme::WARN),
-                    (HostStatus::Connecting, false) => ("Conectando con el servidor…", theme::WARN),
-                    (HostStatus::Offline, _) => ("Sin conexión; reintentando", theme::DANGER),
+                    (HostStatus::Online, true) => (tr("Community mode: announced (LAN · DHT · Nostr)"), theme::ACCENT),
+                    (HostStatus::Online, false) => (tr("CleanDesk network ready (private server)"), theme::ACCENT),
+                    (HostStatus::Connecting, true) => (tr("Announcing on the community network…"), theme::WARN),
+                    (HostStatus::Connecting, false) => (tr("Connecting to the server…"), theme::WARN),
+                    (HostStatus::Offline, _) => (tr("Offline; retrying"), theme::DANGER),
                 };
                 theme::status_dot(ui, color, text);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -188,10 +190,10 @@ fn footer(app: &CleanDeskApp, ctx: &egui::Context) {
                     let mode = app.network_mode();
                     let label = match mode.server_url() {
                         Some(url) => url.to_string(),
-                        None => "sin servidor".to_string(),
+                        None => tr("no server").to_string(),
                     };
                     ui.label(egui::RichText::new(label).size(11.0).color(theme::TEXT_MUTED))
-                        .on_hover_text("Modo de red (Ajustes → Red)");
+                        .on_hover_text(tr("Network mode (Settings → Network)"));
                 });
             });
         });
@@ -209,17 +211,20 @@ fn active_session_banner(app: &CleanDeskApp, ui: &mut egui::Ui, session: &crate:
                 theme::status_dot(ui, theme::WARN, "");
                 let who = session.peer.alias.clone().unwrap_or_else(|| session.peer.hostname.clone());
                 ui.label(
-                    egui::RichText::new(format!("{who} ({}) está viendo tu pantalla", session.peer.id))
+                    egui::RichText::new(trf(
+                        "{who} ({id}) is viewing your screen",
+                        &[("who", &who), ("id", &session.peer.id.to_string())],
+                    ))
                         .strong(),
                 );
                 let perms: Vec<&str> = crate::approval::PERMISSION_ITEMS
                     .iter()
                     .filter(|(p, _)| session.granted.contains(*p))
-                    .map(|(_, l)| *l)
+                    .map(|(_, l)| tr(l))
                     .collect();
                 ui.label(egui::RichText::new(perms.join(" · ")).size(11.0).color(theme::TEXT_DIM));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(theme::danger_button("Finalizar sesión")).clicked() {
+                    if ui.add(theme::danger_button(tr("End session"))).clicked() {
                         app.terminate_host_session();
                     }
                 });
@@ -232,32 +237,32 @@ fn this_device(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     theme::card_accent().show(ui, |ui| {
         ui.horizontal(|ui| {
             theme::status_dot(ui, theme::ACCENT, "");
-            theme::section_label(ui, "Tu dirección", true);
+            theme::section_label(ui, tr("Your address"), true);
         });
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             theme::big_id(ui, app.id);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add(theme::ghost_button("⎘ Copiar")).clicked() {
+                if ui.add(theme::ghost_button(tr("Copy"))).clicked() {
                     ui.ctx().copy_text(app.id.to_string());
-                    app.notice = Some("ID copiado al portapapeles.".into());
+                    app.notice = Some(tr("ID copied to the clipboard.").into());
                 }
             });
         });
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new(
-                "Comparte este identificador para que otros se conecten a tu pantalla con tu permiso.",
-            )
+            egui::RichText::new(tr(
+                "Share this identifier so others can connect to your screen with your permission.",
+            ))
             .size(12.0)
             .color(theme::TEXT_DIM),
         );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Alias:").color(theme::TEXT_DIM));
+            ui.label(egui::RichText::new(tr("Alias:")).color(theme::TEXT_DIM));
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut app.alias_edit)
-                    .hint_text("pc-oficina")
+                    .hint_text(tr("office-pc"))
                     .desired_width(160.0),
             );
             // Persistimos al perder el foco (por Enter o al hacer clic fuera), no
@@ -272,7 +277,7 @@ fn this_device(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 /// Tarjeta "Conexión remota".
 fn connect_panel(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     theme::card().show(ui, |ui| {
-        theme::section_label(ui, "Conexión remota", false);
+        theme::section_label(ui, tr("Remote connection"), false);
         ui.add_space(10.0);
 
         let connecting = app.is_connecting();
@@ -282,7 +287,7 @@ fn connect_panel(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context)
             ui.add_enabled_ui(!connecting, |ui| {
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut app.connect_input)
-                        .hint_text("Introduce ID remoto…")
+                        .hint_text(tr("Enter remote ID…"))
                         .font(egui::TextStyle::Monospace)
                         .desired_width(ui.available_width() - 110.0),
                 );
@@ -292,23 +297,23 @@ fn connect_panel(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context)
             });
             if connecting {
                 ui.spinner();
-            } else if ui.add(theme::primary_button("Conectar →")).clicked() {
+            } else if ui.add(theme::primary_button(tr("Connect ›"))).clicked() {
                 go = true;
             }
         });
 
         ui.add_space(6.0);
-        ui.checkbox(&mut app.show_connect_password, "Acceso desatendido (con contraseña)");
+        ui.checkbox(&mut app.show_connect_password, tr("Unattended access (with password)"));
         if app.show_connect_password {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Contraseña:").color(theme::TEXT_DIM));
+                ui.label(egui::RichText::new(tr("Password:")).color(theme::TEXT_DIM));
                 ui.add(
                     egui::TextEdit::singleline(&mut app.connect_password)
                         .password(true)
                         .desired_width(160.0),
                 );
-                ui.checkbox(&mut app.remember_password, "Recordar")
-                    .on_hover_text("Guarda el equipo en favoritos con su clave derivada (nunca la contraseña en claro)");
+                ui.checkbox(&mut app.remember_password, tr("Remember"))
+                    .on_hover_text(tr("Saves the device to favorites with its derived key (never the plaintext password)"));
             });
         } else {
             app.connect_password.clear();
@@ -317,7 +322,7 @@ fn connect_panel(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context)
         if connecting {
             let target = app.connecting_target().map(|t| t.to_string()).unwrap_or_default();
             ui.label(
-                egui::RichText::new(format!("Esperando a {target}…")).size(12.0).color(theme::TEXT_DIM),
+                egui::RichText::new(trf("Waiting for {target}…", &[("target", &target)])).size(12.0).color(theme::TEXT_DIM),
             );
         }
 
@@ -325,7 +330,7 @@ fn connect_panel(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context)
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("🔒").color(theme::ACCENT).size(12.0));
             ui.label(
-                egui::RichText::new("Cifrado extremo a extremo (DTLS) activado por defecto")
+                egui::RichText::new(tr("End-to-end encryption (DTLS) enabled by default"))
                     .size(11.0)
                     .color(theme::TEXT_MUTED),
             );
@@ -335,7 +340,7 @@ fn connect_panel(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context)
             match CleanDeskId::parse(&app.connect_input) {
                 Ok(id) => app.start_connection(id, ctx),
                 Err(_) => {
-                    app.notice = Some("CleanDesk ID no válido. Revisa el número.".into());
+                    app.notice = Some(tr("Invalid CleanDesk ID. Check the number.").into());
                 }
             }
         }
@@ -345,7 +350,10 @@ fn connect_panel(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context)
 /// Pestañas Recientes / Favoritos.
 fn device_tabs(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
-        for (tab, label) in [(DeviceTab::Recent, "🕓 Recientes"), (DeviceTab::Favorites, "★ Favoritos")] {
+        for (tab, label) in [
+            (DeviceTab::Recent, format!("🕓 {}", tr("Recent"))),
+            (DeviceTab::Favorites, format!("★ {}", tr("Favorites"))),
+        ] {
             let selected = app.tab == tab;
             let color = if selected { theme::ACCENT } else { theme::TEXT_DIM };
             let resp = ui.add(
@@ -365,7 +373,7 @@ fn device_tabs(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
             ui.add_space(12.0);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add(theme::ghost_button("+ Añadir dispositivo")).clicked() {
+            if ui.add(theme::ghost_button(&format!("+ {}", tr("Add device")))).clicked() {
                 app.show_add_device = true;
             }
         });
@@ -406,8 +414,8 @@ fn collect_cards(app: &CleanDeskApp) -> Vec<DeviceCard> {
                 name: e.name.clone(),
                 subtitle: e
                     .last_connection
-                    .map(|t| format!("última conexión {}", format_when(t)))
-                    .unwrap_or_else(|| "sin conexiones".into()),
+                    .map(|t| trf("last connection {when}", &[("when", &format_when(t))]))
+                    .unwrap_or_else(|| tr("no connections").into()),
                 favorite: true,
                 has_key: e.unattended_key.is_some(),
             })
@@ -420,8 +428,8 @@ fn device_grid(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     let cards = collect_cards(app);
     if cards.is_empty() {
         let text = match app.tab {
-            DeviceTab::Recent => "Sin conexiones todavía. Conecta a un ID para verlo aquí.",
-            DeviceTab::Favorites => "Aún no has guardado ningún dispositivo.",
+            DeviceTab::Recent => tr("No connections yet. Connect to an ID to see it here."),
+            DeviceTab::Favorites => tr("You have not saved any device yet."),
         };
         ui.label(egui::RichText::new(text).color(theme::TEXT_MUTED));
         return;
@@ -435,7 +443,7 @@ fn device_grid(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     egui::Grid::new("cd-device-grid").num_columns(cols).spacing([14.0, 14.0]).show(ui, |ui| {
         for (i, card) in cards.iter().enumerate() {
             let hovered = ui.rect_contains_pointer(ui.available_rect_before_wrap());
-            theme::device_card(hovered).show(ui, |ui| {
+            theme::device_card(hovered).show(ui, |ui| ui.vertical(|ui| {
                 ui.set_width(230.0);
                 // "Miniatura": bloque oscuro con icono de monitor y estrella.
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(230.0, 70.0), egui::Sense::hover());
@@ -465,7 +473,7 @@ fn device_grid(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                     )
                     .frame(false),
                 );
-                if star.on_hover_text("Guardar / quitar de favoritos").clicked() {
+                if star.on_hover_text(tr("Add to / remove from favorites")).clicked() {
                     toggle_fav = Some((card.id, card.name.clone(), card.favorite));
                 }
                 if card.has_key {
@@ -474,21 +482,23 @@ fn device_grid(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                         egui::vec2(20.0, 20.0),
                     );
                     let k = ui.put(key_rect, egui::Button::new(egui::RichText::new("🔑").color(theme::ACCENT)).frame(false));
-                    if k.on_hover_text("Contraseña recordada (clic para olvidarla)").clicked() {
+                    if k.on_hover_text(tr("Password remembered (click to forget it)")).clicked() {
                         forget_key = Some(card.id);
                     }
                 }
 
+                // `ui.put` deja el cursor bajo el último rect colocado (la estrella,
+                // dentro de la miniatura); lo devolvemos al pie de la miniatura.
+                ui.advance_cursor_after_rect(rect);
                 ui.add_space(6.0);
                 // Fila inferior con anchos fijos: la columna de texto trunca en
                 // una línea (sin esto egui la estrechaba y el nombre se partía
                 // letra a letra hacia abajo).
                 let row = ui.available_rect_before_wrap();
                 let text_w = 230.0 - 44.0;
-                ui.horizontal(|ui| {
-                    ui.set_min_height(48.0);
+                ui.horizontal_top(|ui| {
                     ui.allocate_ui_with_layout(
-                        egui::vec2(text_w, 48.0),
+                        egui::vec2(text_w, 64.0),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             ui.set_max_width(text_w);
@@ -511,14 +521,14 @@ fn device_grid(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
                         },
                     );
                     let btn = egui::Rect::from_center_size(
-                        egui::pos2(row.right() - 18.0, row.top() + 24.0),
+                        egui::pos2(row.right() - 18.0, row.top() + 30.0),
                         egui::vec2(34.0, 30.0),
                     );
-                    if ui.put(btn, theme::primary_button("▶")).on_hover_text("Conectar").clicked() {
+                    if ui.put(btn, theme::primary_button("▶")).on_hover_text(tr("Connect")).clicked() {
                         connect_target = Some(card.id);
                     }
                 });
-            });
+            }));
             if (i + 1) % cols == 0 {
                 ui.end_row();
             }
@@ -534,7 +544,7 @@ fn device_grid(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     }
     if let Some(id) = forget_key {
         app.forget_key(id);
-        app.notice = Some("Contraseña olvidada.".into());
+        app.notice = Some(tr("Password forgotten.").into());
     }
     if let Some(id) = connect_target {
         app.start_connection(id, ctx);
@@ -548,15 +558,16 @@ fn add_device_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
     }
     let mut open = true;
     let mut done = false;
-    egui::Window::new("Añadir dispositivo")
+    egui::Window::new(tr("Add device"))
+        .id(egui::Id::new("cd-add-device-window"))
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .show(ctx, |ui| {
-            ui.label(egui::RichText::new("Guardar un host permanente en favoritos").color(theme::TEXT_DIM));
+            ui.label(egui::RichText::new(tr("Save a permanent host to favorites")).color(theme::TEXT_DIM));
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label("CleanDesk ID:");
+                ui.label(tr("CleanDesk ID:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut app.add_device_id)
                         .font(egui::TextStyle::Monospace)
@@ -564,18 +575,18 @@ fn add_device_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
                 );
             });
             ui.horizontal(|ui| {
-                ui.label("Nombre:");
-                ui.add(egui::TextEdit::singleline(&mut app.add_device_name).hint_text("Portátil oficina"));
+                ui.label(tr("Name:"));
+                ui.add(egui::TextEdit::singleline(&mut app.add_device_name).hint_text(tr("Office laptop")));
             });
             ui.add_space(8.0);
-            if ui.add(theme::primary_button("Guardar")).clicked() {
+            if ui.add(theme::primary_button(tr("Save"))).clicked() {
                 match CleanDeskId::parse(&app.add_device_id) {
                     Ok(id) => {
                         app.add_favorite(id, app.add_device_name.trim().to_string());
                         app.tab = DeviceTab::Favorites;
                         done = true;
                     }
-                    Err(_) => app.notice = Some("CleanDesk ID no válido.".into()),
+                    Err(_) => app.notice = Some(tr("Invalid CleanDesk ID.").into()),
                 }
             }
         });
@@ -592,28 +603,29 @@ fn security_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    egui::Window::new("Seguridad")
+    egui::Window::new(tr("Security"))
+        .id(egui::Id::new("cd-security-window"))
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .show(ctx, |ui| {
             ui.label(
-                egui::RichText::new("La identidad de este equipo es un par de claves Ed25519. Tu CleanDesk ID se deriva de la clave pública y el servidor exige una firma para registrarlo: nadie puede suplantar tu ID sin la clave privada.")
+                egui::RichText::new(tr("This device's identity is an Ed25519 key pair. Your CleanDesk ID is derived from the public key and the server requires a signature to register it: nobody can impersonate your ID without the private key."))
                     .color(theme::TEXT_DIM),
             );
             ui.add_space(8.0);
-            theme::section_label(ui, "Huella de identidad", true);
+            theme::section_label(ui, tr("Identity fingerprint"), true);
             ui.label(egui::RichText::new(app.state.identity.fingerprint()).monospace());
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new("Compárala por otro canal (teléfono, mensaje) con la persona que se conecta.")
+                egui::RichText::new(tr("Compare it through another channel (phone, message) with the person connecting."))
                     .size(11.0)
                     .color(theme::TEXT_MUTED),
             );
             ui.add_space(8.0);
-            theme::section_label(ui, "Cifrado", false);
-            ui.label(egui::RichText::new("Vídeo, input y control viajan por DTLS extremo a extremo; el servidor solo retransmite la señalización.").size(12.0).color(theme::TEXT_DIM));
-            ui.label(egui::RichText::new("La contraseña de acceso desatendido se guarda solo como hash Argon2id y nunca cruza la red (reto-respuesta HMAC).").size(12.0).color(theme::TEXT_DIM));
+            theme::section_label(ui, tr("Encryption"), false);
+            ui.label(egui::RichText::new(tr("Video, input and control travel over end-to-end DTLS; the server only relays signaling.")).size(12.0).color(theme::TEXT_DIM));
+            ui.label(egui::RichText::new(tr("The unattended-access password is stored only as an Argon2id hash and never crosses the network (HMAC challenge-response).")).size(12.0).color(theme::TEXT_DIM));
         });
     app.show_security = open;
 }
@@ -624,16 +636,23 @@ fn settings_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    egui::Window::new("Ajustes")
+    egui::Window::new(tr("Settings"))
+        .id(egui::Id::new("cd-settings-window"))
         .open(&mut open)
         .collapsible(false)
         .default_width(380.0)
         .show(ctx, |ui| {
+            language_settings(app, ui);
+            ui.add_space(10.0);
+
+            tray_settings(app, ui);
+            ui.add_space(10.0);
+
             network_settings(app, ui);
             ui.add_space(10.0);
 
             // --- Calidad por defecto ---
-            theme::section_label(ui, "Calidad por defecto", true);
+            theme::section_label(ui, tr("Default quality"), true);
             ui.horizontal(|ui| {
                 let mut quality = app.state.settings.read().quality;
                 let before = quality;
@@ -659,22 +678,68 @@ fn settings_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
     app.show_settings = open;
 }
 
+/// Sub-sección "Idioma": sistema, inglés o español. El cambio se aplica en el
+/// acto y se persiste (`None` = seguir al sistema).
+/// Sub-sección "Bandeja": cerrar la ventana la oculta en la bandeja.
+fn tray_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+    theme::section_label(ui, tr("Tray"), true);
+    let mut to_tray = app.state.settings.read().minimize_to_tray;
+    if ui
+        .checkbox(&mut to_tray, tr("Closing the window minimizes to the tray (the host keeps running)"))
+        .changed()
+    {
+        app.state.settings.write().minimize_to_tray = to_tray;
+        app.save_settings();
+    }
+}
+
+fn language_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+    theme::section_label(ui, tr("Language"), true);
+
+    // `None` = sistema; `Some(tag)` = idioma fijado por el usuario.
+    let current: Option<Lang> = app
+        .state
+        .settings
+        .read()
+        .language
+        .as_deref()
+        .map(Lang::from_tag);
+    let mut choice = current;
+    let label = |c: Option<Lang>| match c {
+        None => tr("System default"),
+        Some(Lang::En) => "English",
+        Some(Lang::Es) => "Español",
+    };
+    egui::ComboBox::from_id_salt("settings-language")
+        .selected_text(label(choice))
+        .show_ui(ui, |ui| {
+            for option in [None, Some(Lang::En), Some(Lang::Es)] {
+                ui.selectable_value(&mut choice, option, label(option));
+            }
+        });
+    if choice != current {
+        app.state.settings.write().language = choice.map(|l| l.tag().to_string());
+        app.save_settings();
+        i18n::set_lang(choice.unwrap_or_else(Lang::system));
+    }
+}
+
 /// Sub-sección de acceso desatendido.
 fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
-    theme::section_label(ui, "Acceso desatendido", true);
+    theme::section_label(ui, tr("Unattended access"), true);
 
     let mut enabled = app.state.settings.read().unattended_enabled;
     let toggled = ui
-        .checkbox(&mut enabled, "Permitir conexiones desatendidas")
+        .checkbox(&mut enabled, tr("Allow unattended connections"))
         .changed();
 
     // Campo de contraseña (solo relevante al activar).
     ui.horizontal(|ui| {
-        ui.label("Contraseña:");
+        ui.label(tr("Password:"));
         ui.add(egui::TextEdit::singleline(&mut app.unattended_pw).password(true));
     });
     ui.label(
-        egui::RichText::new("Quien conecte con esta contraseña entra sin que tengas que aceptar. Reinicia la app tras cambiarla para que el host la use.")
+        egui::RichText::new(tr("Anyone connecting with this password gets in without your approval. Restart the app after changing it so the host picks it up."))
             .size(11.0)
             .color(theme::TEXT_MUTED),
     );
@@ -684,7 +749,7 @@ fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
             // Activamos: requiere contraseña.
             let pw = app.unattended_pw.trim().to_string();
             if pw.len() < 6 {
-                app.notice = Some("La contraseña de acceso desatendido debe tener al menos 6 caracteres.".into());
+                app.notice = Some(tr("The unattended-access password must be at least 6 characters long.").into());
                 // Revertimos el check hasta que haya contraseña.
                 app.state.settings.write().unattended_enabled = false;
             } else {
@@ -694,11 +759,11 @@ fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
                     Ok(()) => {
                         app.unattended_pw.clear();
                         app.save_settings();
-                        app.notice = Some("Acceso desatendido activado.".into());
+                        app.notice = Some(tr("Unattended access enabled.").into());
                     }
                     Err(e) => {
                         app.state.settings.write().unattended_enabled = false;
-                        app.notice = Some(format!("No se pudo activar: {e}"));
+                        app.notice = Some(trf("Could not enable it: {err}", &[("err", &e.to_string())]));
                     }
                 }
             }
@@ -706,7 +771,7 @@ fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
             // Desactivamos y olvidamos los secretos.
             app.state.settings.write().disable_unattended();
             app.save_settings();
-            app.notice = Some("Acceso desatendido desactivado.".into());
+            app.notice = Some(tr("Unattended access disabled.").into());
         }
     }
 }
@@ -729,18 +794,18 @@ fn persist_alias(app: &mut CleanDeskApp) {
     app.save_settings();
 }
 
-/// "hace 5 min", "hace 3 h", "hace 2 d" a partir de un instante Unix.
+/// "5 min ago", "3 h ago", "2 d ago" (traducido) a partir de un instante Unix.
 pub fn format_when(unix: u64) -> String {
     let now = crate::app::unix_now();
     let secs = now.saturating_sub(unix);
     if secs < 60 {
-        "ahora".into()
+        tr("just now").into()
     } else if secs < 3600 {
-        format!("hace {} min", secs / 60)
+        trf("{n} min ago", &[("n", &(secs / 60).to_string())])
     } else if secs < 86_400 {
-        format!("hace {} h", secs / 3600)
+        trf("{n} h ago", &[("n", &(secs / 3600).to_string())])
     } else {
-        format!("hace {} d", secs / 86_400)
+        trf("{n} d ago", &[("n", &(secs / 86_400).to_string())])
     }
 }
 
@@ -750,7 +815,7 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     use cleandesk_platform::service::ServiceStatus;
     use cleandesk_platform::{service, startup};
 
-    theme::section_label(ui, "Sistema", true);
+    theme::section_label(ui, tr("System"), true);
 
     // Refrescamos el estado real del SO cada pocos segundos (consultar el SCM
     // cuesta unos milisegundos; no lo hacemos en cada fotograma).
@@ -768,20 +833,20 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 
     // --- Iniciar con Windows ---
     let mut run_at_login = app.run_at_login;
-    if ui.checkbox(&mut run_at_login, "Iniciar con Windows (al iniciar sesión)").changed() {
+    if ui.checkbox(&mut run_at_login, tr("Start with Windows (at sign-in)")).changed() {
         match exe.as_deref().map(|e| startup::set_run_at_login(run_at_login, e, &[])) {
             Some(Ok(())) => {
                 app.run_at_login = run_at_login;
                 app.state.settings.write().start_with_windows = run_at_login;
                 app.save_settings();
                 app.notice = Some(if run_at_login {
-                    "CleanDesk se abrirá al iniciar sesión.".into()
+                    tr("CleanDesk will open when you sign in.").into()
                 } else {
-                    "CleanDesk ya no se abrirá al iniciar sesión.".into()
+                    tr("CleanDesk will no longer open when you sign in.").into()
                 });
             }
-            Some(Err(e)) => app.notice = Some(format!("No se pudo cambiar el arranque: {e}")),
-            None => app.notice = Some("No se pudo localizar el ejecutable.".into()),
+            Some(Err(e)) => app.notice = Some(trf("Could not change startup: {err}", &[("err", &e.to_string())])),
+            None => app.notice = Some(tr("Could not locate the executable.").into()),
         }
         app.platform_checked_at = None;
     }
@@ -790,21 +855,21 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     let installed = app.service_status != ServiceStatus::NotInstalled;
     let mut want_service = installed;
     let changed = ui
-        .checkbox(&mut want_service, "Instalar como servicio (acceso desatendido antes de iniciar sesión)")
-        .on_hover_text("Pide permisos de administrador. El servicio mantiene el host desatendido activo aunque nadie haya iniciado sesión; cuando abres CleanDesk, la GUI toma el relevo.")
+        .checkbox(&mut want_service, tr("Install as a service (unattended access before sign-in)"))
+        .on_hover_text(tr("Requires administrator rights. The service keeps the unattended host running even when nobody is signed in; when you open CleanDesk, the GUI takes over."))
         .changed();
     let (status_text, status_color) = match app.service_status {
-        ServiceStatus::Running => ("Servicio instalado y en ejecución", theme::ACCENT),
-        ServiceStatus::Stopped => ("Servicio instalado (parado)", theme::WARN),
-        ServiceStatus::Other => ("Servicio cambiando de estado…", theme::WARN),
-        ServiceStatus::NotInstalled => ("Servicio no instalado", theme::TEXT_MUTED),
+        ServiceStatus::Running => (tr("Service installed and running"), theme::ACCENT),
+        ServiceStatus::Stopped => (tr("Service installed (stopped)"), theme::WARN),
+        ServiceStatus::Other => (tr("Service changing state…"), theme::WARN),
+        ServiceStatus::NotInstalled => (tr("Service not installed"), theme::TEXT_MUTED),
     };
     ui.horizontal(|ui| {
         theme::status_dot(ui, status_color, status_text);
     });
     if installed && !app.state.settings.read().unattended_enabled {
         ui.label(
-            egui::RichText::new("El servicio solo atiende acceso desatendido: activa una contraseña arriba para que sea útil.")
+            egui::RichText::new(tr("The service only handles unattended access: set a password above to make it useful."))
                 .size(11.0)
                 .color(theme::WARN),
         );
@@ -813,22 +878,22 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
         let result = match (want_service, exe.as_deref()) {
             (true, Some(e)) => service::request_install(e, &app.state.data_dir()),
             (false, Some(e)) => service::request_uninstall(e),
-            (_, None) => Err(cleandesk_platform::PlatformError::Other("no se pudo localizar el ejecutable".into())),
+            (_, None) => Err(cleandesk_platform::PlatformError::Other(tr("Could not locate the executable.").into())),
         };
         match result {
             Ok(()) => {
                 app.state.settings.write().install_service = want_service;
                 app.save_settings();
                 app.notice = Some(if want_service {
-                    "Servicio CleanDesk instalado y arrancado.".into()
+                    tr("CleanDesk service installed and started.").into()
                 } else {
-                    "Servicio CleanDesk eliminado.".into()
+                    tr("CleanDesk service removed.").into()
                 });
             }
             Err(cleandesk_platform::PlatformError::ElevationDeclined) => {
-                app.notice = Some("Operación cancelada: se necesitan permisos de administrador.".into());
+                app.notice = Some(tr("Operation cancelled: administrator rights are required.").into());
             }
-            Err(e) => app.notice = Some(format!("No se pudo cambiar el servicio: {e}")),
+            Err(e) => app.notice = Some(trf("Could not change the service: {err}", &[("err", &e.to_string())])),
         }
         app.platform_checked_at = None;
     }
@@ -839,10 +904,10 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 fn network_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     use cleandesk_core::config::NetworkMode;
 
-    theme::section_label(ui, "Red", true);
+    theme::section_label(ui, tr("Network"), true);
     if let Some(url) = &app.signal_override {
         ui.label(
-            egui::RichText::new(format!("Forzado por --signal-url: {url}"))
+            egui::RichText::new(trf("Forced by --signal-url: {url}", &[("url", url)]))
                 .size(11.0)
                 .color(theme::WARN),
         );
@@ -855,15 +920,15 @@ fn network_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     let mut changed = false;
 
     changed |= ui
-        .radio_value(&mut community, true, "Comunitario (sin servidor): LAN, DHT de BitTorrent y relés Nostr")
+        .radio_value(&mut community, true, tr("Community (no server): LAN, BitTorrent DHT and Nostr relays"))
         .changed();
     changed |= ui
-        .radio_value(&mut community, false, "Servidor privado CleanDesk")
+        .radio_value(&mut community, false, tr("Private CleanDesk server"))
         .changed();
     if !community {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("URL:").color(theme::TEXT_DIM));
-            let resp = ui.add(egui::TextEdit::singleline(&mut url).hint_text("ws://servidor:7420").desired_width(240.0));
+            ui.label(egui::RichText::new(tr("URL:")).color(theme::TEXT_DIM));
+            let resp = ui.add(egui::TextEdit::singleline(&mut url).hint_text(tr("ws://server:7420")).desired_width(240.0));
             if resp.lost_focus() {
                 changed = true;
             }
@@ -871,9 +936,9 @@ fn network_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     }
     ui.label(
         egui::RichText::new(if community {
-            "Tu equipo se anuncia firmado en la DHT y en tu red local; nadie tiene que mantener servidores. La primera conexión fija la clave del equipo remoto (huella en Seguridad)."
+            tr("Your device announces itself, signed, on the DHT and your local network; nobody has to run servers. The first connection pins the remote device's key (fingerprint under Security).")
         } else {
-            "Toda la señalización pasa por tu servidor; útil en empresas y redes cerradas."
+            tr("All signaling goes through your server; useful for companies and closed networks.")
         })
         .size(11.0)
         .color(theme::TEXT_MUTED),
@@ -885,7 +950,7 @@ fn network_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
         } else {
             let url = url.trim().to_string();
             if !(url.starts_with("ws://") || url.starts_with("wss://")) {
-                app.notice = Some("La URL del servidor debe empezar por ws:// o wss://".into());
+                app.notice = Some(tr("The server URL must start with ws:// or wss://").into());
                 return;
             }
             NetworkMode::Server { url }
@@ -894,7 +959,7 @@ fn network_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
             app.state.settings.write().network = new_mode;
             app.save_settings();
             app.restart_host();
-            app.notice = Some("Modo de red actualizado; el host se reinicia.".into());
+            app.notice = Some(tr("Network mode updated; the host is restarting.").into());
         }
     }
 }
@@ -905,11 +970,16 @@ mod tests {
 
     #[test]
     fn format_when_buckets() {
+        // El idioma es global al proceso; comprobamos en el estado por defecto
+        // (inglés) sin tocarlo para no interferir con otros tests.
+        if i18n::lang() != Lang::En {
+            return;
+        }
         let now = crate::app::unix_now();
-        assert_eq!(format_when(now), "ahora");
-        assert_eq!(format_when(now - 120), "hace 2 min");
-        assert_eq!(format_when(now - 7200), "hace 2 h");
-        assert_eq!(format_when(now - 3 * 86_400), "hace 3 d");
-        assert_eq!(format_when(now + 1000), "ahora", "future timestamps never underflow");
+        assert_eq!(format_when(now), "just now");
+        assert_eq!(format_when(now - 120), "2 min ago");
+        assert_eq!(format_when(now - 7200), "2 h ago");
+        assert_eq!(format_when(now - 3 * 86_400), "3 d ago");
+        assert_eq!(format_when(now + 1000), "just now", "future timestamps never underflow");
     }
 }

@@ -95,14 +95,14 @@ impl Resolver {
         }
 
         Err(DiscoveryError::Other(
-            "el equipo no está anunciado (¿está encendido y con CleanDesk abierto?)".into(),
+            "the device is not announced (is it on, with CleanDesk running?)".into(),
         ))
     }
 
     fn check_pin(&self, found: &str, pinned: Option<&str>) -> Result<()> {
         match pinned {
             Some(p) if p != found => Err(DiscoveryError::AuthFailed(
-                "la identidad del equipo remoto ha cambiado respecto a la guardada; comprueba su huella y elimínalo de favoritos si es legítimo".into(),
+                "the remote device identity changed from the pinned one; verify its fingerprint before trusting the new key".into(),
             )),
             _ => Ok(()),
         }

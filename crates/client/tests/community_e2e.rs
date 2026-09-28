@@ -95,5 +95,5 @@ async fn pinned_key_mismatch_is_refused() {
         .await
         .expect("timed out")
         .expect_err("a changed identity must be refused");
-    assert!(err.to_string().contains("identidad"), "unexpected error: {err}");
+    assert!(err.to_string().contains("identity"), "unexpected error: {err}");
 }

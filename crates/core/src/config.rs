@@ -11,7 +11,7 @@ use crate::Result;
 /// `#[serde(default)]` at struct level: any field added in a later build is
 /// simply absent from an older `appdata.json` and must take its default
 /// rather than fail the whole load.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// Default outbound quality profile (spec §8).
@@ -45,6 +45,14 @@ pub struct Settings {
     /// different key under the same ID is refused (see `cleandesk-discovery`).
     #[serde(default)]
     pub pinned_keys: std::collections::BTreeMap<u64, String>,
+    /// UI language as a BCP-47-ish tag (`"en"`, `"es"`). `None` follows the
+    /// system locale.
+    #[serde(default)]
+    pub language: Option<String>,
+    /// Closing the main window hides it to the system tray instead of quitting
+    /// (the host keeps serving). Default on.
+    #[serde(default = "default_true")]
+    pub minimize_to_tray: bool,
 }
 
 /// Rendezvous mode.
@@ -56,6 +64,30 @@ pub enum NetworkMode {
     Community,
     /// A private CleanDesk Server (companies, closed networks).
     Server { url: String },
+}
+
+fn default_true() -> bool {
+    true
+}
+
+// Manual `Default` so that in-memory defaults and serde's field defaults agree
+// (`minimize_to_tray` is on unless the user turned it off).
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            quality: QualityProfile::default(),
+            unattended_enabled: false,
+            unattended_password_hash: None,
+            unattended_key_bytes: None,
+            start_with_windows: false,
+            install_service: false,
+            alias: None,
+            network: NetworkMode::default(),
+            pinned_keys: Default::default(),
+            language: None,
+            minimize_to_tray: true,
+        }
+    }
 }
 
 impl NetworkMode {
