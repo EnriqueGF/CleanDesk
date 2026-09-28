@@ -989,6 +989,7 @@ name = "cleandesk-client"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "arboard",
  "async-trait",
  "bytes",
  "cleandesk-codec",
@@ -998,6 +999,7 @@ dependencies = [
  "cleandesk-host",
  "cleandesk-proto",
  "cleandesk-transport",
+ "directories",
  "futures",
  "thiserror 2.0.21",
  "tokio",
@@ -1063,6 +1065,7 @@ dependencies = [
  "ed25519-dalek 2.2.0",
  "futures-util",
  "igd-next",
+ "mac_address",
  "mainline",
  "mdns-sd",
  "nostr",
@@ -1086,12 +1089,15 @@ dependencies = [
  "cleandesk-codec",
  "cleandesk-core",
  "cleandesk-crypto",
+ "cleandesk-discovery",
  "cleandesk-host",
  "cleandesk-platform",
  "cleandesk-proto",
  "eframe",
  "egui",
+ "image",
  "raw-window-handle",
+ "rfd",
  "sys-locale",
  "thiserror 2.0.21",
  "tokio",
@@ -1105,6 +1111,7 @@ name = "cleandesk-host"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "arboard",
  "async-trait",
  "bytes",
  "cleandesk-capture",
@@ -1115,6 +1122,7 @@ dependencies = [
  "cleandesk-input",
  "cleandesk-proto",
  "cleandesk-transport",
+ "directories",
  "futures",
  "parking_lot",
  "thiserror 2.0.21",
@@ -1623,6 +1631,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e0e367e4e7da84520dedcac1901e4da967309406d1e51017ae1abfb97adbd38"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
+ "libc",
  "objc2 0.6.4",
 ]
 
@@ -2981,6 +2991,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
 
 [[package]]
+name = "mac_address"
+version = "1.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0aeb26bf5e836cc1c341c8106051b573f1766dfa05aa87f0b98be5e51b02303"
+dependencies = [
+ "nix 0.29.0",
+ "winapi",
+]
+
+[[package]]
 name = "mainline"
 version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3259,6 +3279,19 @@ dependencies = [
 
 [[package]]
 name = "nix"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+ "memoffset 0.9.1",
+]
+
+[[package]]
+name = "nix"
 version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
@@ -3434,6 +3467,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
  "objc2 0.6.4",
  "objc2-core-foundation",
  "objc2-core-graphics",
@@ -4250,6 +4284,27 @@ name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
+
+[[package]]
+name = "rfd"
+version = "0.15.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef2bee61e6cffa4635c72d7d81a84294e28f0930db0ddcb0f66d10244674ebed"
+dependencies = [
+ "block2 0.6.2",
+ "dispatch2",
+ "js-sys",
+ "log",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "raw-window-handle",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "ring"

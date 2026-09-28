@@ -42,6 +42,10 @@ pub struct Record {
     /// Optional human alias, truncated to keep the record small.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
+    /// MAC address of the host's primary adapter (`AA:BB:CC:DD:EE:FF`), so a
+    /// viewer that finds the record can Wake-on-LAN the machine later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mac: Option<String>,
     /// Ed25519 signature (base64) over [`Record::signing_bytes`].
     #[serde(default)]
     pub sig: String,
@@ -63,6 +67,7 @@ impl Record {
             ep: endpoints,
             ts,
             alias: alias.map(|a| a.chars().take(32).collect()),
+            mac: None,
             sig: String::new(),
         };
         // Keep well under the DHT limit even with many endpoints.
@@ -71,6 +76,13 @@ impl Record {
         }
         r.sig = identity.sign_b64(&r.signing_bytes());
         r
+    }
+
+    /// Set (or clear) the MAC address and re-sign. `identity` must be the
+    /// same key the record was built for, or verification fails afterwards.
+    pub fn set_mac(&mut self, identity: &Identity, mac: Option<String>) {
+        self.mac = mac.map(|m| m.chars().take(17).collect());
+        self.sig = identity.sign_b64(&self.signing_bytes());
     }
 
     /// Canonical bytes covered by the signature (everything but `sig`).
@@ -88,6 +100,12 @@ impl Record {
         }
         h.update(self.ts.to_le_bytes());
         h.update(self.alias.as_deref().unwrap_or("").as_bytes());
+        // Records from before the MAC field hashed nothing past the alias; an
+        // absent MAC keeps that exact input so old signatures stay valid.
+        if let Some(mac) = &self.mac {
+            h.update([0]);
+            h.update(mac.as_bytes());
+        }
         h.finalize().to_vec()
     }
 
@@ -238,12 +256,43 @@ mod tests {
     }
 
     #[test]
+    fn mac_roundtrips_and_is_signed() {
+        let id = ident();
+        let mut r = Record::new(&id, None, vec!["10.0.0.1:1".parse().unwrap()], Some("pc".into()), 1000);
+        let without = String::from_utf8(r.to_json().unwrap()).unwrap();
+        assert!(!without.contains("\"mac\""), "absent mac is not serialised");
+        r.set_mac(&id, Some("AA:BB:CC:DD:EE:FF".into()));
+        let bytes = r.to_json().unwrap();
+        let back = Record::from_json(&bytes).unwrap();
+        assert_eq!(back, r);
+        assert_eq!(back.mac.as_deref(), Some("AA:BB:CC:DD:EE:FF"));
+        back.verify(1000).unwrap();
+        // Tampering with the MAC (or removing it) must break the signature.
+        let mut t = r.clone();
+        t.mac = Some("AA:BB:CC:DD:EE:00".into());
+        assert!(t.verify(1000).is_err());
+        let mut t = r.clone();
+        t.mac = None;
+        assert!(t.verify(1000).is_err());
+        // Adding a MAC to a record signed without one is tampering too.
+        let mut t = Record::new(&id, None, vec![], None, 1000);
+        t.mac = Some("AA:BB:CC:DD:EE:FF".into());
+        assert!(t.verify(1000).is_err());
+        // Clearing it through the API re-signs.
+        r.set_mac(&id, None);
+        r.verify(1000).unwrap();
+        assert!(r.mac.is_none());
+    }
+
+    #[test]
     fn record_never_exceeds_dht_limit() {
         let id = ident();
         let eps: Vec<SocketAddr> = (0..40).map(|i| format!("203.0.113.{i}:65535").parse().unwrap()).collect();
-        let r = Record::new(&id, Some("f".repeat(64)), eps, Some("x".repeat(500)), u64::MAX);
+        let mut r = Record::new(&id, Some("f".repeat(64)), eps, Some("x".repeat(500)), u64::MAX);
+        r.set_mac(&id, Some("F".repeat(100)));
         assert!(r.ep.len() <= 8);
         assert!(r.alias.as_ref().unwrap().len() <= 32);
+        assert!(r.mac.as_ref().unwrap().len() <= 17);
         assert!(r.to_json().unwrap().len() <= MAX_RECORD_BYTES);
         r.verify(u64::MAX).unwrap();
     }

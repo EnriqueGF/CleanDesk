@@ -103,6 +103,54 @@ pub fn new_injector() -> Box<dyn InputInjector> {
     Box::new(WinInputInjector)
 }
 
+// ---------------------------------------------------------------------------
+// Remote actions (spec section 6: lock workstation, block local input, SAS)
+// ---------------------------------------------------------------------------
+
+/// Lock the interactive session (the equivalent of Win+L). The screen stays
+/// captured; the viewer sees the lock screen.
+#[cfg(windows)]
+pub fn lock_workstation() -> anyhow::Result<()> {
+    win::lock_workstation()
+}
+
+/// Block (`true`) or unblock (`false`) the *local* keyboard and mouse so only
+/// injected input reaches the desktop. Requires the process to run at an
+/// integrity level at least as high as the foreground application; the OS
+/// silently releases the block if the process exits, but callers must still
+/// unblock explicitly when the session ends.
+#[cfg(windows)]
+pub fn block_local_input(blocked: bool) -> anyhow::Result<()> {
+    win::block_local_input(blocked)
+}
+
+/// Best-effort substitute for the secure attention sequence (Ctrl+Alt+Del).
+///
+/// A real SAS can only be raised from a Windows service holding
+/// `SeTcbPrivilege` (`SendSAS`); an interactive process cannot. This sends
+/// Ctrl+Shift+Esc through `SendInput` instead, which opens Task Manager — the
+/// most common reason a support technician reaches for Ctrl+Alt+Del. When
+/// CleanDesk runs as a service the real sequence can replace this.
+#[cfg(windows)]
+pub fn send_secure_attention() -> anyhow::Result<()> {
+    win::send_secure_attention()
+}
+
+#[cfg(not(windows))]
+pub fn lock_workstation() -> anyhow::Result<()> {
+    anyhow::bail!("cleandesk-input: LockWorkStation is only available on Windows")
+}
+
+#[cfg(not(windows))]
+pub fn block_local_input(_blocked: bool) -> anyhow::Result<()> {
+    anyhow::bail!("cleandesk-input: BlockInput is only available on Windows")
+}
+
+#[cfg(not(windows))]
+pub fn send_secure_attention() -> anyhow::Result<()> {
+    anyhow::bail!("cleandesk-input: secure attention is only available on Windows")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

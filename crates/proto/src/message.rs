@@ -216,6 +216,28 @@ pub enum SessionMessage {
     Ping { nonce: u64 },
     /// Viewer → host: echo of a [`SessionMessage::Ping`].
     Pong { nonce: u64 },
+    /// Viewer → host: a one-shot privileged action (spec section 6). The host
+    /// checks the matching permission before acting. Added in 2.1.
+    RemoteAction { action: RemoteAction },
+}
+
+/// Privileged one-shot actions a viewer may request from the host.
+///
+/// Externally tagged (postcard). **Append-only**, like [`SessionMessage`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RemoteAction {
+    /// Reboot the host machine (`Permissions::RESTART_MACHINE`).
+    RestartMachine,
+    /// Lock the host's interactive session, like Win+L
+    /// (`Permissions::CONTROL_KEYBOARD`).
+    LockWorkstation,
+    /// Block or unblock the host's *local* keyboard and mouse so only the
+    /// viewer drives it (`Permissions::LOCK_LOCAL_INPUT`). The host always
+    /// unblocks when the session ends.
+    LockLocalInput { locked: bool },
+    /// Secure-attention substitute (Ctrl+Alt+Del). Without a Windows service
+    /// the host can only emulate it best-effort (`Permissions::CONTROL_KEYBOARD`).
+    SecureAttention,
 }
 
 /// Clipboard payload. Text/URL for the MVP; binary kinds reserved.
@@ -238,7 +260,14 @@ pub struct MonitorInfo {
     pub origin_y: i32,
 }
 
-/// File-transfer control protocol (data bytes travel on a binary sub-channel).
+/// File-transfer control protocol (data bytes travel on the `files` channel
+/// as [`crate::files::FileChunk`]s; the state machine lives in [`crate::files`]).
+///
+/// Roles: the *sender* offers, streams chunks once accepted, reports
+/// `Progress` and finishes with `Complete`. The *receiver* accepts, acks
+/// progress with `Progress` (which doubles as flow control: the sender keeps
+/// at most a window of bytes beyond the last ack in flight) and, after
+/// verifying the size, answers `Complete` back. Either side may `Cancel`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileTransferMsg {
     /// Announce an outgoing file/folder tree.
@@ -247,9 +276,9 @@ pub enum FileTransferMsg {
     Accept { transfer_id: u64 },
     /// Reject / cancel a transfer.
     Cancel { transfer_id: u64 },
-    /// Progress report (bytes transferred).
+    /// Progress report (bytes transferred), sent by both sides.
     Progress { transfer_id: u64, transferred: u64 },
-    /// Transfer finished successfully.
+    /// Sender: all bytes sent. Receiver: all bytes verified and stored.
     Complete { transfer_id: u64 },
 }
 

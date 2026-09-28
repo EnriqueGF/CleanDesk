@@ -16,7 +16,7 @@
 use cleandesk_client::{ClientEvent, ClientSession};
 use cleandesk_codec::DecodedImage;
 use cleandesk_proto::{
-    message::{InputEvent, MonitorInfo, MouseButton},
+    message::{InputEvent, MonitorInfo, MouseButton, RemoteAction},
     permissions::Permissions,
     quality::QualityProfile,
     session::{DeviceInfo, SessionId, SessionStats},
@@ -24,7 +24,7 @@ use cleandesk_proto::{
 use tracing::debug;
 
 use crate::i18n::{tr, trf};
-use crate::keymap::{key_to_vk, VK_CONTROL, VK_MENU, VK_SHIFT};
+use crate::keymap::{key_to_vk, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_MENU, VK_SHIFT};
 use crate::mainwindow::{quality_label, QUALITY_PROFILES};
 use crate::theme;
 
@@ -58,6 +58,8 @@ pub struct ViewerState {
     frame_size: [usize; 2],
     /// Frames recibidos (para el contador de la barra).
     frames_received: u64,
+    /// Último fotograma decodificado (para la miniatura de la sesión).
+    last_frame: Option<DecodedImage>,
 
     /// Estadísticas de sesión más recientes (para la barra).
     stats: Option<SessionStats>,
@@ -85,6 +87,39 @@ pub struct ViewerState {
     modifiers: ModifierState,
     /// Últimas coordenadas normalizadas enviadas, para no repetir moves idénticos.
     last_move: Option<(f32, f32)>,
+
+    /// Sincronización automática del portapapeles de texto (spec §16).
+    clipboard_sync: bool,
+    /// Hemos pedido bloquear el teclado/ratón local del host.
+    local_input_locked: bool,
+    /// Transferencias de archivos en curso o terminadas (spec §17).
+    transfers: Vec<Transfer>,
+    /// Ofertas del host pendientes de aceptar.
+    offers: Vec<FileOffer>,
+    /// Si el panel de archivos está visible.
+    show_files: bool,
+}
+
+/// Una transferencia de archivo vista desde el visor.
+struct Transfer {
+    id: u64,
+    name: String,
+    transferred: u64,
+    total: u64,
+    state: TransferState,
+}
+
+enum TransferState {
+    Running,
+    Done(std::path::PathBuf),
+    Failed(String),
+}
+
+/// Un archivo que el host nos ofrece.
+struct FileOffer {
+    id: u64,
+    name: String,
+    size: u64,
 }
 
 impl ViewerState {
@@ -98,6 +133,7 @@ impl ViewerState {
             texture: None,
             frame_size: [0, 0],
             frames_received: 0,
+            last_frame: None,
             stats: None,
             quality: QualityProfile::Auto,
             monitors: Vec::new(),
@@ -110,6 +146,11 @@ impl ViewerState {
             fullscreen: false,
             modifiers: ModifierState::default(),
             last_move: None,
+            clipboard_sync: false,
+            local_input_locked: false,
+            transfers: Vec::new(),
+            offers: Vec::new(),
+            show_files: false,
         }
     }
 
@@ -119,6 +160,11 @@ impl ViewerState {
 
     pub fn is_fullscreen(&self) -> bool {
         self.fullscreen
+    }
+
+    /// El último fotograma completo recibido, si lo hubo.
+    pub fn last_frame(&self) -> Option<&DecodedImage> {
+        self.last_frame.as_ref()
     }
 
     /// Solicita el cierre ordenado de la sesión (best-effort, no bloquea).
@@ -238,6 +284,30 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                 if ui.toggle_value(&mut viewer.show_chat, chat_label).changed() && viewer.show_chat {
                     viewer.unread_chat = 0;
                 }
+                let files_label = if viewer.offers.is_empty() {
+                    tr("Files").to_string()
+                } else {
+                    trf("Files ({n})", &[("n", &viewer.offers.len().to_string())])
+                };
+                ui.add_enabled_ui(viewer.granted.contains(Permissions::FILE_TRANSFER), |ui| {
+                    ui.toggle_value(&mut viewer.show_files, files_label)
+                        .on_disabled_hover_text(tr("File transfer was not granted by the host."));
+                });
+                ui.add_enabled_ui(viewer.granted.contains(Permissions::CLIPBOARD), |ui| {
+                    if ui
+                        .toggle_value(&mut viewer.clipboard_sync, tr("Clipboard"))
+                        .on_hover_text(tr("Keep the text clipboard in sync with the remote device"))
+                        .on_disabled_hover_text(tr("Clipboard access was not granted by the host."))
+                        .changed()
+                    {
+                        if viewer.clipboard_sync {
+                            viewer.session.enable_clipboard_sync();
+                        } else {
+                            viewer.session.disable_clipboard_sync();
+                        }
+                    }
+                });
+                actions_menu(viewer, ui);
 
                 // Botón de desconexión, alineado a la derecha.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -268,9 +338,18 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
         return ViewerOutcome::Disconnected(Some(tr("Session ended.").into()));
     }
 
-    // 4) Panel de chat opcional (spec §17).
+    // 4) Paneles opcionales: chat (spec §17) y archivos.
     if viewer.show_chat {
         show_chat_panel(viewer, ctx);
+    }
+    if viewer.show_files {
+        show_files_panel(viewer, ctx);
+    }
+    // Soltar archivos sobre el visor los envía al host.
+    let dropped: Vec<std::path::PathBuf> =
+        ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+    for path in dropped {
+        offer_file(viewer, path);
     }
 
     // 5) Área central: la imagen remota + captura de input.
@@ -281,6 +360,187 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
         });
 
     ViewerOutcome::Continue
+}
+
+/// Menú "Actions": acciones privilegiadas en el host (spec §19). Cada entrada
+/// solo se habilita si el host concedió el permiso correspondiente.
+fn actions_menu(viewer: &mut ViewerState, ui: &mut egui::Ui) {
+    ui.menu_button(tr("Actions"), |ui| {
+        ui.set_min_width(240.0);
+        let kb = viewer.granted.contains(Permissions::CONTROL_KEYBOARD);
+        if ui
+            .add_enabled(kb, egui::Button::new(tr("Send Ctrl+Alt+Del")))
+            .on_hover_text(tr("Secure-attention sequence (best effort without the service)"))
+            .clicked()
+        {
+            viewer.session.remote_action(RemoteAction::SecureAttention);
+            ui.close();
+        }
+        if ui.add_enabled(kb, egui::Button::new(tr("Send Ctrl+Shift+Esc (Task Manager)"))).clicked() {
+            send_chord(viewer, &[VK_CONTROL, VK_SHIFT, VK_ESCAPE]);
+            ui.close();
+        }
+        if ui.add_enabled(kb, egui::Button::new(tr("Send Win+D (show desktop)"))).clicked() {
+            send_chord(viewer, &[VK_LWIN, 0x44]);
+            ui.close();
+        }
+        if ui.add_enabled(kb, egui::Button::new(tr("Lock remote session (Win+L)"))).clicked() {
+            viewer.session.remote_action(RemoteAction::LockWorkstation);
+            ui.close();
+        }
+        ui.separator();
+        let can_lock = viewer.granted.contains(Permissions::LOCK_LOCAL_INPUT);
+        let lock_label = if viewer.local_input_locked {
+            tr("Unlock remote keyboard and mouse")
+        } else {
+            tr("Lock remote keyboard and mouse")
+        };
+        if ui
+            .add_enabled(can_lock, egui::Button::new(lock_label))
+            .on_hover_text(tr("Nobody at the remote device can use it while locked; it is always unlocked when the session ends."))
+            .clicked()
+        {
+            viewer.local_input_locked = !viewer.local_input_locked;
+            viewer.session.remote_action(RemoteAction::LockLocalInput { locked: viewer.local_input_locked });
+            ui.close();
+        }
+        ui.separator();
+        let can_restart = viewer.granted.contains(Permissions::RESTART_MACHINE);
+        if ui
+            .add_enabled(can_restart, egui::Button::new(egui::RichText::new(tr("Restart remote device")).color(theme::DANGER)))
+            .on_hover_text(tr("Reboots the remote device now. Reconnect once it is back."))
+            .clicked()
+        {
+            viewer.session.remote_action(RemoteAction::RestartMachine);
+            ui.close();
+        }
+    });
+}
+
+/// Pulsa y suelta una combinación de teclas en el host (en orden).
+fn send_chord(viewer: &ViewerState, codes: &[u32]) {
+    for code in codes {
+        viewer.session.send_input(InputEvent::Key { code: *code, pressed: true });
+    }
+    for code in codes.iter().rev() {
+        viewer.session.send_input(InputEvent::Key { code: *code, pressed: false });
+    }
+}
+
+/// Ofrece un archivo local al host y lo registra en la lista.
+fn offer_file(viewer: &mut ViewerState, path: std::path::PathBuf) {
+    if !viewer.granted.contains(Permissions::FILE_TRANSFER) {
+        viewer.chat_log.push(tr("File transfer was not granted by the host.").into());
+        return;
+    }
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let total = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let id = viewer.session.send_file(path);
+    viewer.transfers.push(Transfer { id, name, transferred: 0, total, state: TransferState::Running });
+    viewer.show_files = true;
+}
+
+/// Panel lateral de archivos: ofertas entrantes y progreso de transferencias.
+fn show_files_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
+    egui::SidePanel::right("viewer-files")
+        .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(egui::Margin::same(10)))
+        .default_width(300.0)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(tr("Files")).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(theme::primary_button(tr("Send file…"))).clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                            offer_file(viewer, path);
+                        }
+                    }
+                });
+            });
+            ui.label(egui::RichText::new(tr("Drop files on the remote screen to send them.")).size(11.0).color(theme::TEXT_MUTED));
+            ui.separator();
+
+            let mut accept: Option<u64> = None;
+            let mut reject: Option<u64> = None;
+            for offer in &viewer.offers {
+                theme::card_tinted().show(ui, |ui| {
+                    ui.label(egui::RichText::new(trf("{name} ({size})", &[("name", &offer.name), ("size", &human_size(offer.size))])).strong());
+                    ui.label(egui::RichText::new(tr("The remote device wants to send you this file.")).size(11.0).color(theme::TEXT_DIM));
+                    ui.horizontal(|ui| {
+                        if ui.add(theme::primary_button(tr("Accept"))).clicked() {
+                            accept = Some(offer.id);
+                        }
+                        if ui.add(theme::ghost_button(tr("Reject"))).clicked() {
+                            reject = Some(offer.id);
+                        }
+                    });
+                });
+            }
+            if let Some(id) = accept {
+                viewer.session.accept_file(id);
+                if let Some(o) = viewer.offers.iter().find(|o| o.id == id) {
+                    viewer.transfers.push(Transfer { id, name: o.name.clone(), transferred: 0, total: o.size, state: TransferState::Running });
+                }
+                viewer.offers.retain(|o| o.id != id);
+            }
+            if let Some(id) = reject {
+                viewer.session.cancel_file(id);
+                viewer.offers.retain(|o| o.id != id);
+            }
+
+            let mut cancel: Option<u64> = None;
+            let mut open: Option<std::path::PathBuf> = None;
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for t in viewer.transfers.iter().rev() {
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(&t.name).strong());
+                    match &t.state {
+                        TransferState::Running => {
+                            let frac = if t.total > 0 { t.transferred as f32 / t.total as f32 } else { 0.0 };
+                            ui.horizontal(|ui| {
+                                ui.add(egui::ProgressBar::new(frac).desired_width(180.0).text(format!("{} / {}", human_size(t.transferred), human_size(t.total))));
+                                if ui.small_button("✕").on_hover_text(tr("Cancel")).clicked() {
+                                    cancel = Some(t.id);
+                                }
+                            });
+                        }
+                        TransferState::Done(path) => {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(tr("Completed")).size(11.0).color(theme::ONLINE));
+                                if ui.link(egui::RichText::new(tr("Show in folder")).size(11.0)).clicked() {
+                                    open = Some(path.clone());
+                                }
+                            });
+                        }
+                        TransferState::Failed(reason) => {
+                            ui.label(egui::RichText::new(trf("Failed: {reason}", &[("reason", reason)])).size(11.0).color(theme::DANGER));
+                        }
+                    }
+                }
+            });
+            if let Some(id) = cancel {
+                viewer.session.cancel_file(id);
+            }
+            if let Some(path) = open {
+                let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or(path);
+                let _ = std::process::Command::new("explorer").arg(dir).spawn();
+            }
+        });
+}
+
+/// "1.2 MB" a partir de bytes.
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = bytes as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < UNITS.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{v:.1} {}", UNITS[i])
+    }
 }
 
 fn monitor_label(monitors: &[MonitorInfo], index: u16) -> String {
@@ -332,6 +592,50 @@ fn drain_events(viewer: &mut ViewerState) -> Option<ViewerOutcome> {
                     )));
                 }
             }
+            Ok(ClientEvent::Clipboard(_)) => {
+                // El cliente ya lo aplicó al portapapeles local si la
+                // sincronización está activa; nada que mostrar.
+            }
+            Ok(ClientEvent::FileOffer { id, name, size }) => {
+                viewer.offers.push(FileOffer { id, name, size });
+                viewer.show_files = true;
+            }
+            Ok(ClientEvent::FileProgress { id, transferred, total }) => {
+                match viewer.transfers.iter_mut().find(|t| t.id == id) {
+                    Some(t) => {
+                        t.transferred = transferred;
+                        t.total = total;
+                    }
+                    None => {
+                        let name = viewer
+                            .offers
+                            .iter()
+                            .find(|o| o.id == id)
+                            .map(|o| o.name.clone())
+                            .unwrap_or_else(|| format!("#{id}"));
+                        viewer.transfers.push(Transfer { id, name, transferred, total, state: TransferState::Running });
+                    }
+                }
+            }
+            Ok(ClientEvent::FileDone { id, path }) => {
+                viewer.offers.retain(|o| o.id != id);
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                match viewer.transfers.iter_mut().find(|t| t.id == id) {
+                    Some(t) => {
+                        t.transferred = t.total;
+                        t.state = TransferState::Done(path);
+                    }
+                    None => viewer.transfers.push(Transfer { id, name, transferred: 0, total: 0, state: TransferState::Done(path) }),
+                }
+            }
+            Ok(ClientEvent::FileFailed { id, reason }) => {
+                viewer.offers.retain(|o| o.id != id);
+                match viewer.transfers.iter_mut().find(|t| t.id == id) {
+                    Some(t) => t.state = TransferState::Failed(reason),
+                    None => viewer.transfers.push(Transfer { id, name: format!("#{id}"), transferred: 0, total: 0, state: TransferState::Failed(reason) }),
+                }
+                viewer.show_files = true;
+            }
             Ok(ClientEvent::Disconnected(reason)) => {
                 return Some(ViewerOutcome::Disconnected(Some(trf(
                     "Disconnected: {reason}",
@@ -374,6 +678,7 @@ fn upload_latest_frame(viewer: &mut ViewerState, ctx: &egui::Context) {
                 Some(ctx.load_texture("cleandesk-remote-screen", color, egui::TextureOptions::LINEAR));
         }
     }
+    viewer.last_frame = Some(img);
 }
 
 /// Dibuja la imagen remota (o un aviso de espera) y captura el input sobre ella.

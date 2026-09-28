@@ -66,6 +66,7 @@ pub async fn connect_community(mut config: ClientConfig, pinned_key: Option<Stri
     }
 
     let host_key = resolved.record.pk.clone();
+    let host_mac = resolved.record.mac.clone();
 
     // 2. Direct endpoints.
     for ep in &resolved.endpoints {
@@ -73,7 +74,7 @@ pub async fn connect_community(mut config: ClientConfig, pinned_key: Option<Stri
             Ok(link) => {
                 let via = if resolved.via == "LAN" { "LAN" } else { "directo" };
                 let (out, rx) = drive_direct(link);
-                return connect_over(config, out, rx, via, Some(host_key)).await;
+                return connect_over(config, out, rx, via, Some(host_key), host_mac).await;
             }
             Err(e) => debug!(%ep, error = %e, "direct endpoint failed"),
         }
@@ -113,7 +114,7 @@ pub async fn connect_community(mut config: ClientConfig, pinned_key: Option<Stri
         }
     });
     let out: Arc<dyn SignalOut> = Arc::new(QueueOut(out_tx));
-    connect_over(config, out, in_rx, "nostr", Some(host_key)).await
+    connect_over(config, out, in_rx, "nostr", Some(host_key), host_mac).await
 }
 
 /// Own a direct link: outbound queue → socket, socket → inbound channel.

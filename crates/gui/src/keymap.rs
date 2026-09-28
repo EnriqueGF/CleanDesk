@@ -14,6 +14,10 @@ pub const VK_SHIFT: u32 = 0x10;
 pub const VK_CONTROL: u32 = 0x11;
 /// Código de tecla virtual de la tecla Alt (`VK_MENU`).
 pub const VK_MENU: u32 = 0x12;
+/// Escape.
+pub const VK_ESCAPE: u32 = 0x1B;
+/// Tecla Windows izquierda.
+pub const VK_LWIN: u32 = 0x5B;
 
 /// Convierte una [`egui::Key`] en su Virtual-Key code de Windows.
 ///

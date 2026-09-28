@@ -22,10 +22,14 @@ tracing.workspace = true
 eframe = "0.32.3"
 egui = "0.32.3"
 sys-locale = "0.3.2"
+image.workspace = true
+cleandesk-discovery.workspace = true
 # System tray icon (Windows message loop is provided by eframe/winit).
 tray-icon = { version = "0.25.1", default-features = false }
 # To reach the native window from the tray thread (show/raise while hidden).
 raw-window-handle = "0.6"
+# Native file picker for "Send file…" in the viewer.
+rfd = { version = "0.15.3", default-features = false, features = ["common-controls-v6"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

@@ -10,10 +10,11 @@
 use cleandesk_proto::{
     frame::{decode_payload, encode_payload, encode_vec, FrameCodec},
     id::CleanDeskId,
+    files::{FileChunk, MAX_CHUNK_DATA},
     media::FrameChunk,
     message::{
-        ClipboardData, FileTransferMsg, InputEvent, MonitorInfo, MouseButton, SessionMessage,
-        VideoFrame,
+        ClipboardData, FileTransferMsg, InputEvent, MonitorInfo, MouseButton, RemoteAction,
+        SessionMessage, VideoFrame,
     },
     permissions::Permissions,
     quality::QualityProfile,
@@ -77,11 +78,36 @@ fn every_session_message() -> Vec<SessionMessage> {
         SessionMessage::RequestKeyframe,
         SessionMessage::Ping { nonce: 0xDEAD_BEEF_CAFE },
         SessionMessage::Pong { nonce: 0xDEAD_BEEF_CAFE },
+        SessionMessage::RemoteAction { action: RemoteAction::LockLocalInput { locked: true } },
     ]
 }
 
 /// postcard variant tags (the first byte of each encoded message), pinned.
-const EXPECTED_SESSION_TAGS: [u8; 17] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+const EXPECTED_SESSION_TAGS: [u8; 18] =
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+
+/// Every `RemoteAction`, in declaration order, with its pinned tag.
+fn every_remote_action() -> Vec<RemoteAction> {
+    vec![
+        RemoteAction::RestartMachine,
+        RemoteAction::LockWorkstation,
+        RemoteAction::LockLocalInput { locked: false },
+        RemoteAction::SecureAttention,
+    ]
+}
+const EXPECTED_REMOTE_ACTION_TAGS: [u8; 4] = [0, 1, 2, 3];
+
+/// Every `FileTransferMsg`, in declaration order, with its pinned tag.
+fn every_file_msg() -> Vec<FileTransferMsg> {
+    vec![
+        FileTransferMsg::Offer { transfer_id: 1, name: "a.bin".into(), size: 3, is_dir: false },
+        FileTransferMsg::Accept { transfer_id: 1 },
+        FileTransferMsg::Cancel { transfer_id: 1 },
+        FileTransferMsg::Progress { transfer_id: 1, transferred: 2 },
+        FileTransferMsg::Complete { transfer_id: 1 },
+    ]
+}
+const EXPECTED_FILE_TAGS: [u8; 5] = [0, 1, 2, 3, 4];
 
 #[test]
 fn every_session_message_roundtrips_through_postcard() {
@@ -100,6 +126,40 @@ fn session_message_variant_tags_are_stable() {
         let bytes = encode_payload(msg).unwrap();
         assert_eq!(bytes[0], expected, "variant index changed for {msg:?}");
     }
+}
+
+#[test]
+fn remote_action_and_file_msg_tags_are_stable() {
+    let actions = every_remote_action();
+    assert_eq!(actions.len(), EXPECTED_REMOTE_ACTION_TAGS.len());
+    for (a, expected) in actions.iter().zip(EXPECTED_REMOTE_ACTION_TAGS) {
+        let bytes = encode_payload(a).unwrap();
+        assert_eq!(bytes[0], expected, "variant index changed for {a:?}");
+        assert_eq!(decode_payload::<RemoteAction>(&bytes).unwrap(), *a);
+        // Nested inside the session envelope too.
+        let msg = SessionMessage::RemoteAction { action: *a };
+        let bytes = encode_payload(&msg).unwrap();
+        assert_eq!(bytes[0], 17);
+        assert_eq!(decode_payload::<SessionMessage>(&bytes).unwrap(), msg);
+    }
+    let files = every_file_msg();
+    assert_eq!(files.len(), EXPECTED_FILE_TAGS.len());
+    for (m, expected) in files.iter().zip(EXPECTED_FILE_TAGS) {
+        let bytes = encode_payload(m).unwrap();
+        assert_eq!(bytes[0], expected, "variant index changed for {m:?}");
+        let msg = SessionMessage::File(m.clone());
+        let bytes = encode_payload(&msg).unwrap();
+        assert_eq!(decode_payload::<SessionMessage>(&bytes).unwrap(), msg);
+    }
+}
+
+#[test]
+fn file_chunk_roundtrips_and_fits_a_channel_message() {
+    let chunk = FileChunk { transfer_id: 9, offset: 1 << 40, data: vec![7; MAX_CHUNK_DATA] };
+    let bytes = encode_payload(&chunk).unwrap();
+    assert!(bytes.len() <= 16 * 1024);
+    assert_eq!(decode_payload::<FileChunk>(&bytes).unwrap(), chunk);
+    assert!(decode_payload::<FileChunk>(&bytes[..bytes.len() - 1]).is_err());
 }
 
 #[test]
@@ -188,7 +248,8 @@ fn version_compatibility_is_major_only() {
     assert!(PROTOCOL_VERSION.compatible_with(v));
     let v = Version { major: PROTOCOL_VERSION.major + 1, minor: 0 };
     assert!(!PROTOCOL_VERSION.compatible_with(v));
-    assert_eq!(Version { major: 2, minor: 0 }.to_string(), "2.0");
+    assert_eq!(Version { major: 2, minor: 1 }.to_string(), "2.1");
+    assert_eq!(PROTOCOL_VERSION, Version { major: 2, minor: 1 });
 }
 
 #[test]

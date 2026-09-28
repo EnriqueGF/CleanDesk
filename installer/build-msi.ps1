@@ -61,13 +61,13 @@ $obj = Join-Path $out "cleandesk.wixobj"
 $msi = Join-Path $out "CleanDesk-$Version-x64.msi"
 
 Write-Host "== candle" -ForegroundColor Cyan
-& $candle -nologo -arch x64 -ext WixFirewallExtension -ext WixUIExtension `
+& $candle -nologo -arch x64 -ext WixFirewallExtension -ext WixUIExtension -ext WixUtilExtension `
     "-dVersion=$Version" "-dSourceDir=$root" `
     -out $obj (Join-Path $PSScriptRoot "cleandesk.wxs")
 if ($LASTEXITCODE -ne 0) { throw "candle failed" }
 
 Write-Host "== light" -ForegroundColor Cyan
-& $light -nologo -ext WixFirewallExtension -ext WixUIExtension -cultures:es-ES `
+& $light -nologo -ext WixFirewallExtension -ext WixUIExtension -ext WixUtilExtension -cultures:en-US `
     -sice:ICE61 -out $msi $obj
 if ($LASTEXITCODE -ne 0) { throw "light failed" }
 

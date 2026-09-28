@@ -6,8 +6,9 @@
 
 use anyhow::Context as _;
 use cleandesk_proto::message::{InputEvent, MonitorInfo, MouseButton};
+use windows::Win32::System::Shutdown::LockWorkStation;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+    BlockInput, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
     KEYEVENTF_KEYUP, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN,
     MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE,
     MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL,
@@ -148,6 +149,37 @@ fn key_input(code: u32, flags: KEYBD_EVENT_FLAGS) -> INPUT {
             },
         },
     }
+}
+
+/// Virtual-key codes for the secure-attention substitute.
+const VK_SHIFT_CODE: u32 = 0x10;
+const VK_CONTROL_CODE: u32 = 0x11;
+const VK_ESCAPE_CODE: u32 = 0x1B;
+
+/// See [`crate::lock_workstation`].
+pub(crate) fn lock_workstation() -> anyhow::Result<()> {
+    // SAFETY: LockWorkStation takes no arguments and has no preconditions.
+    unsafe { LockWorkStation() }.context("LockWorkStation")
+}
+
+/// See [`crate::block_local_input`].
+pub(crate) fn block_local_input(blocked: bool) -> anyhow::Result<()> {
+    // SAFETY: BlockInput takes a plain BOOL and has no memory preconditions.
+    unsafe { BlockInput(blocked) }.with_context(|| format!("BlockInput({blocked})"))
+}
+
+/// See [`crate::send_secure_attention`]: Ctrl+Shift+Esc, pressed and released
+/// in one `SendInput` batch so a failure never leaves a modifier held.
+pub(crate) fn send_secure_attention() -> anyhow::Result<()> {
+    let down = KEYBD_EVENT_FLAGS(0);
+    send(&[
+        key_input(VK_CONTROL_CODE, down),
+        key_input(VK_SHIFT_CODE, down),
+        key_input(VK_ESCAPE_CODE, down),
+        key_input(VK_ESCAPE_CODE, KEYEVENTF_KEYUP),
+        key_input(VK_SHIFT_CODE, KEYEVENTF_KEYUP),
+        key_input(VK_CONTROL_CODE, KEYEVENTF_KEYUP),
+    ])
 }
 
 /// Submit a batch of `INPUT` records, failing if the OS inserted fewer than all

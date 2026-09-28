@@ -217,6 +217,110 @@ fn spanish(en: &str) -> Option<&'static str> {
 
         // --- Ventana "Ajustes" ---
         "Language" => "Idioma",
+        "Chat" => "Chat",
+        "Chat ({n})" => "Chat ({n})",
+        "CleanDesk ID:" => "ID de CleanDesk:",
+        "Frames" => "Fotogramas",
+        "Ping" => "Ping",
+        "Relay" => "Relay",
+        "URL:" => "URL:",
+        // --- Visor: acciones, portapapeles y archivos ---
+        "Files" => "Archivos",
+        "Files ({n})" => "Archivos ({n})",
+        "File transfer was not granted by the host." => "El host no concedió la transferencia de archivos.",
+        "Keep the text clipboard in sync with the remote device" => "Mantener el portapapeles de texto sincronizado con el equipo remoto",
+        "Clipboard access was not granted by the host." => "El host no concedió el acceso al portapapeles.",
+        "Actions" => "Acciones",
+        "Send Ctrl+Alt+Del" => "Enviar Ctrl+Alt+Supr",
+        "Secure-attention sequence (best effort without the service)" => "Secuencia de atención segura (lo mejor posible sin el servicio)",
+        "Send Ctrl+Shift+Esc (Task Manager)" => "Enviar Ctrl+Mayús+Esc (Administrador de tareas)",
+        "Send Win+D (show desktop)" => "Enviar Win+D (mostrar escritorio)",
+        "Lock remote session (Win+L)" => "Bloquear sesión remota (Win+L)",
+        "Unlock remote keyboard and mouse" => "Desbloquear teclado y ratón remotos",
+        "Lock remote keyboard and mouse" => "Bloquear teclado y ratón remotos",
+        "Nobody at the remote device can use it while locked; it is always unlocked when the session ends." => "Nadie podrá usar el equipo remoto mientras esté bloqueado; se desbloquea siempre al terminar la sesión.",
+        "Restart remote device" => "Reiniciar equipo remoto",
+        "Reboots the remote device now. Reconnect once it is back." => "Reinicia el equipo remoto ahora. Vuelve a conectar cuando arranque.",
+        "Send file…" => "Enviar archivo…",
+        "Drop files on the remote screen to send them." => "Suelta archivos sobre la pantalla remota para enviarlos.",
+        "{name} ({size})" => "{name} ({size})",
+        "The remote device wants to send you this file." => "El equipo remoto quiere enviarte este archivo.",
+        "Accept" => "Aceptar",
+        "Reject" => "Rechazar",
+        "Cancel" => "Cancelar",
+        "Completed" => "Completado",
+        "Show in folder" => "Mostrar en la carpeta",
+        "Failed: {reason}" => "Error: {reason}",
+        // --- Diseño nuevo: navegación, banner, tarjetas, páginas ---
+        "Home" => "Inicio",
+        "Sessions" => "Sesiones",
+        "Contacts" => "Contactos",
+        "Invitations" => "Invitaciones",
+        "Ready to connect (community network)" => "Listo para conectar (red comunitaria)",
+        "Ready to connect (private server)" => "Listo para conectar (servidor privado)",
+        "Secure connections. Your privacy first." => "Conexiones seguras. Tu privacidad primero.",
+        "Your desktop,
+anywhere" => "Tu escritorio,
+en cualquier lugar",
+        "Connect securely, quickly and simply with CleanDesk." => "Conéctate de forma segura, rápida y sencilla con CleanDesk.",
+        "Your CleanDesk address" => "Tu dirección de CleanDesk",
+        "Invite" => "Invitar",
+        "Connect to remote desktop" => "Conectar a escritorio remoto",
+        "Enter a CleanDesk address or device alias" => "Introducir dirección de CleanDesk o alias de dispositivo",
+        "What's new in CleanDesk?" => "¿Qué hay de nuevo en CleanDesk?",
+        "Discover the latest features and improvements." => "Descubre las últimas funciones y mejoras.",
+        "See what's new" => "Ver novedades",
+        "Set a password so you can reach this device without anyone accepting." => "Define una contraseña para acceder a este equipo sin que nadie acepte.",
+        "Set up now" => "Configurar ahora",
+        "Discover" => "Descubrir",
+        "Find and connect to devices on your local network automatically." => "Encuentra y conéctate a dispositivos de tu red local automáticamente.",
+        "Find devices" => "Buscar dispositivos",
+        "Work better as a team" => "Trabaja mejor en equipo",
+        "Share access, manage devices and keep everything secure." => "Comparte acceso, gestiona dispositivos y mantén todo seguro.",
+        "Recent sessions" => "Sesiones recientes",
+        "See all" => "Ver todo",
+        "Connected {when}" => "Conectado {when}",
+        "to a new device" => "a un nuevo dispositivo",
+        "Copy ID" => "Copiar ID",
+        "Remove from favorites" => "Quitar de favoritos",
+        "Add to favorites" => "Añadir a favoritos",
+        "Wake up (Wake-on-LAN)" => "Despertar (Wake-on-LAN)",
+        "Forget remembered password" => "Olvidar contraseña recordada",
+        "Wake-up packet sent." => "Paquete de despertar enviado.",
+        "Could not send the wake-up packet: {err}" => "No se pudo enviar el paquete de despertar: {err}",
+        "Every connection made from or to this device." => "Todas las conexiones hechas desde o hacia este equipo.",
+        "Device" => "Equipo",
+        "User" => "Usuario",
+        "When" => "Cuándo",
+        "Duration" => "Duración",
+        "Type" => "Tipo",
+        "State" => "Estado",
+        "active" => "activa",
+        "closed" => "cerrada",
+        "rejected" => "rechazada",
+        "failed" => "fallida",
+        "unknown" => "desconocido",
+        "Saved devices. Star a recent session to add it here." => "Equipos guardados. Marca con estrella una sesión reciente para añadirla aquí.",
+        "Invite someone to connect to this device, or check requests waiting for your approval." => "Invita a alguien a conectarse a este equipo o revisa las solicitudes pendientes de tu aprobación.",
+        "Send this text to the person who should connect to you:" => "Envía este texto a la persona que debe conectarse contigo:",
+        "Copy invitation" => "Copiar invitación",
+        "Invitation copied to the clipboard." => "Invitación copiada al portapapeles.",
+        "They will need your approval unless unattended access is enabled with a password (Settings)." => "Necesitará tu aprobación salvo que el acceso desatendido esté activado con contraseña (Ajustes).",
+        "Pending requests" => "Solicitudes pendientes",
+        "No pending requests. Incoming requests appear as a dialog you can accept or reject." => "Sin solicitudes pendientes. Las solicitudes entrantes aparecen en un diálogo que puedes aceptar o rechazar.",
+        "Connect to my desktop with CleanDesk.
+My CleanDesk ID: {id}
+Fingerprint: {fp}
+Download: https://github.com/EnriqueGF/CleanDesk/releases" => "Conéctate a mi escritorio con CleanDesk.
+Mi CleanDesk ID: {id}
+Huella: {fp}
+Descarga: https://github.com/EnriqueGF/CleanDesk/releases",
+        "Nearby devices" => "Equipos cercanos",
+        "Scanning the local network…" => "Rastreando la red local…",
+        "Scan again" => "Rastrear de nuevo",
+        "No CleanDesk devices found on this network." => "No se encontraron equipos CleanDesk en esta red.",
+        "Device alias" => "Alias del equipo",
+        "Shown to people you connect to and used to find you on the local network." => "Se muestra a quienes te conectas y sirve para encontrarte en la red local.",
         "Show CleanDesk" => "Mostrar CleanDesk",
         "Quit" => "Salir",
         "Tray" => "Bandeja",
@@ -285,7 +389,6 @@ fn spanish(en: &str) -> Option<&'static str> {
         "System: {os}" => "Sistema: {os}",
         "Authentication: {auth}" => "Autenticación: {auth}",
         "Granted permissions" => "Permisos concedidos",
-        "Accept" => "Aceptar",
         "Decline" => "Rechazar",
         "Interactive" => "Interactiva",
         "Trusted device" => "Dispositivo de confianza",
@@ -399,6 +502,53 @@ mod tests {
             assert!(!es.is_empty(), "empty translation for {key:?}");
             assert_ne!(es, *key, "translation identical to key for {key:?}");
         }
+    }
+
+    /// Recorre las fuentes de la GUI y exige una entrada española para cada
+    /// literal pasado a `tr`/`trf`: así una clave nueva no puede quedarse en
+    /// inglés sin que lo note la CI.
+    #[test]
+    fn every_literal_key_in_sources_has_a_spanish_entry() {
+        let sources = [
+            include_str!("mainwindow.rs"),
+            include_str!("viewer.rs"),
+            include_str!("approval.rs"),
+            include_str!("app.rs"),
+            include_str!("tray.rs"),
+        ];
+        let mut missing = Vec::new();
+        for src in sources {
+            for call in ["tr(\"", "trf(\""] {
+                let mut rest = src;
+                while let Some(pos) = rest.find(call) {
+                    rest = &rest[pos + call.len()..];
+                    // Fin del literal: la primera comilla no escapada.
+                    let mut end = 0;
+                    let bytes = rest.as_bytes();
+                    while end < bytes.len() {
+                        if bytes[end] == b'\\' {
+                            end += 2;
+                            continue;
+                        }
+                        if bytes[end] == b'"' {
+                            break;
+                        }
+                        end += 1;
+                    }
+                    let raw = &rest[..end.min(rest.len())];
+                    let key = raw.replace("\\n", "\n").replace("\\\"", "\"");
+                    if key.is_empty() {
+                        continue;
+                    }
+                    if spanish(&key).is_none() {
+                        missing.push(key);
+                    }
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(missing.is_empty(), "missing Spanish entries: {missing:#?}");
     }
 
     #[test]

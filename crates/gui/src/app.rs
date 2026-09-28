@@ -62,11 +62,23 @@ pub struct HostSession {
     pub granted: Permissions,
 }
 
-/// Pestaña de la lista de equipos.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeviceTab {
-    Recent,
-    Favorites,
+/// Página de la navegación superior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Page {
+    #[default]
+    Home,
+    Sessions,
+    Contacts,
+    Invitations,
+}
+
+/// Un equipo visto en la red local (descubrimiento mDNS).
+#[derive(Debug, Clone)]
+pub struct NearbyDevice {
+    pub id: CleanDeskId,
+    pub alias: Option<String>,
+    pub public_key: String,
+    pub mac: Option<String>,
 }
 
 /// La aplicación completa.
@@ -108,8 +120,21 @@ pub struct CleanDeskApp {
     pub show_requested: Arc<std::sync::atomic::AtomicBool>,
     /// El usuario eligió "Salir": la siguiente petición de cierre se acepta.
     quitting: bool,
-    /// Pestaña activa de la lista de equipos.
-    pub tab: DeviceTab,
+    /// Página activa de la navegación superior.
+    pub page: Page,
+    /// Último equipo al que se conectó con éxito (para la miniatura).
+    pub last_target: Option<CleanDeskId>,
+    /// Miniaturas de la última sesión por equipo (cargadas perezosamente;
+    /// `None` = no hay fichero).
+    pub thumbs: std::collections::HashMap<u64, Option<egui::TextureHandle>>,
+    /// Equipos vistos en la red local en el último rastreo.
+    pub nearby: Arc<Mutex<Vec<NearbyDevice>>>,
+    /// Hay un rastreo mDNS en curso.
+    pub discovering: Arc<std::sync::atomic::AtomicBool>,
+    /// Ventana "Equipos cercanos" visible.
+    pub show_nearby: bool,
+    /// Instante del último rastreo automático.
+    pub last_scan: Option<std::time::Instant>,
     /// Ventana de ajustes visible.
     pub show_settings: bool,
     /// Ventana de seguridad (huella) visible.
@@ -224,7 +249,13 @@ impl CleanDeskApp {
             },
             quitting: false,
             show_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            tab: DeviceTab::Recent,
+            page: Page::Home,
+            last_target: None,
+            thumbs: std::collections::HashMap::new(),
+            nearby: Arc::new(Mutex::new(Vec::new())),
+            discovering: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            show_nearby: false,
+            last_scan: None,
             // `CLEANDESK_OPEN_SETTINGS=1` abre Ajustes al arrancar (capturas, soporte).
             show_settings: std::env::var_os("CLEANDESK_OPEN_SETTINGS").is_some(),
             show_security: false,
@@ -378,6 +409,22 @@ impl CleanDeskApp {
             book.add(DeviceEntry::new(id, name));
         }
         drop(book);
+        // Si el equipo se anuncia en la LAN ya conocemos su clave: la fijamos
+        // ahora para que la primera conexion ya verifique la identidad.
+        if let Some(key) = self.nearby_public_key(id) {
+            let mut settings = self.state.settings.write();
+            if settings.pinned_key(id).is_none() {
+                settings.pin_key(id, &key);
+            }
+        }
+        let mac = self
+            .nearby
+            .lock()
+            .ok()
+            .and_then(|n| n.iter().find(|d| d.id == id).and_then(|d| d.mac.clone()));
+        if let Some(mac) = mac {
+            self.state.addressbook.write().update(id, |e| e.mac = Some(mac.clone()));
+        }
         self.save_settings();
     }
 
@@ -415,6 +462,7 @@ impl CleanDeskApp {
             Ok(Ok(session)) => {
                 let target = *target;
                 info!(%target, "conexión establecida");
+                self.last_target = Some(target);
                 self.mark_connected(target);
                 let record = SessionRecord::start(session.session, target, self.device.hostname.clone(), "p2p");
                 if let Err(e) = self.state.record_session_start(record) {
@@ -429,6 +477,10 @@ impl CleanDeskApp {
                     if self.state.settings.write().pin_key(target, pk) {
                         self.save_settings();
                     }
+                }
+                // Y su MAC, para poder despertarlo desde la agenda.
+                if let Some(mac) = session.peer_mac.clone() {
+                    self.remember_mac(target, mac);
                 }
                 self.connect = ConnectPhase::Active(Box::new(ViewerState::new(session)));
             }
@@ -662,6 +714,9 @@ impl CleanDeskApp {
             }
             crate::viewer::ViewerOutcome::Disconnected(notice) => {
                 viewer.disconnect();
+                if let (Some(target), Some(frame)) = (self.last_target, viewer.last_frame()) {
+                    self.save_thumbnail(target, frame);
+                }
                 if let Err(e) = self.state.record_session_end(viewer.session_id(), "closed") {
                     warn!(error = %e, "no se pudo cerrar el registro de historial");
                 }
@@ -822,4 +877,119 @@ pub(crate) fn unix_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------
+// Miniaturas, descubrimiento LAN e invitaciones
+// ---------------------------------------------------------------------------
+
+impl CleanDeskApp {
+    /// Ruta del PNG de miniatura de `id`.
+    fn thumb_path(&self, id: CleanDeskId) -> std::path::PathBuf {
+        self.state.data_dir().join("thumbs").join(format!("{}.png", id.value()))
+    }
+
+    /// Guarda una miniatura (≈320 px de ancho) del último fotograma de una
+    /// sesión, para la tarjeta de "Sesiones recientes".
+    pub fn save_thumbnail(&mut self, id: CleanDeskId, frame: &cleandesk_codec::DecodedImage) {
+        if frame.width == 0 || frame.height == 0 {
+            return;
+        }
+        let Some(src) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone()) else {
+            return;
+        };
+        let target_w = 320u32.min(frame.width);
+        let target_h = ((frame.height as u64 * target_w as u64) / frame.width as u64).max(1) as u32;
+        let small = image::imageops::resize(&src, target_w, target_h, image::imageops::FilterType::Triangle);
+        let path = self.thumb_path(id);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Err(e) = small.save(&path) {
+            warn!(error = %e, "could not save session thumbnail");
+        }
+        // Forzamos recarga en la siguiente pintura.
+        self.thumbs.remove(&id.value());
+    }
+
+    /// Textura de la miniatura de `id`, cargándola del disco la primera vez.
+    pub fn thumbnail(&mut self, ctx: &egui::Context, id: CleanDeskId) -> Option<egui::TextureHandle> {
+        if let Some(cached) = self.thumbs.get(&id.value()) {
+            return cached.clone();
+        }
+        let path = self.thumb_path(id);
+        let loaded = image::open(&path).ok().map(|img| {
+            let rgba = img.to_rgba8();
+            let size = [rgba.width() as usize, rgba.height() as usize];
+            let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+            ctx.load_texture(format!("thumb-{}", id.value()), color, egui::TextureOptions::LINEAR)
+        });
+        self.thumbs.insert(id.value(), loaded.clone());
+        loaded
+    }
+
+    /// Lanza un rastreo mDNS de la red local (no bloquea). Los resultados
+    /// aparecen en `nearby` cuando termina.
+    pub fn discover_nearby(&mut self, ctx: &egui::Context) {
+        use std::sync::atomic::Ordering;
+        if self.discovering.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        self.last_scan = Some(std::time::Instant::now());
+        let nearby = self.nearby.clone();
+        let flag = self.discovering.clone();
+        let me = self.id;
+        let ctx = ctx.clone();
+        self.rt.spawn(async move {
+            let peers = cleandesk_discovery::lan::browse_all(std::time::Duration::from_millis(2500)).await;
+            let list: Vec<NearbyDevice> = peers
+                .into_iter()
+                .filter(|p| p.id != me)
+                .map(|p| NearbyDevice { id: p.id, alias: p.alias, public_key: p.public_key, mac: p.mac })
+                .collect();
+            if let Ok(mut guard) = nearby.lock() {
+                *guard = list;
+            }
+            flag.store(false, Ordering::Relaxed);
+            ctx.request_repaint();
+        });
+    }
+
+    /// ¿Se ha visto `id` en la red local en el último rastreo?
+    pub fn is_nearby(&self, id: CleanDeskId) -> bool {
+        self.nearby.lock().map(|n| n.iter().any(|d| d.id == id)).unwrap_or(false)
+    }
+
+    /// Guarda la MAC de un contacto (solo si ya está en la agenda).
+    pub fn remember_mac(&self, id: CleanDeskId, mac: String) {
+        let changed = self
+            .state
+            .addressbook
+            .write()
+            .update(id, |e| {
+                if e.mac.as_deref() != Some(mac.as_str()) {
+                    e.mac = Some(mac.clone());
+                }
+            });
+        if changed {
+            self.save_settings();
+        }
+    }
+
+    /// Clave pública anunciada por un equipo cercano (para fijarla al guardar
+    /// el contacto sin esperar a la primera conexión).
+    pub fn nearby_public_key(&self, id: CleanDeskId) -> Option<String> {
+        self.nearby
+            .lock()
+            .ok()
+            .and_then(|n| n.iter().find(|d| d.id == id).map(|d| d.public_key.clone()))
+    }
+
+    /// Texto de invitación listo para pegar en un chat o correo.
+    pub fn invitation_text(&self) -> String {
+        crate::i18n::trf(
+            "Connect to my desktop with CleanDesk.\nMy CleanDesk ID: {id}\nFingerprint: {fp}\nDownload: https://github.com/EnriqueGF/CleanDesk/releases",
+            &[("id", &self.id.to_string()), ("fp", &self.state.identity.fingerprint())],
+        )
+    }
 }

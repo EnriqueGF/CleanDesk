@@ -11,4 +11,4 @@ cleandesk-proto.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Shutdown"] }

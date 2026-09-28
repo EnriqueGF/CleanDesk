@@ -9,7 +9,10 @@
 //!   embedding UI, and answers the host's unattended-auth challenge if any.
 //!
 //! The UI drives a [`ClientSession`]: it pulls decoded frames from `frames`,
-//! reads [`ClientEvent`]s from `events`, and pushes input / quality / chat back.
+//! reads [`ClientEvent`]s from `events`, and pushes input / quality / chat /
+//! clipboard / files / remote actions back. Everything the viewer sends is
+//! gated on the permissions the host announced (`PermissionsUpdated`); the
+//! host re-checks on its side regardless.
 //!
 //! # Loss recovery
 //!
@@ -28,7 +31,8 @@ use cleandesk_proto::{
     id::CleanDeskId,
     media::{FrameChunk, Reassembler},
     message::{
-        AuthProof, InputEvent, MonitorInfo, SessionMessage, SignalMessage, SignalPayload,
+        AuthProof, ClipboardData, InputEvent, MonitorInfo, RemoteAction, SessionMessage,
+        SignalMessage, SignalPayload,
     },
     permissions::Permissions,
     quality::QualityProfile,
@@ -37,9 +41,15 @@ use cleandesk_proto::{
 };
 use cleandesk_transport::{Channel, IceConfig, PeerConnection, SignalOut, SignalingClient};
 
+mod clipboard;
 pub mod community;
+mod files;
 pub use community::connect_community;
-use std::sync::Arc;
+pub use files::default_downloads_dir;
+use files::{FileCommand, FilesCtx};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -73,6 +83,9 @@ pub struct ClientConfig {
     pub unattended_key: Option<[u8; 32]>,
     /// STUN/TURN servers for ICE.
     pub ice: IceConfig,
+    /// Where files the host sends are stored. `None` means
+    /// [`default_downloads_dir`] (`<Downloads>/CleanDesk`).
+    pub downloads_dir: Option<PathBuf>,
 }
 
 impl ClientConfig {
@@ -88,6 +101,7 @@ impl ClientConfig {
             unattended_password: None,
             unattended_key: None,
             ice: IceConfig::from_env(),
+            downloads_dir: None,
         }
     }
 }
@@ -104,6 +118,19 @@ pub enum ClientEvent {
     Monitors(Vec<MonitorInfo>),
     AuthResult(bool),
     Disconnected(String),
+    /// Text the host put on its clipboard (only with `CLIPBOARD` granted).
+    /// Also applied locally when [`ClientSession::enable_clipboard_sync`] is on.
+    Clipboard(String),
+    /// The host offers a file; answer with [`ClientSession::accept_file`] or
+    /// [`ClientSession::cancel_file`].
+    FileOffer { id: u64, name: String, size: u64 },
+    /// Progress of a transfer in either direction.
+    FileProgress { id: u64, transferred: u64, total: u64 },
+    /// A transfer finished: `path` is where the file was stored (incoming)
+    /// or the local file that was sent (outgoing).
+    FileDone { id: u64, path: PathBuf },
+    /// A transfer failed or was cancelled.
+    FileFailed { id: u64, reason: String },
 }
 
 /// A live viewer session. Frames and events flow *out*; input/quality/chat flow
@@ -118,12 +145,23 @@ pub struct ClientSession {
     /// The host's Ed25519 public key (base64) when the path authenticated it
     /// (community mode); the UI pins it in the address book.
     pub peer_public_key: Option<String>,
+    /// The host's MAC address as announced in its rendezvous record, for
+    /// Wake-on-LAN from the address book (community mode only).
+    pub peer_mac: Option<String>,
     /// Decoded frames to render (bounded; stale frames are dropped under load).
     pub frames: mpsc::Receiver<DecodedImage>,
     /// Control-plane events.
     pub events: mpsc::Receiver<ClientEvent>,
     input_tx: mpsc::Sender<InputEvent>,
     control_tx: mpsc::UnboundedSender<SessionMessage>,
+    files_tx: mpsc::UnboundedSender<FileCommand>,
+    /// Viewer-initiated transfer ids are odd (see `cleandesk_proto::files`).
+    next_transfer_id: AtomicU64,
+    /// Permissions as last announced by the host (`Permissions::bits`).
+    granted_live: Arc<AtomicU32>,
+    /// Outbound side of the built-in clipboard sync; `None` until enabled.
+    clipboard: Arc<Mutex<Option<clipboard::ClipboardSync>>>,
+    clipboard_tx: mpsc::UnboundedSender<String>,
 }
 
 impl std::fmt::Debug for ClientSession {
@@ -165,6 +203,83 @@ impl ClientSession {
             .control_tx
             .send(SessionMessage::Disconnect { reason: "viewer closed".into() });
     }
+
+    /// The permissions currently in force, as last announced by the host
+    /// (`granted` is the initial grant from the accept).
+    pub fn current_permissions(&self) -> Permissions {
+        Permissions::from_bits_truncate(self.granted_live.load(Ordering::Relaxed))
+    }
+
+    /// Put `text` on the host's clipboard. Dropped unless `CLIPBOARD` is granted.
+    pub fn send_clipboard(&self, text: String) {
+        if !self.current_permissions().contains(Permissions::CLIPBOARD) {
+            debug!("clipboard send dropped: not granted");
+            return;
+        }
+        if text.len() > clipboard::MAX_TEXT_LEN {
+            debug!(len = text.len(), "clipboard send dropped: too large");
+            return;
+        }
+        let _ = self.control_tx.send(SessionMessage::Clipboard(ClipboardData::Text { content: text }));
+    }
+
+    /// Turn on automatic two-way text clipboard sync: local changes are sent
+    /// to the host every 500 ms and host changes are applied locally (the
+    /// `Clipboard` event is still emitted). Idempotent; everything is gated
+    /// on the `CLIPBOARD` permission. Safe to call from a GUI thread.
+    pub fn enable_clipboard_sync(&self) {
+        let mut guard = lock(&self.clipboard);
+        if guard.is_none() {
+            *guard = Some(clipboard::ClipboardSync::start(self.clipboard_tx.clone()));
+        }
+    }
+
+    /// Stop the automatic clipboard sync (explicit sends still work).
+    pub fn disable_clipboard_sync(&self) {
+        *lock(&self.clipboard) = None;
+    }
+
+    /// Offer the local file at `path` to the host. Returns the transfer id
+    /// used in the subsequent `FileProgress` / `FileDone` / `FileFailed`
+    /// events (a `FileFailed` follows immediately if `FILE_TRANSFER` is not
+    /// granted).
+    pub fn send_file(&self, path: PathBuf) -> u64 {
+        let transfer_id = self.next_transfer_id.fetch_add(2, Ordering::Relaxed);
+        let _ = self.files_tx.send(FileCommand::Send { transfer_id, path });
+        transfer_id
+    }
+
+    /// Accept a file the host offered (`FileOffer`); it lands in the
+    /// downloads directory and completes with `FileDone`.
+    pub fn accept_file(&self, id: u64) {
+        let _ = self.files_tx.send(FileCommand::Accept(id));
+    }
+
+    /// Cancel or reject a transfer in either direction.
+    pub fn cancel_file(&self, id: u64) {
+        let _ = self.files_tx.send(FileCommand::Cancel(id));
+    }
+
+    /// Ask the host for a privileged action. Dropped locally when the matching
+    /// permission is not granted; the host checks again anyway.
+    pub fn remote_action(&self, action: RemoteAction) {
+        let needed = match action {
+            RemoteAction::RestartMachine => Permissions::RESTART_MACHINE,
+            RemoteAction::LockWorkstation | RemoteAction::SecureAttention => Permissions::CONTROL_KEYBOARD,
+            RemoteAction::LockLocalInput { .. } => Permissions::LOCK_LOCAL_INPUT,
+        };
+        if !self.current_permissions().contains(needed) {
+            debug!(?action, "remote action dropped: not granted");
+            return;
+        }
+        let _ = self.control_tx.send(SessionMessage::RemoteAction { action });
+    }
+}
+
+/// Lock a `Mutex`, recovering from poisoning (the guarded value is a plain
+/// handle; a poisoned lock is safe to reuse).
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Open a session to `config.target`. Returns once the P2P link is connected, or
@@ -183,7 +298,7 @@ pub async fn connect(config: ClientConfig) -> Result<ClientSession> {
 
     let events_rx = signal.events()?;
     let signal: Arc<dyn SignalOut> = Arc::new(signal);
-    connect_over(config, signal, events_rx, "servidor", None).await
+    connect_over(config, signal, events_rx, "servidor", None, None).await
 }
 
 /// The rendezvous-independent part of [`connect`]: request, wait for the
@@ -194,6 +309,7 @@ pub(crate) async fn connect_over(
     mut events_rx: mpsc::Receiver<SignalMessage>,
     via: &'static str,
     peer_public_key: Option<String>,
+    peer_mac: Option<String>,
 ) -> Result<ClientSession> {
     // Signal intended unattended auth to the server via a (non-secret) proof
     // placeholder; the real challenge/response happens over the control channel.
@@ -266,6 +382,10 @@ pub(crate) async fn connect_over(
     let (cev_tx, cev_rx) = mpsc::channel::<ClientEvent>(32);
     let (input_tx, input_rx) = mpsc::channel::<InputEvent>(256);
     let (control_tx, control_rx) = mpsc::unbounded_channel::<SessionMessage>();
+    let (files_tx, files_rx) = mpsc::unbounded_channel::<FileCommand>();
+    let (clipboard_tx, clipboard_rx) = mpsc::unbounded_channel::<String>();
+    let granted_live = Arc::new(AtomicU32::new(granted.bits()));
+    let clipboard: Arc<Mutex<Option<clipboard::ClipboardSync>>> = Arc::new(Mutex::new(None));
 
     let _ = cev_tx.try_send(ClientEvent::Connected);
     let _ = control_tx.send(SessionMessage::Hello { protocol: PROTOCOL_VERSION, info: config.device.clone() });
@@ -275,11 +395,39 @@ pub(crate) async fn connect_over(
         peer.clone(),
         incoming,
         frames_tx,
-        cev_tx,
+        cev_tx.clone(),
         control_tx.clone(),
         UnattendedCredential::from_config(&config),
         config.target,
+        Dispatch { files_tx: files_tx.clone(), granted: granted_live.clone(), clipboard: clipboard.clone() },
     ));
+
+    // File transfers.
+    tokio::spawn(files::run_files(
+        FilesCtx {
+            peer: peer.clone(),
+            control_tx: control_tx.clone(),
+            events: cev_tx,
+            granted: granted_live.clone(),
+            downloads: config.downloads_dir.clone().unwrap_or_else(default_downloads_dir),
+            cmd_tx: files_tx.clone(),
+        },
+        files_rx,
+    ));
+
+    // Local clipboard changes (only flowing once `enable_clipboard_sync` ran).
+    {
+        let control_tx = control_tx.clone();
+        let granted = granted_live.clone();
+        let mut rx = clipboard_rx;
+        tokio::spawn(async move {
+            while let Some(text) = rx.recv().await {
+                if Permissions::from_bits_truncate(granted.load(Ordering::Relaxed)).contains(Permissions::CLIPBOARD) {
+                    let _ = control_tx.send(SessionMessage::Clipboard(ClipboardData::Text { content: text }));
+                }
+            }
+        });
+    }
 
     // Outbound input.
     {
@@ -319,11 +467,24 @@ pub(crate) async fn connect_over(
         granted,
         via,
         peer_public_key,
+        peer_mac,
         frames: frames_rx,
         events: cev_rx,
         input_tx,
         control_tx,
+        files_tx,
+        next_transfer_id: AtomicU64::new(1),
+        granted_live,
+        clipboard,
+        clipboard_tx,
     })
+}
+
+/// Session-wide shared state the inbound dispatcher updates or forwards to.
+struct Dispatch {
+    files_tx: mpsc::UnboundedSender<FileCommand>,
+    granted: Arc<AtomicU32>,
+    clipboard: Arc<Mutex<Option<clipboard::ClipboardSync>>>,
 }
 
 /// Background: apply offer/answer/ICE from the server to the peer.
@@ -452,6 +613,7 @@ impl FrameGate {
 }
 
 /// Background: decode inbound video and handle inbound control messages.
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_incoming(
     peer: Arc<PeerConnection>,
     mut incoming: mpsc::Receiver<(Channel, Bytes)>,
@@ -460,6 +622,7 @@ async fn dispatch_incoming(
     control_tx: mpsc::UnboundedSender<SessionMessage>,
     credential: Option<UnattendedCredential>,
     host_id: CleanDeskId,
+    shared: Dispatch,
 ) {
     let mut decoder = TileDecoder::new();
     let mut reassembler = Reassembler::new();
@@ -520,7 +683,22 @@ async fn dispatch_incoming(
                         }
                     }
                     SessionMessage::PermissionsUpdate { granted } => {
+                        shared.granted.store(granted.bits(), Ordering::Relaxed);
                         let _ = cev_tx.send(ClientEvent::PermissionsUpdated(granted)).await;
+                    }
+                    SessionMessage::Clipboard(ClipboardData::Text { content }) => {
+                        let granted = Permissions::from_bits_truncate(shared.granted.load(Ordering::Relaxed));
+                        if !granted.contains(Permissions::CLIPBOARD) || content.len() > clipboard::MAX_TEXT_LEN {
+                            debug!("ignoring clipboard from host");
+                            continue;
+                        }
+                        if let Some(sync) = lock(&shared.clipboard).as_ref() {
+                            sync.apply_remote(content.clone());
+                        }
+                        let _ = cev_tx.send(ClientEvent::Clipboard(content)).await;
+                    }
+                    SessionMessage::File(msg) => {
+                        let _ = shared.files_tx.send(FileCommand::Control(msg));
                     }
                     SessionMessage::Stats(s) => {
                         let _ = cev_tx.send(ClientEvent::Stats(s)).await;
@@ -541,7 +719,10 @@ async fn dispatch_incoming(
                     _ => {}
                 }
             }
-            _ => {}
+            Channel::Files => {
+                let _ = shared.files_tx.send(FileCommand::Chunk(bytes));
+            }
+            Channel::Input => {}
         }
     }
     let _ = peer.close().await;

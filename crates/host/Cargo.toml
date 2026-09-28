@@ -23,4 +23,8 @@ cleandesk-crypto.workspace = true
 cleandesk-discovery.workspace = true
 uuid.workspace = true
 bytes.workspace = true
+directories.workspace = true
+# Clipboard access (text only). Default features pull image support and heavier
+# platform deps we do not need.
+arboard = { version = "3.6", default-features = false }
 parking_lot.workspace = true

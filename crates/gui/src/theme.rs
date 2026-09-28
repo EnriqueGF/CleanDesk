@@ -1,4 +1,4 @@
-//! Tema visual de CleanDesk: fondo *slate* oscuro con acento esmeralda.
+//! Tema visual de CleanDesk: fondo claro con acento verde.
 //!
 //! Centraliza colores, radios y espaciados para que la ventana principal, el
 //! visor y los diálogos compartan el mismo lenguaje visual. Todo son valores
@@ -7,39 +7,47 @@
 
 use egui::{Color32, CornerRadius, Margin, Stroke, Style, Visuals};
 
-// Paleta (slate / emerald).
-pub const BG: Color32 = Color32::from_rgb(2, 6, 23); // slate-950
-pub const PANEL: Color32 = Color32::from_rgb(15, 23, 42); // slate-900
-pub const CARD: Color32 = Color32::from_rgb(11, 18, 34);
-pub const WIDGET: Color32 = Color32::from_rgb(30, 41, 59); // slate-800
-pub const BORDER: Color32 = Color32::from_rgb(30, 41, 59);
-pub const BORDER_SOFT: Color32 = Color32::from_rgb(51, 65, 85); // slate-700
-pub const TEXT: Color32 = Color32::from_rgb(241, 245, 249); // slate-100
-pub const TEXT_DIM: Color32 = Color32::from_rgb(148, 163, 184); // slate-400
-pub const TEXT_MUTED: Color32 = Color32::from_rgb(100, 116, 139); // slate-500
-pub const ACCENT: Color32 = Color32::from_rgb(52, 211, 153); // emerald-400
-pub const ACCENT_STRONG: Color32 = Color32::from_rgb(16, 185, 129); // emerald-500
-pub const ACCENT_DIM: Color32 = Color32::from_rgb(6, 78, 59); // emerald-900
-pub const WARN: Color32 = Color32::from_rgb(251, 191, 36); // amber-400
-pub const DANGER: Color32 = Color32::from_rgb(244, 63, 94); // rose-500
-pub const STAR: Color32 = Color32::from_rgb(251, 191, 36);
+// Paleta (claro / verde).
+pub const BG: Color32 = Color32::from_rgb(246, 248, 247); // fondo de página
+pub const PANEL: Color32 = Color32::from_rgb(255, 255, 255); // cabecera, pie, ventanas
+pub const CARD: Color32 = Color32::from_rgb(255, 255, 255);
+pub const CARD_TINT: Color32 = Color32::from_rgb(236, 246, 239); // tarjetas verdosas
+pub const HERO_A: Color32 = Color32::from_rgb(232, 244, 236); // degradado banner (izq.)
+pub const HERO_B: Color32 = Color32::from_rgb(214, 238, 222); // degradado banner (der.)
+pub const WIDGET: Color32 = Color32::from_rgb(243, 245, 244);
+pub const BORDER: Color32 = Color32::from_rgb(226, 232, 228);
+pub const BORDER_SOFT: Color32 = Color32::from_rgb(203, 213, 206);
+pub const TEXT: Color32 = Color32::from_rgb(23, 33, 28);
+pub const TEXT_DIM: Color32 = Color32::from_rgb(86, 100, 92);
+pub const TEXT_MUTED: Color32 = Color32::from_rgb(140, 152, 145);
+pub const ACCENT: Color32 = Color32::from_rgb(31, 138, 74); // verde principal
+pub const ACCENT_STRONG: Color32 = Color32::from_rgb(24, 122, 64);
+pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(52, 190, 106);
+pub const ACCENT_DIM: Color32 = Color32::from_rgb(222, 240, 228); // fondos suaves verdes
+pub const WARN: Color32 = Color32::from_rgb(217, 119, 6);
+pub const DANGER: Color32 = Color32::from_rgb(220, 38, 38);
+pub const STAR: Color32 = Color32::from_rgb(245, 158, 11);
+pub const ONLINE: Color32 = Color32::from_rgb(34, 197, 94);
+pub const OFFLINE: Color32 = Color32::from_rgb(148, 163, 184);
 
-pub const RADIUS: u8 = 12;
-pub const RADIUS_SM: u8 = 8;
+pub const RADIUS: u8 = 14;
+pub const RADIUS_SM: u8 = 9;
 
 /// Aplica el tema al contexto. Llamar una vez al crear la app.
 pub fn apply(ctx: &egui::Context) {
     let mut style: Style = (*ctx.style()).clone();
-    let mut v = Visuals::dark();
+    let mut v = Visuals::light();
 
     v.override_text_color = Some(TEXT);
     v.panel_fill = PANEL;
     v.window_fill = PANEL;
-    v.extreme_bg_color = BG;
-    v.faint_bg_color = CARD;
+    v.extreme_bg_color = Color32::WHITE;
+    v.faint_bg_color = WIDGET;
     v.window_stroke = Stroke::new(1.0_f32, BORDER);
     v.window_corner_radius = CornerRadius::same(RADIUS);
     v.menu_corner_radius = CornerRadius::same(RADIUS_SM);
+    v.window_shadow.color = Color32::from_black_alpha(28);
+    v.popup_shadow.color = Color32::from_black_alpha(20);
     v.selection.bg_fill = ACCENT_DIM;
     v.selection.stroke = Stroke::new(1.0_f32, ACCENT);
     v.hyperlink_color = ACCENT;
@@ -59,14 +67,14 @@ pub fn apply(ctx: &egui::Context) {
     w.inactive.fg_stroke = Stroke::new(1.0_f32, TEXT);
     w.inactive.corner_radius = CornerRadius::same(RADIUS_SM);
 
-    w.hovered.bg_fill = Color32::from_rgb(40, 52, 72);
-    w.hovered.weak_bg_fill = Color32::from_rgb(40, 52, 72);
-    w.hovered.bg_stroke = Stroke::new(1.0_f32, ACCENT);
+    w.hovered.bg_fill = ACCENT_DIM;
+    w.hovered.weak_bg_fill = ACCENT_DIM;
+    w.hovered.bg_stroke = Stroke::new(1.0_f32, ACCENT_LIGHT);
     w.hovered.fg_stroke = Stroke::new(1.0_f32, TEXT);
     w.hovered.corner_radius = CornerRadius::same(RADIUS_SM);
 
-    w.active.bg_fill = ACCENT_DIM;
-    w.active.weak_bg_fill = ACCENT_DIM;
+    w.active.bg_fill = Color32::from_rgb(200, 232, 212);
+    w.active.weak_bg_fill = Color32::from_rgb(200, 232, 212);
     w.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
     w.active.fg_stroke = Stroke::new(1.0_f32, TEXT);
     w.active.corner_radius = CornerRadius::same(RADIUS_SM);
@@ -79,34 +87,47 @@ pub fn apply(ctx: &egui::Context) {
 
     style.visuals = v;
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-    style.spacing.button_padding = egui::vec2(12.0, 6.0);
-    style.spacing.window_margin = Margin::same(16);
-    style.spacing.interact_size.y = 28.0;
+    style.spacing.button_padding = egui::vec2(14.0, 7.0);
+    style.spacing.window_margin = Margin::same(18);
+    style.spacing.interact_size.y = 30.0;
     ctx.set_style(style);
 }
 
-/// Marco de tarjeta (fondo `CARD`, borde `BORDER`, radio `RADIUS`).
+/// Marco de tarjeta blanca con borde suave.
 pub fn card() -> egui::Frame {
     egui::Frame::new()
         .fill(CARD)
         .stroke(Stroke::new(1.0_f32, BORDER))
         .corner_radius(CornerRadius::same(RADIUS))
         .inner_margin(Margin::same(18))
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 2],
+            blur: 8,
+            spread: 0,
+            color: Color32::from_black_alpha(10),
+        })
 }
 
-/// Tarjeta destacada con borde esmeralda (la de "Tu dirección").
-pub fn card_accent() -> egui::Frame {
-    card().stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(52, 211, 153, 80)))
+/// Tarjeta con tinte verde (las tarjetas de acción del inicio).
+pub fn card_tinted() -> egui::Frame {
+    card().fill(CARD_TINT).stroke(Stroke::new(1.0_f32, Color32::from_rgb(214, 232, 220)))
 }
 
-/// Tarjeta pequeña de la rejilla de dispositivos.
+/// Tarjeta de la rejilla de sesiones recientes (sin margen interior: la
+/// miniatura ocupa todo el ancho y el pie lleva su propio relleno).
 pub fn device_card(hovered: bool) -> egui::Frame {
-    let stroke = if hovered { ACCENT } else { BORDER };
+    let stroke = if hovered { ACCENT_LIGHT } else { BORDER };
     egui::Frame::new()
-        .fill(Color32::from_rgb(6, 11, 25))
+        .fill(CARD)
         .stroke(Stroke::new(1.0_f32, stroke))
         .corner_radius(CornerRadius::same(RADIUS))
-        .inner_margin(Margin::same(14))
+        .inner_margin(Margin::ZERO)
+        .shadow(egui::epaint::Shadow {
+            offset: [0, 2],
+            blur: 8,
+            spread: 0,
+            color: Color32::from_black_alpha(10),
+        })
 }
 
 /// Etiqueta de sección en mayúsculas, pequeña y con color de acento/atenuado.
@@ -120,46 +141,114 @@ pub fn section_label(ui: &mut egui::Ui, text: &str, accent: bool) {
     );
 }
 
-/// Botón primario (relleno esmeralda, texto oscuro).
+/// Botón primario (relleno verde, texto blanco).
 pub fn primary_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(egui::RichText::new(text.to_owned()).strong().color(BG))
-        .fill(ACCENT_STRONG)
+    egui::Button::new(egui::RichText::new(text.to_owned()).strong().color(Color32::WHITE))
+        .fill(ACCENT)
         .stroke(Stroke::NONE)
         .corner_radius(CornerRadius::same(RADIUS_SM))
 }
 
-/// Botón secundario (borde esmeralda suave).
+/// Botón secundario (blanco con borde y texto verde).
 pub fn ghost_button(text: &str) -> egui::Button<'static> {
     egui::Button::new(egui::RichText::new(text.to_owned()).color(ACCENT))
-        .fill(Color32::from_rgba_unmultiplied(16, 185, 129, 24))
-        .stroke(Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(52, 211, 153, 90)))
+        .fill(Color32::WHITE)
+        .stroke(Stroke::new(1.0_f32, BORDER_SOFT))
         .corner_radius(CornerRadius::same(RADIUS_SM))
+}
+
+/// Botón "pastilla" blanco con texto oscuro (tarjetas de acción).
+pub fn pill_button(text: &str) -> egui::Button<'static> {
+    egui::Button::new(egui::RichText::new(text.to_owned()).color(TEXT))
+        .fill(Color32::WHITE)
+        .stroke(Stroke::new(1.0_f32, BORDER_SOFT))
+        .corner_radius(CornerRadius::same(20))
+}
+
+/// Botón cuadrado de icono con borde (copiar, candado…).
+pub fn icon_button(text: &str) -> egui::Button<'static> {
+    egui::Button::new(egui::RichText::new(text.to_owned()).size(16.0).color(TEXT_DIM))
+        .fill(Color32::WHITE)
+        .stroke(Stroke::new(1.0_f32, BORDER_SOFT))
+        .corner_radius(CornerRadius::same(RADIUS_SM))
+        .min_size(egui::vec2(40.0, 40.0))
 }
 
 /// Botón peligroso (rojo) para desconectar/finalizar.
 pub fn danger_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(egui::RichText::new(text.to_owned()).strong().color(TEXT))
-        .fill(Color32::from_rgb(120, 30, 50))
-        .stroke(Stroke::new(1.0_f32, DANGER))
+    egui::Button::new(egui::RichText::new(text.to_owned()).strong().color(Color32::WHITE))
+        .fill(DANGER)
+        .stroke(Stroke::NONE)
         .corner_radius(CornerRadius::same(RADIUS_SM))
 }
 
 /// Punto de estado coloreado seguido de un texto.
 pub fn status_dot(ui: &mut egui::Ui, color: Color32, text: &str) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-    ui.painter().circle_filled(rect.center(), 4.0, color);
-    ui.label(egui::RichText::new(text).color(TEXT_DIM).size(12.0));
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(9.0, 9.0), egui::Sense::hover());
+    ui.painter().circle_filled(rect.center(), 4.5, color);
+    if !text.is_empty() {
+        ui.label(egui::RichText::new(text).color(TEXT_DIM).size(13.0));
+    }
 }
 
-/// Dibuja el ID en tres grupos, con el grupo central en color de acento.
+/// Dibuja el ID en tres grupos grandes en verde.
 pub fn big_id(ui: &mut egui::Ui, id: cleandesk_proto::CleanDeskId) {
     let s = id.to_string();
-    let groups: Vec<&str> = s.split(' ').collect();
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 10.0;
-        for (i, g) in groups.iter().enumerate() {
-            let color = if i == 1 { ACCENT } else { TEXT };
-            ui.label(egui::RichText::new(*g).monospace().size(34.0).strong().color(color));
-        }
-    });
+    ui.label(egui::RichText::new(s).size(38.0).strong().color(ACCENT));
+}
+
+/// Rectángulo con degradado horizontal (banner) pintado con dos triángulos
+/// de la malla de egui.
+pub fn gradient_rect(painter: &egui::Painter, rect: egui::Rect, left: Color32, right: Color32, radius: f32) {
+    use egui::epaint::{Mesh, Vertex, WHITE_UV};
+    // Fondo redondeado uniforme por debajo y degradado por encima con una
+    // malla rectangular; el pequeño recorte en las esquinas se disimula con
+    // el color del borde.
+    painter.rect_filled(rect, radius, left);
+    let inset = rect.shrink2(egui::vec2(radius * 0.5, 0.0));
+    let mut mesh = Mesh::default();
+    let c = |color: Color32| color;
+    mesh.vertices.push(Vertex { pos: inset.left_top(), uv: WHITE_UV, color: c(left) });
+    mesh.vertices.push(Vertex { pos: inset.right_top(), uv: WHITE_UV, color: c(right) });
+    mesh.vertices.push(Vertex { pos: inset.right_bottom(), uv: WHITE_UV, color: c(right) });
+    mesh.vertices.push(Vertex { pos: inset.left_bottom(), uv: WHITE_UV, color: c(left) });
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// Hoja decorativa (dos arcos rellenos) en verde translúcido.
+pub fn leaf(painter: &egui::Painter, center: egui::Pos2, size: f32, alpha: u8) {
+    let color = Color32::from_rgba_unmultiplied(31, 138, 74, alpha);
+    let mut pts = Vec::with_capacity(40);
+    for i in 0..=20 {
+        let t = i as f32 / 20.0;
+        let x = center.x - size * 0.5 + t * size;
+        let y = center.y - (t * std::f32::consts::PI).sin() * size * 0.35;
+        pts.push(egui::pos2(x, y));
+    }
+    for i in (0..=20).rev() {
+        let t = i as f32 / 20.0;
+        let x = center.x - size * 0.5 + t * size;
+        let y = center.y + (t * std::f32::consts::PI).sin() * size * 0.35;
+        pts.push(egui::pos2(x, y));
+    }
+    painter.add(egui::Shape::convex_polygon(pts, color, Stroke::NONE));
+}
+
+/// Icono de monitor dibujado con primitivas (pantalla + pie).
+pub fn monitor_icon(painter: &egui::Painter, center: egui::Pos2, size: f32, color: Color32) {
+    let w = size;
+    let h = size * 0.66;
+    let screen = egui::Rect::from_center_size(egui::pos2(center.x, center.y - size * 0.08), egui::vec2(w, h));
+    painter.rect_stroke(screen, size * 0.12, Stroke::new((size * 0.08).max(1.5), color), egui::StrokeKind::Inside);
+    let stand_y = screen.bottom() + size * 0.14;
+    painter.line_segment(
+        [egui::pos2(center.x, screen.bottom()), egui::pos2(center.x, stand_y)],
+        Stroke::new((size * 0.08).max(1.5), color),
+    );
+    painter.line_segment(
+        [egui::pos2(center.x - size * 0.22, stand_y), egui::pos2(center.x + size * 0.22, stand_y)],
+        Stroke::new((size * 0.08).max(1.5), color),
+    );
 }

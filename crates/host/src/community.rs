@@ -186,13 +186,17 @@ pub async fn serve_community(config: HostConfig, approver: Arc<dyn Approver>) ->
         for ip in cleandesk_discovery::upnp::local_addresses() {
             endpoints.push(SocketAddr::new(ip, direct_port));
         }
-        Record::new(
+        let mut record = Record::new(
             &record_identity,
             nostr_hex.clone(),
             endpoints,
             alias.clone(),
             cleandesk_discovery_now(),
-        )
+        );
+        // Viewers keep the MAC with the contact so they can wake this
+        // machine later (Wake-on-LAN); `set_mac` re-signs the record.
+        record.set_mac(&record_identity, cleandesk_discovery::wol::local_mac_address());
+        record
     };
     if let Some(node) = &dht {
         if let Err(e) = node.publish(&identity, &build_record(&mapping)).await {

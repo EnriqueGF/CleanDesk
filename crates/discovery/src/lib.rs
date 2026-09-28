@@ -34,7 +34,9 @@ pub mod nostr_link;
 pub mod record;
 pub mod resolver;
 pub mod upnp;
+pub mod wol;
 
+pub use lan::browse_all;
 pub use record::Record;
 pub use resolver::{Resolved, Resolver};
 

@@ -58,6 +58,7 @@ impl Resolver {
                         ep: peer.endpoints.clone(),
                         ts: unix_now(),
                         alias: peer.alias.clone(),
+                        mac: peer.mac.clone(),
                         sig: String::new(),
                     };
                     if record.matches_id(id) {

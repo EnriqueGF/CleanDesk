@@ -18,11 +18,14 @@
 //! * Unattended authentication is rate-limited per caller ([`AuthThrottle`])
 //!   and bounded in time ([`AUTH_TIMEOUT`]).
 
+mod clipboard;
 pub mod community;
+mod files;
 mod media;
 mod throttle;
 
 pub use community::{serve_community, CommunityOptions};
+pub use files::default_downloads_dir;
 pub use media::MediaControl;
 pub use throttle::AuthThrottle;
 
@@ -32,9 +35,10 @@ use bytes::Bytes;
 use cleandesk_crypto::identity::Identity;
 use cleandesk_proto::{
     frame,
+    files::FileChunk,
     message::{
-        AuthKind, InputEvent, MonitorInfo, MouseButton, RejectReason, SessionMessage,
-        SignalMessage, SignalPayload,
+        AuthKind, ClipboardData, FileTransferMsg, InputEvent, MonitorInfo, MouseButton,
+        RejectReason, RemoteAction, SessionMessage, SignalMessage, SignalPayload,
     },
     permissions::Permissions,
     quality::QualityProfile,
@@ -43,6 +47,7 @@ use cleandesk_proto::{
 };
 use cleandesk_transport::{Channel, IceConfig, PeerConnection, SignalOut, SignalingClient};
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Notify};
@@ -90,6 +95,9 @@ pub struct HostConfig {
     pub control: Option<Arc<HostControl>>,
     /// Options for [`serve_community`] (ignored by [`serve`]).
     pub community: CommunityOptions,
+    /// Where files sent by the viewer are stored. `None` means
+    /// [`default_downloads_dir`] (`<Downloads>/CleanDesk`).
+    pub downloads_dir: Option<PathBuf>,
 }
 
 impl HostConfig {
@@ -105,6 +113,7 @@ impl HostConfig {
             events: None,
             control: None,
             community: CommunityOptions::default(),
+            downloads_dir: None,
         }
     }
 }
@@ -511,18 +520,33 @@ async fn run_session_inner(
     let mut pressed = PressedState::default();
     let granted = ctx.granted;
 
+    // Clipboard sync runs only once the viewer is authenticated *and* the
+    // permission was granted; until then `clipboard` stays `None` and the
+    // receiver below is never polled.
+    let (clip_tx, mut clip_rx) = mpsc::unbounded_channel::<String>();
+    let mut clipboard: Option<clipboard::ClipboardSync> = None;
+    if authed && granted.contains(Permissions::CLIPBOARD) {
+        clipboard = Some(clipboard::ClipboardSync::start(clip_tx.clone()));
+    }
+    let downloads = ctx.config.downloads_dir.clone().unwrap_or_else(default_downloads_dir);
+    let mut files = files::FileReceiver::new(downloads);
+    // Whether we currently hold the host's local input blocked; must be
+    // undone on every exit path.
+    let mut local_input_blocked = false;
+
     let reason = loop {
-        let next = if authed {
-            incoming.recv().await
-        } else {
-            match tokio::time::timeout_at(auth_deadline.into(), incoming.recv()).await {
-                Ok(v) => v,
-                Err(_) => {
-                    warn!("unattended auth timed out");
-                    send_ctrl(&peer, &SessionMessage::Disconnect { reason: "auth timeout".into() }).await;
-                    break "authentication timed out".to_string();
-                }
+        let next = tokio::select! {
+            biased;
+            _ = tokio::time::sleep_until(auth_deadline.into()), if !authed => {
+                warn!("unattended auth timed out");
+                send_ctrl(&peer, &SessionMessage::Disconnect { reason: "auth timeout".into() }).await;
+                break "authentication timed out".to_string();
             }
+            Some(text) = clip_rx.recv(), if clipboard.is_some() => {
+                send_ctrl(&peer, &SessionMessage::Clipboard(ClipboardData::Text { content: text })).await;
+                continue;
+            }
+            next = incoming.recv() => next,
         };
         let Some((ch, bytes)) = next else { break "connection closed".to_string() };
         match ch {
@@ -539,6 +563,15 @@ async fn run_session_inner(
                     }
                 }
             }
+            Channel::Files => {
+                if !authed || !granted.contains(Permissions::FILE_TRANSFER) {
+                    continue;
+                }
+                let Ok(chunk) = frame::decode_payload::<FileChunk>(&bytes) else { continue };
+                for reply in files.on_chunk(chunk).await {
+                    send_ctrl(&peer, &reply).await;
+                }
+            }
             Channel::Control => {
                 let Ok(msg) = frame::decode_payload::<SessionMessage>(&bytes) else { continue };
                 match msg {
@@ -551,6 +584,9 @@ async fn run_session_inner(
                             let _ = ctx.outcome_tx.send(SessionOutcome::AuthSucceeded { peer: ctx.peer.id });
                             if !media_started {
                                 media_started = start_all(&peer, &media, ctx).await;
+                            }
+                            if clipboard.is_none() && granted.contains(Permissions::CLIPBOARD) {
+                                clipboard = Some(clipboard::ClipboardSync::start(clip_tx.clone()));
                             }
                         } else {
                             warn!("unattended authentication failed");
@@ -574,10 +610,46 @@ async fn run_session_inner(
                     }
                     SessionMessage::RequestKeyframe => media.request_keyframe(),
                     SessionMessage::Pong { nonce } => media.observe_pong(nonce),
-                    SessionMessage::Chat { .. } | SessionMessage::Clipboard(_) => {
-                        // Chat/clipboard are surfaced to the GUI in a later
-                        // milestone; permissions already gate clipboard.
-                        debug!("control message not yet surfaced");
+                    SessionMessage::Clipboard(ClipboardData::Text { content }) => {
+                        // `clipboard` only exists when CLIPBOARD was granted,
+                        // so this doubles as the permission check.
+                        match &clipboard {
+                            Some(sync) => sync.apply_remote(content),
+                            None => debug!("clipboard update ignored (not granted)"),
+                        }
+                    }
+                    SessionMessage::Clipboard(ClipboardData::Image { .. }) => {
+                        debug!("image clipboard not supported");
+                    }
+                    SessionMessage::File(msg) => {
+                        if granted.contains(Permissions::FILE_TRANSFER) {
+                            for reply in files.on_control(msg).await {
+                                send_ctrl(&peer, &reply).await;
+                            }
+                        } else {
+                            let transfer_id = file_msg_id(&msg);
+                            debug!(transfer_id, "file transfer refused (not granted)");
+                            send_ctrl(&peer, &SessionMessage::File(FileTransferMsg::Cancel { transfer_id })).await;
+                        }
+                    }
+                    SessionMessage::RemoteAction { action } => {
+                        if !remote_action_allowed(action, granted) {
+                            warn!(?action, "remote action refused (not granted)");
+                            continue;
+                        }
+                        info!(?action, "remote action");
+                        match perform_remote_action(action) {
+                            Ok(()) => {
+                                if let RemoteAction::LockLocalInput { locked } = action {
+                                    local_input_blocked = locked;
+                                }
+                            }
+                            Err(e) => warn!(?action, error = %e, "remote action failed"),
+                        }
+                    }
+                    SessionMessage::Chat { .. } => {
+                        // Chat is surfaced to the GUI in a later milestone.
+                        debug!("chat message not yet surfaced");
                     }
                     SessionMessage::Disconnect { reason } => {
                         info!(%reason, "viewer disconnected");
@@ -587,15 +659,76 @@ async fn run_session_inner(
                     other => debug!(?other, "unhandled control message"),
                 }
             }
-            _ => {}
+            Channel::Video => {}
         }
     };
 
-    // Whatever happened, never leave a key or button held down on the host.
+    // Whatever happened, never leave a key or button held down on the host,
+    // never leave its local input blocked, and never leave half a file behind.
     for ev in pressed.release_all() {
         let _ = injector.inject(ev, &media.monitor());
     }
+    if local_input_blocked {
+        if let Err(e) = cleandesk_input::block_local_input(false) {
+            warn!(error = %e, "could not unblock local input at session end");
+        }
+    }
+    files.abort_all().await;
+    drop(clipboard);
     reason
+}
+
+/// The transfer a file control message refers to.
+fn file_msg_id(msg: &FileTransferMsg) -> u64 {
+    match msg {
+        FileTransferMsg::Offer { transfer_id, .. }
+        | FileTransferMsg::Accept { transfer_id }
+        | FileTransferMsg::Cancel { transfer_id }
+        | FileTransferMsg::Progress { transfer_id, .. }
+        | FileTransferMsg::Complete { transfer_id } => *transfer_id,
+    }
+}
+
+/// True if the granted permissions allow this remote action.
+pub fn remote_action_allowed(action: RemoteAction, granted: Permissions) -> bool {
+    match action {
+        RemoteAction::RestartMachine => granted.contains(Permissions::RESTART_MACHINE),
+        RemoteAction::LockWorkstation | RemoteAction::SecureAttention => {
+            granted.contains(Permissions::CONTROL_KEYBOARD)
+        }
+        RemoteAction::LockLocalInput { .. } => granted.contains(Permissions::LOCK_LOCAL_INPUT),
+    }
+}
+
+/// Execute an already-authorised remote action on this machine.
+fn perform_remote_action(action: RemoteAction) -> Result<()> {
+    match action {
+        RemoteAction::RestartMachine => restart_machine(),
+        RemoteAction::LockWorkstation => cleandesk_input::lock_workstation(),
+        RemoteAction::LockLocalInput { locked } => cleandesk_input::block_local_input(locked),
+        RemoteAction::SecureAttention => cleandesk_input::send_secure_attention(),
+    }
+}
+
+/// Schedule a reboot in a few seconds so the viewer sees the session end
+/// cleanly rather than the link simply dying.
+#[cfg(windows)]
+fn restart_machine() -> Result<()> {
+    let status = std::process::Command::new("shutdown")
+        .args(["/r", "/t", "5", "/c", "CleanDesk remote restart"])
+        .status()
+        .context("running shutdown")?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("shutdown exited with {status}")
+    }
+}
+
+#[cfg(not(windows))]
+fn restart_machine() -> Result<()> {
+    warn!("remote restart is only implemented on Windows; ignoring");
+    Ok(())
 }
 
 /// Announce permissions, start media + stats, and notify the embedder.
@@ -756,6 +889,31 @@ mod tests {
         assert!(rel.contains(&InputEvent::Key { code: 0x11, pressed: false }));
         assert!(p.is_empty());
         assert!(p.release_all().is_empty());
+    }
+
+    #[test]
+    fn remote_actions_follow_permissions() {
+        let none = Permissions::VIEW_ONLY;
+        for a in [
+            RemoteAction::RestartMachine,
+            RemoteAction::LockWorkstation,
+            RemoteAction::LockLocalInput { locked: true },
+            RemoteAction::SecureAttention,
+        ] {
+            assert!(!remote_action_allowed(a, none), "{a:?} must not be allowed view-only");
+            assert!(remote_action_allowed(a, Permissions::full()));
+        }
+        let kb = Permissions::VIEW_SCREEN | Permissions::CONTROL_KEYBOARD;
+        assert!(remote_action_allowed(RemoteAction::LockWorkstation, kb));
+        assert!(remote_action_allowed(RemoteAction::SecureAttention, kb));
+        assert!(!remote_action_allowed(RemoteAction::RestartMachine, kb));
+        assert!(!remote_action_allowed(RemoteAction::LockLocalInput { locked: false }, kb));
+        let restart = Permissions::VIEW_SCREEN | Permissions::RESTART_MACHINE;
+        assert!(remote_action_allowed(RemoteAction::RestartMachine, restart));
+        assert!(!remote_action_allowed(RemoteAction::LockWorkstation, restart));
+        let lock = Permissions::VIEW_SCREEN | Permissions::LOCK_LOCAL_INPUT;
+        assert!(remote_action_allowed(RemoteAction::LockLocalInput { locked: true }, lock));
+        assert!(!remote_action_allowed(RemoteAction::SecureAttention, lock));
     }
 
     #[test]

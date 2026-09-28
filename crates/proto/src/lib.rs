@@ -11,6 +11,7 @@
 //! the client, host, signal server and relay all agree on the same types.
 
 pub mod error;
+pub mod files;
 pub mod frame;
 pub mod id;
 pub mod media;
@@ -36,7 +37,9 @@ pub use quality::QualityProfile;
 ///   (`SignalMessage::RegisterChallenge` / `RegisterProof`); older clients can
 ///   no longer register, hence the major bump. Also adds
 ///   `SessionMessage::{RequestKeyframe, Ping, Pong}`.
-pub const PROTOCOL_VERSION: Version = Version { major: 2, minor: 0 };
+/// * 2.1 — `SessionMessage::RemoteAction` and the file-transfer data format
+///   (`files::FileChunk` on the `files` channel).
+pub const PROTOCOL_VERSION: Version = Version { major: 2, minor: 1 };
 
 /// Default TCP port for the signaling (CleanDesk Server) WebSocket endpoint.
 ///

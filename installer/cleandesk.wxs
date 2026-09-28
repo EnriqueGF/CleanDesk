@@ -8,14 +8,28 @@
   handled by MajorUpgrade with a stable UpgradeCode; the ProductId is
   regenerated on every build ("*").
 
+  Install options (also settable on the msiexec command line for silent
+  installs, e.g. `msiexec /i CleanDesk.msi /qn STARTWITHWINDOWS=0
+  INSTALLDESKTOPSHORTCUT=0`):
+    STARTWITHWINDOWS       "1" (default) writes the HKCU Run value "CleanDesk"
+                           so the app starts at sign-in. The app's own
+                           "Start with Windows" setting writes the same value
+                           name, so both stay consistent.
+    INSTALLDESKTOPSHORTCUT "1" (default) creates the desktop shortcut.
+  The interactive UI exposes both on the OptionsDlg page (WixUI_FeatureTree
+  with OptionsDlg inserted between the license and the feature tree) and
+  offers "Launch CleanDesk" on the exit page.
+
   The Windows service is not installed by the MSI on purpose: the app installs
-  it on demand from Ajustes → Sistema (UAC prompt), so users who only want the
+  it on demand from Settings → System (UAC prompt), so users who only want the
   interactive mode never get a background service.
 -->
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
   <Product Id="*"
            Name="CleanDesk"
-           Language="3082"
+           Language="1033"
            Codepage="1252"
            Version="$(var.Version)"
            Manufacturer="CleanDesk"
@@ -24,16 +38,21 @@
     <Package InstallerVersion="500"
              Compressed="yes"
              InstallScope="perMachine"
-             Description="CleanDesk: escritorio remoto rápido, ligero y seguro"
+             Description="CleanDesk: fast, lightweight and secure remote desktop"
              Manufacturer="CleanDesk" />
 
-    <MajorUpgrade DowngradeErrorMessage="Ya hay instalada una versión más reciente de CleanDesk." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of CleanDesk is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <Icon Id="cleandesk.ico" SourceFile="$(var.SourceDir)\installer\cleandesk.ico" />
     <Property Id="ARPPRODUCTICON" Value="cleandesk.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/EnriqueGF/CleanDesk" />
     <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!-- Install options. Secure="yes" so values passed on the command line
+         survive the transition to the elevated server side of the install. -->
+    <Property Id="STARTWITHWINDOWS" Value="1" Secure="yes" />
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" Secure="yes" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
@@ -52,14 +71,11 @@
               KeyPath="yes" />
         <!-- Inbound rules so LAN discovery, direct signaling and ICE work
              without a manual firewall prompt. -->
-        <fire:FirewallException xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension"
-                                Id="FwDirect" Name="CleanDesk (señalización directa)"
+        <fire:FirewallException Id="FwDirect" Name="CleanDesk (direct signaling)"
                                 Port="7423" Protocol="tcp" Scope="any" IgnoreFailure="yes" />
-        <fire:FirewallException xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension"
-                                Id="FwIce" Name="CleanDesk (WebRTC)"
+        <fire:FirewallException Id="FwIce" Name="CleanDesk (WebRTC)"
                                 Port="7424" Protocol="udp" Scope="any" IgnoreFailure="yes" />
-        <fire:FirewallException xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension"
-                                Id="FwMdns" Name="CleanDesk (mDNS)"
+        <fire:FirewallException Id="FwMdns" Name="CleanDesk (mDNS)"
                                 Port="5353" Protocol="udp" Scope="localSubnet" IgnoreFailure="yes" />
       </Component>
       <Component Id="RelayExecutable" Guid="7A1E2D3C-4B5F-4A6E-9D8C-0F1E2D3C4B55" Win64="yes">
@@ -72,13 +88,25 @@
               Source="$(var.SourceDir)\target\release\cleandesk-signal-server.exe"
               KeyPath="yes" />
       </Component>
+      <!-- Autostart at sign-in for the installing user. Same value name the
+           app writes from its own settings page, so toggling either side
+           keeps a single entry. -->
+      <Component Id="StartWithWindows" Guid="D4E5F6A7-B8C9-4D0E-9F1A-2B3C4D5E6F99" Win64="yes">
+        <Condition>STARTWITHWINDOWS = "1"</Condition>
+        <RegistryValue Root="HKCU"
+                       Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                       Name="CleanDesk"
+                       Type="string"
+                       Value="&quot;[INSTALLFOLDER]cleandesk.exe&quot;"
+                       KeyPath="yes" />
+      </Component>
     </DirectoryRef>
 
     <DirectoryRef Id="ProgramMenuDir">
       <Component Id="StartMenuShortcut" Guid="5E6F7A8B-9C0D-4E1F-A2B3-C4D5E6F7A877">
         <Shortcut Id="StartMenuCleanDesk"
                   Name="CleanDesk"
-                  Description="Escritorio remoto CleanDesk"
+                  Description="CleanDesk remote desktop"
                   Target="[INSTALLFOLDER]cleandesk.exe"
                   WorkingDirectory="INSTALLFOLDER"
                   Icon="cleandesk.ico" />
@@ -89,6 +117,7 @@
 
     <DirectoryRef Id="DesktopFolder">
       <Component Id="DesktopShortcut" Guid="9A0B1C2D-3E4F-4A5B-8C7D-6E5F4A3B2C88">
+        <Condition>INSTALLDESKTOPSHORTCUT = "1"</Condition>
         <Shortcut Id="DesktopCleanDesk"
                   Name="CleanDesk"
                   Target="[INSTALLFOLDER]cleandesk.exe"
@@ -102,13 +131,61 @@
       <ComponentRef Id="MainExecutable" />
       <ComponentRef Id="StartMenuShortcut" />
       <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="StartWithWindows" />
     </Feature>
-    <Feature Id="Servers" Title="Servidor y relay (modo privado / comunitario)" Level="1000">
+    <Feature Id="Servers" Title="Signaling server and relay (private / community mode)" Level="1000">
       <ComponentRef Id="RelayExecutable" />
       <ComponentRef Id="SignalExecutable" />
     </Feature>
 
-    <UIRef Id="WixUI_FeatureTree" />
+    <!-- "Launch CleanDesk" checkbox on the exit page. -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch CleanDesk" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[#cleandesk.exe]" />
+    <CustomAction Id="LaunchCleanDesk"
+                  BinaryKey="WixCA"
+                  DllEntry="WixShellExec"
+                  Impersonate="yes" />
+
+    <UI Id="WixUI_CleanDesk">
+      <UIRef Id="WixUI_FeatureTree" />
+
+      <!-- Options page inserted between the license and the feature tree.
+           WixUI_FeatureTree publishes LicenseAgreementDlg/Next -> CustomizeDlg
+           at Order 2 and CustomizeDlg/Back -> LicenseAgreementDlg; a higher
+           Order runs later, so the last NewDialog wins. -->
+      <Dialog Id="OptionsDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.LicenseAgreementDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="300" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Install options" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="340" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose how CleanDesk integrates with Windows." />
+
+        <Control Id="StartWithWindowsCheck" Type="CheckBox" X="26" Y="70" Width="320" Height="17"
+                 Property="STARTWITHWINDOWS" CheckBoxValue="1"
+                 Text="&amp;Start CleanDesk when I sign in" />
+        <Control Id="StartWithWindowsHelp" Type="Text" X="40" Y="88" Width="310" Height="24" NoPrefix="yes"
+                 Text="Keeps the host reachable after a reboot. You can change this later from Settings." />
+
+        <Control Id="DesktopShortcutCheck" Type="CheckBox" X="26" Y="120" Width="320" Height="17"
+                 Property="INSTALLDESKTOPSHORTCUT" CheckBoxValue="1"
+                 Text="&amp;Create a desktop shortcut" />
+
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="OptionsDlg" Order="3">LicenseAccepted = "1"</Publish>
+      <Publish Dialog="OptionsDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
+      <Publish Dialog="OptionsDlg" Control="Next" Event="NewDialog" Value="CustomizeDlg">1</Publish>
+      <Publish Dialog="CustomizeDlg" Control="Back" Event="NewDialog" Value="OptionsDlg" Order="3">NOT Installed</Publish>
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchCleanDesk">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed</Publish>
+    </UI>
+
     <WixVariable Id="WixUILicenseRtf" Value="$(var.SourceDir)\installer\license.rtf" />
   </Product>
 </Wix>

@@ -36,6 +36,10 @@ pub struct DeviceEntry {
     /// someone else appearing under the same ID (see `cleandesk-discovery`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinned_key: Option<String>,
+    /// MAC address (`AA:BB:CC:DD:EE:FF`) of the device's primary adapter, as
+    /// last published by the host; lets the viewer send a Wake-on-LAN packet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mac: Option<String>,
 }
 
 /// Serde default for [`DeviceEntry::state`]: a device we have not heard
@@ -58,6 +62,7 @@ impl DeviceEntry {
             state: DeviceState::Offline,
             unattended_key: None,
             pinned_key: None,
+            mac: None,
         }
     }
 

@@ -24,6 +24,8 @@ mainline = "8.0.0"
 nostr = { version = "0.45.5", default-features = false, features = ["std", "os-rng", "nip44"] }
 igd-next = { version = "0.17.1", features = ["aio_tokio"] }
 mdns-sd = "0.21.4"
+# Wake-on-LAN: the primary adapter MAC a host publishes so a viewer can wake it.
+mac_address = "1.1.8"
 # Only to pin the process-level TLS provider: two providers (ring via
 # tungstenite, aws-lc via nostr deps) end up in the graph and rustls refuses
 # to guess.
