@@ -1,0 +1,24 @@
+[package]
+name = "cleandesk-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Host role runtime: capture -> encode -> send; receive & inject input."
+
+[dependencies]
+cleandesk-proto.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+cleandesk-core.workspace = true
+cleandesk-capture.workspace = true
+cleandesk-codec.workspace = true
+cleandesk-input.workspace = true
+cleandesk-transport.workspace = true
+cleandesk-crypto.workspace = true
+bytes.workspace = true
+parking_lot.workspace = true

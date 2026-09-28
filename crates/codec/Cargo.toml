@@ -1,0 +1,20 @@
+[package]
+name = "cleandesk-codec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Video encode/decode: tile+zstd+JPEG MVP behind a codec trait."
+
+[dependencies]
+cleandesk-proto.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+zstd.workspace = true
+image.workspace = true
+serde.workspace = true
+# Already declared in the workspace root (used there for postcard::message
+# framing); reused here to serialize the small internal tile-payload struct
+# before zstd compression — see `src/payload.rs`.
+postcard.workspace = true

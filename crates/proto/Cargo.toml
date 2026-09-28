@@ -1,0 +1,18 @@
+[package]
+name = "cleandesk-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Shared protocol: IDs, permissions, signaling & session messages, wire framing."
+
+[dependencies]
+serde.workspace = true
+postcard.workspace = true
+bitflags.workspace = true
+thiserror.workspace = true
+bytes.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

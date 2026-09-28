@@ -1,0 +1,14 @@
+[package]
+name = "cleandesk-input"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Input capture + injection (Windows SendInput)."
+
+[dependencies]
+cleandesk-proto.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

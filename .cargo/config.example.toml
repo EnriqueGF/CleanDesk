@@ -1,0 +1,4 @@
+# Build output goes to F: because C: has very little free space.
+# All target artifacts for this project are written under F:\cleandesk-target.
+[build]
+target-dir = "F:/cleandesk-target"

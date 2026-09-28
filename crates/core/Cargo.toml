@@ -1,0 +1,19 @@
+[package]
+name = "cleandesk-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Session orchestration, permissions, config, storage, history, address book."
+
+[dependencies]
+cleandesk-proto.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+cleandesk-crypto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+directories.workspace = true
+uuid.workspace = true
+parking_lot.workspace = true

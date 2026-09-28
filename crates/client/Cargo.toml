@@ -1,0 +1,21 @@
+[package]
+name = "cleandesk-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Viewer role runtime: receive & decode video; capture & send input."
+
+[dependencies]
+cleandesk-proto.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+cleandesk-core.workspace = true
+cleandesk-codec.workspace = true
+cleandesk-transport.workspace = true
+cleandesk-crypto.workspace = true
+bytes.workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "cleandesk-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "egui/eframe desktop UI: main window + session viewer."
+
+[dependencies]
+cleandesk-proto.workspace = true
+cleandesk-core.workspace = true
+cleandesk-client.workspace = true
+cleandesk-host.workspace = true
+cleandesk-codec.workspace = true
+cleandesk-platform.workspace = true
+cleandesk-crypto.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+eframe = "0.32.3"
+egui = "0.32.3"

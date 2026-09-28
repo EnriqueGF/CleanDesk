@@ -1,0 +1,89 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/proto",
+    "crates/crypto",
+    "crates/transport",
+    "crates/capture",
+    "crates/codec",
+    "crates/input",
+    "crates/platform",
+    "crates/core",
+    "crates/host",
+    "crates/client",
+    "crates/gui",
+    "crates/app",
+    "crates/signal-server",
+    "crates/relay-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+authors = ["CleanDesk Contributors"]
+repository = "https://github.com/EnriqueGF/CleanDesk"
+
+[workspace.dependencies]
+# Internal crates
+cleandesk-proto = { path = "crates/proto" }
+cleandesk-crypto = { path = "crates/crypto" }
+cleandesk-transport = { path = "crates/transport" }
+cleandesk-capture = { path = "crates/capture" }
+cleandesk-codec = { path = "crates/codec" }
+cleandesk-input = { path = "crates/input" }
+cleandesk-platform = { path = "crates/platform" }
+cleandesk-core = { path = "crates/core" }
+cleandesk-host = { path = "crates/host" }
+cleandesk-client = { path = "crates/client" }
+cleandesk-gui = { path = "crates/gui" }
+
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures = "0.3"
+futures-util = "0.3"
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+postcard = { version = "1", features = ["use-std"] }
+bytes = "1"
+
+# Crypto
+ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"] }
+argon2 = "0.5"
+rand = "0.8"
+rand_core = "0.6"
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+zeroize = { version = "1", features = ["derive"] }
+
+# Compression / imaging
+zstd = "0.13"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+
+# Utility
+bitflags = { version = "2", features = ["serde"] }
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+directories = "5"
+parking_lot = "0.12"
+dashmap = "6"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1

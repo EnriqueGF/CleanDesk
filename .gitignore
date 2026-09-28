@@ -1,0 +1,15 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+*.pdb
+.env
+.DS_Store
+# Local runtime state / secrets — never commit
+/data
+*.identity
+*.token
+
+# Machine-specific cargo config (custom target-dir); copy .cargo/config.example.toml if you need it
+.cargo/config.toml
+# Local scratch / logs
+*.log

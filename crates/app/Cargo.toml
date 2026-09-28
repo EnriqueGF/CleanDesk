@@ -1,0 +1,23 @@
+[package]
+name = "cleandesk-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "CleanDesk desktop application entry point (GUI / headless host / direct connect)."
+
+[[bin]]
+name = "cleandesk"
+path = "src/main.rs"
+
+[dependencies]
+cleandesk-proto.workspace = true
+cleandesk-core.workspace = true
+cleandesk-host.workspace = true
+cleandesk-platform.workspace = true
+cleandesk-gui.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

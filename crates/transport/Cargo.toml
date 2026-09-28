@@ -1,0 +1,26 @@
+[package]
+name = "cleandesk-transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "P2P transport: WebRTC data channels, NAT traversal, relay fallback."
+
+[dependencies]
+cleandesk-proto.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+bytes.workspace = true
+serde_json.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+webrtc = "0.21.0"
+base64.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
