@@ -104,6 +104,8 @@ pub struct CleanDeskApp {
     pub identity_alarm: Option<CleanDeskId>,
     /// Icono de bandeja (None si el sistema no lo permite).
     tray: Option<crate::tray::Tray>,
+    /// Otra instancia pidió que mostremos la ventana (mutex de instancia única).
+    pub show_requested: Arc<std::sync::atomic::AtomicBool>,
     /// El usuario eligió "Salir": la siguiente petición de cierre se acepta.
     quitting: bool,
     /// Pestaña activa de la lista de equipos.
@@ -213,7 +215,7 @@ impl CleanDeskApp {
             pending_remember: None,
             notice: None,
             identity_alarm: None,
-            tray: match crate::tray::Tray::new(cc.egui_ctx.clone()) {
+            tray: match crate::tray::Tray::new(cc.egui_ctx.clone(), crate::tray::native_handle(cc)) {
                 Ok(t) => Some(t),
                 Err(e) => {
                     warn!(error = %e, "tray icon unavailable");
@@ -221,6 +223,7 @@ impl CleanDeskApp {
                 }
             },
             quitting: false,
+            show_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tab: DeviceTab::Recent,
             // `CLEANDESK_OPEN_SETTINGS=1` abre Ajustes al arrancar (capturas, soporte).
             show_settings: std::env::var_os("CLEANDESK_OPEN_SETTINGS").is_some(),
@@ -536,6 +539,11 @@ impl CleanDeskApp {
     /// "Salir" en el menú de la bandeja cierra de verdad.
     fn handle_tray(&mut self, ctx: &egui::Context) {
         use crate::tray::TrayAction;
+        if self.show_requested.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         if let Some(tray) = &self.tray {
             match tray.poll() {
                 TrayAction::Show => {

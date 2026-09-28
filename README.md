@@ -45,6 +45,8 @@ files and provide support — using **P2P connections** whenever possible and a
   included), switchable in Settings.
 - **Lives in the tray.** Closing the window minimizes CleanDesk to the system
   tray and the host keeps serving; quit from the tray menu (configurable).
+  Launching it again just brings the existing window back (single instance per
+  data directory).
 
 <p align="center">
   <img src="docs/screenshots/settings.png" alt="Settings: network mode, unattended access, service" width="520">

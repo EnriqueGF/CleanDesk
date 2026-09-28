@@ -249,6 +249,20 @@ fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_override: Op
         .build()
         .context("building tokio runtime")?;
     let data_dir = app.data_dir();
+    // One headless host per data directory (the GUI has its own key and
+    // coordinates with us through the presence lock instead).
+    use cleandesk_platform::single_instance::{self, Instance};
+    let _guard = match single_instance::acquire(&single_instance::instance_key(&data_dir, "host")) {
+        Ok(Instance::Primary(g)) => Some(g),
+        Ok(Instance::AlreadyRunning) => {
+            tracing::warn!("a headless host is already running for this data directory; exiting");
+            return Ok(());
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "single-instance guard unavailable; continuing");
+            None
+        }
+    };
     rt.block_on(async move {
         let approver: Arc<dyn Approver> = Arc::new(HeadlessApprover);
         let mut warned_gui = false;

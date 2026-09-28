@@ -15,6 +15,7 @@
 //! return [`PlatformError::Unsupported`] so the GUI can grey the options out.
 
 pub mod presence;
+pub mod single_instance;
 pub mod service;
 pub mod startup;
 
