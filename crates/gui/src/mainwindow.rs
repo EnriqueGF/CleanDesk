@@ -149,7 +149,7 @@ fn header(app: &mut CleanDeskApp, ctx: &egui::Context) {
                 ui.add_space(28.0);
 
                 for (page, icon, label) in [
-                    (Page::Home, "⌂", tr("Home")),
+                    (Page::Home, "🏠", tr("Home")),
                     (Page::Sessions, "🖥", tr("Sessions")),
                     (Page::Contacts, "👤", tr("Contacts")),
                     (Page::Invitations, "✉", tr("Invitations")),
@@ -333,7 +333,7 @@ fn hero(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
                         ui.horizontal(|ui| {
                             theme::big_id(ui, app.id);
                             ui.add_space(10.0);
-                            if ui.add(theme::icon_button("⧉")).on_hover_text(tr("Copy")).clicked() {
+                            if ui.add(theme::icon_button("📋")).on_hover_text(tr("Copy")).clicked() {
                                 ui.ctx().copy_text(app.id.to_string());
                                 app.notice = Some(tr("ID copied to the clipboard.").into());
                             }
@@ -473,6 +473,8 @@ fn action_cards(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) 
 fn action_card(ui: &mut egui::Ui, tinted: bool, icon: &str, title: &str, text: &str, button: &str, mut on_click: impl FnMut()) {
     let frame = if tinted { theme::card_tinted() } else { theme::card() };
     frame.show(ui, |ui| {
+      // `ui.columns` justifica el texto; volvemos a la alineación normal.
+      ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
         ui.set_min_height(190.0);
         let (rect, _) = ui.allocate_exact_size(egui::vec2(44.0, 44.0), egui::Sense::hover());
         ui.painter().rect_filled(rect, theme::RADIUS_SM as f32, theme::ACCENT_DIM);
@@ -485,6 +487,7 @@ fn action_card(ui: &mut egui::Ui, tinted: bool, icon: &str, title: &str, text: &
         if ui.add(theme::pill_button(&format!("{button}  ›"))).clicked() {
             on_click();
         }
+      });
     });
 }
 
@@ -809,6 +812,7 @@ fn invitations_page(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 
     ui.columns(2, |cols| {
         theme::card().show(&mut cols[0], |ui| {
+          ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
             theme::section_label(ui, tr("Invite"), true);
             ui.add_space(6.0);
             ui.label(tr("Send this text to the person who should connect to you:"));
@@ -838,8 +842,10 @@ fn invitations_page(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
                     .size(11.0)
                     .color(theme::TEXT_MUTED),
             );
+          });
         });
         theme::card().show(&mut cols[1], |ui| {
+          ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
             theme::section_label(ui, tr("Pending requests"), true);
             ui.add_space(6.0);
             match &app.host_session {
@@ -854,6 +860,7 @@ fn invitations_page(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
             ui.add_space(10.0);
             theme::section_label(ui, tr("Identity fingerprint"), false);
             ui.label(egui::RichText::new(app.state.identity.fingerprint()).monospace().size(12.0));
+          });
         });
     });
 }
@@ -1127,48 +1134,75 @@ fn language_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     theme::section_label(ui, tr("Unattended access"), true);
 
-    let mut enabled = app.state.settings.read().unattended_enabled;
-    let toggled = ui
-        .checkbox(&mut enabled, tr("Allow unattended connections"))
-        .changed();
+    let (mut enabled, has_password) = {
+        let s = app.state.settings.read();
+        (s.unattended_enabled, s.unattended_key_bytes.is_some())
+    };
 
-    ui.horizontal(|ui| {
-        ui.label(tr("Password:"));
-        ui.add(egui::TextEdit::singleline(&mut app.unattended_pw).password(true));
-    });
-    ui.label(
-        egui::RichText::new(tr("Anyone connecting with this password gets in without your approval. Restart the app after changing it so the host picks it up."))
-            .size(11.0)
-            .color(theme::TEXT_MUTED),
-    );
-
-    if toggled {
-        if enabled {
-            let pw = app.unattended_pw.trim().to_string();
-            if pw.len() < 6 {
-                app.notice = Some(tr("The unattended-access password must be at least 6 characters long.").into());
-                app.state.settings.write().unattended_enabled = false;
-            } else {
-                let host_id = app.id.value();
-                let result = app.state.settings.write().enable_unattended(&pw, host_id);
-                match result {
-                    Ok(()) => {
-                        app.unattended_pw.clear();
-                        app.save_settings();
-                        app.notice = Some(tr("Unattended access enabled.").into());
-                    }
-                    Err(e) => {
-                        app.state.settings.write().unattended_enabled = false;
-                        app.notice = Some(trf("Could not enable it: {err}", &[("err", &e.to_string())]));
-                    }
-                }
-            }
+    // El check solo enciende/apaga; la contraseña se guarda con su botón.
+    // Sin contraseña guardada no se puede activar, y se explica aquí mismo
+    // (el aviso general queda tapado por esta ventana).
+    if ui.checkbox(&mut enabled, tr("Allow unattended connections")).changed() {
+        if enabled && !has_password {
+            app.unattended_msg = Some((tr("Set a password below first (at least 6 characters).").into(), true));
+        } else if enabled {
+            app.state.settings.write().unattended_enabled = true;
+            app.save_settings();
+            app.restart_host();
+            app.unattended_msg = Some((tr("Unattended access enabled.").into(), false));
         } else {
             app.state.settings.write().disable_unattended();
             app.save_settings();
-            app.notice = Some(tr("Unattended access disabled.").into());
+            app.restart_host();
+            app.unattended_msg = Some((tr("Unattended access disabled.").into(), false));
         }
     }
+
+    let mut save = false;
+    ui.horizontal(|ui| {
+        ui.label(tr("Password:"));
+        let resp = ui.add(
+            egui::TextEdit::singleline(&mut app.unattended_pw)
+                .password(true)
+                .hint_text(if has_password { tr("(set; type a new one to replace it)") } else { tr("at least 6 characters") })
+                .desired_width(180.0),
+        );
+        if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            save = true;
+        }
+        let valid = app.unattended_pw.trim().len() >= 6;
+        if ui.add_enabled(valid, theme::primary_button(tr("Save password"))).clicked() {
+            save = true;
+        }
+    });
+    if save {
+        let pw = app.unattended_pw.trim().to_string();
+        if pw.len() < 6 {
+            app.unattended_msg = Some((tr("The unattended-access password must be at least 6 characters long.").into(), true));
+        } else {
+            let host_id = app.id.value();
+            let result = app.state.settings.write().enable_unattended(&pw, host_id);
+            match result {
+                Ok(()) => {
+                    app.unattended_pw.clear();
+                    app.save_settings();
+                    app.restart_host();
+                    app.unattended_msg = Some((tr("Password saved; unattended access enabled.").into(), false));
+                }
+                Err(e) => {
+                    app.unattended_msg = Some((trf("Could not enable it: {err}", &[("err", &e.to_string())]), true));
+                }
+            }
+        }
+    }
+    if let Some((msg, is_err)) = &app.unattended_msg {
+        ui.label(egui::RichText::new(msg).size(12.0).color(if *is_err { theme::DANGER } else { theme::ACCENT_STRONG }));
+    }
+    ui.label(
+        egui::RichText::new(tr("Anyone connecting with this password gets in without your approval. Only an Argon2id hash and a derived key are stored, never the password."))
+            .size(11.0)
+            .color(theme::TEXT_MUTED),
+    );
 }
 
 /// Guarda el alias en los ajustes (o lo borra si queda vacío) y persiste.
@@ -1211,14 +1245,7 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 
     theme::section_label(ui, tr("System"), true);
 
-    let stale = app
-        .platform_checked_at
-        .is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(3));
-    if stale {
-        app.service_status = service::status();
-        app.run_at_login = startup::is_run_at_login().unwrap_or(false);
-        app.platform_checked_at = Some(std::time::Instant::now());
-    }
+    app.poll_platform_status(ui.ctx());
     ui.ctx().request_repaint_after(std::time::Duration::from_secs(3));
 
     let exe = std::env::current_exe().ok();

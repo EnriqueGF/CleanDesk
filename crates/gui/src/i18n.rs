@@ -217,6 +217,12 @@ fn spanish(en: &str) -> Option<&'static str> {
 
         // --- Ventana "Ajustes" ---
         "Language" => "Idioma",
+        "Set a password below first (at least 6 characters)." => "Primero define una contraseña abajo (mínimo 6 caracteres).",
+        "(set; type a new one to replace it)" => "(definida; escribe otra para sustituirla)",
+        "at least 6 characters" => "mínimo 6 caracteres",
+        "Save password" => "Guardar contraseña",
+        "Password saved; unattended access enabled." => "Contraseña guardada; acceso desatendido activado.",
+        "Anyone connecting with this password gets in without your approval. Only an Argon2id hash and a derived key are stored, never the password." => "Quien se conecte con esta contraseña entra sin tu aprobación. Solo se guarda un hash Argon2id y una clave derivada, nunca la contraseña.",
         "Chat" => "Chat",
         "Chat ({n})" => "Chat ({n})",
         "CleanDesk ID:" => "ID de CleanDesk:",
@@ -559,9 +565,15 @@ mod tests {
             let es = spanish(key).unwrap();
             let mut rest = *key;
             while let Some(start) = rest.find('{') {
-                let end = rest[start..].find('}').map(|e| start + e + 1).expect("unclosed placeholder");
+                let end = rest[start..]
+                    .find('}')
+                    .map(|e| start + e + 1)
+                    .expect("unclosed placeholder");
                 let ph = &rest[start..end];
-                assert!(es.contains(ph), "placeholder {ph} missing in Spanish for {key:?}");
+                assert!(
+                    es.contains(ph),
+                    "placeholder {ph} missing in Spanish for {key:?}"
+                );
                 rest = &rest[end..];
             }
         }
@@ -598,7 +610,10 @@ mod tests {
             "{n} min ago",
             "{who} ({id}) is viewing your screen",
         ] {
-            assert!(spanish(key).is_some(), "UI key {key:?} missing from the Spanish table");
+            assert!(
+                spanish(key).is_some(),
+                "UI key {key:?} missing from the Spanish table"
+            );
         }
     }
 

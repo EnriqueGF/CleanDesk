@@ -181,7 +181,10 @@ impl ViewerState {
             (self.modifiers.alt, VK_MENU),
         ] {
             if held {
-                self.session.send_input(InputEvent::Key { code, pressed: false });
+                self.session.send_input(InputEvent::Key {
+                    code,
+                    pressed: false,
+                });
             }
         }
     }
@@ -238,7 +241,11 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                         .selected_text(monitor_label(&viewer.monitors, viewer.monitor))
                         .show_ui(ui, |ui| {
                             for m in &viewer.monitors {
-                                ui.selectable_value(&mut viewer.monitor, m.index, monitor_label(&viewer.monitors, m.index));
+                                ui.selectable_value(
+                                    &mut viewer.monitor,
+                                    m.index,
+                                    monitor_label(&viewer.monitors, m.index),
+                                );
                             }
                         });
                     if viewer.monitor != before {
@@ -254,7 +261,11 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                     .selected_text(quality_label(viewer.quality))
                     .show_ui(ui, |ui| {
                         for profile in QUALITY_PROFILES {
-                            ui.selectable_value(&mut viewer.quality, *profile, quality_label(*profile));
+                            ui.selectable_value(
+                                &mut viewer.quality,
+                                *profile,
+                                quality_label(*profile),
+                            );
                         }
                     });
                 if viewer.quality != before {
@@ -271,7 +282,11 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                 {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(viewer.fullscreen));
                 }
-                if ui.button("⟳").on_hover_text(tr("Refresh image (request a keyframe)")).clicked() {
+                if ui
+                    .button("⟳")
+                    .on_hover_text(tr("Refresh image (request a keyframe)"))
+                    .clicked()
+                {
                     viewer.session.request_keyframe();
                 }
 
@@ -281,7 +296,8 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                 } else {
                     tr("Chat").to_string()
                 };
-                if ui.toggle_value(&mut viewer.show_chat, chat_label).changed() && viewer.show_chat {
+                if ui.toggle_value(&mut viewer.show_chat, chat_label).changed() && viewer.show_chat
+                {
                     viewer.unread_chat = 0;
                 }
                 let files_label = if viewer.offers.is_empty() {
@@ -319,7 +335,11 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
 
             // Línea de estadísticas (spec §26).
             ui.horizontal_wrapped(|ui| {
-                ui.label(egui::RichText::new(stats_line(viewer)).size(11.0).color(theme::TEXT_MUTED));
+                ui.label(
+                    egui::RichText::new(stats_line(viewer))
+                        .size(11.0)
+                        .color(theme::TEXT_MUTED),
+                );
                 // Aviso si no hay control.
                 if !viewer.granted.contains(Permissions::CONTROL_MOUSE)
                     && !viewer.granted.contains(Permissions::CONTROL_KEYBOARD)
@@ -346,8 +366,13 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
         show_files_panel(viewer, ctx);
     }
     // Soltar archivos sobre el visor los envía al host.
-    let dropped: Vec<std::path::PathBuf> =
-        ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+    let dropped: Vec<std::path::PathBuf> = ctx.input(|i| {
+        i.raw
+            .dropped_files
+            .iter()
+            .filter_map(|f| f.path.clone())
+            .collect()
+    });
     for path in dropped {
         offer_file(viewer, path);
     }
@@ -420,30 +445,51 @@ fn actions_menu(viewer: &mut ViewerState, ui: &mut egui::Ui) {
 /// Pulsa y suelta una combinación de teclas en el host (en orden).
 fn send_chord(viewer: &ViewerState, codes: &[u32]) {
     for code in codes {
-        viewer.session.send_input(InputEvent::Key { code: *code, pressed: true });
+        viewer.session.send_input(InputEvent::Key {
+            code: *code,
+            pressed: true,
+        });
     }
     for code in codes.iter().rev() {
-        viewer.session.send_input(InputEvent::Key { code: *code, pressed: false });
+        viewer.session.send_input(InputEvent::Key {
+            code: *code,
+            pressed: false,
+        });
     }
 }
 
 /// Ofrece un archivo local al host y lo registra en la lista.
 fn offer_file(viewer: &mut ViewerState, path: std::path::PathBuf) {
     if !viewer.granted.contains(Permissions::FILE_TRANSFER) {
-        viewer.chat_log.push(tr("File transfer was not granted by the host.").into());
+        viewer
+            .chat_log
+            .push(tr("File transfer was not granted by the host.").into());
         return;
     }
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let total = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     let id = viewer.session.send_file(path);
-    viewer.transfers.push(Transfer { id, name, transferred: 0, total, state: TransferState::Running });
+    viewer.transfers.push(Transfer {
+        id,
+        name,
+        transferred: 0,
+        total,
+        state: TransferState::Running,
+    });
     viewer.show_files = true;
 }
 
 /// Panel lateral de archivos: ofertas entrantes y progreso de transferencias.
 fn show_files_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
     egui::SidePanel::right("viewer-files")
-        .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(egui::Margin::same(10)))
+        .frame(
+            egui::Frame::new()
+                .fill(theme::PANEL)
+                .inner_margin(egui::Margin::same(10)),
+        )
         .default_width(300.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -456,15 +502,29 @@ fn show_files_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
                     }
                 });
             });
-            ui.label(egui::RichText::new(tr("Drop files on the remote screen to send them.")).size(11.0).color(theme::TEXT_MUTED));
+            ui.label(
+                egui::RichText::new(tr("Drop files on the remote screen to send them."))
+                    .size(11.0)
+                    .color(theme::TEXT_MUTED),
+            );
             ui.separator();
 
             let mut accept: Option<u64> = None;
             let mut reject: Option<u64> = None;
             for offer in &viewer.offers {
                 theme::card_tinted().show(ui, |ui| {
-                    ui.label(egui::RichText::new(trf("{name} ({size})", &[("name", &offer.name), ("size", &human_size(offer.size))])).strong());
-                    ui.label(egui::RichText::new(tr("The remote device wants to send you this file.")).size(11.0).color(theme::TEXT_DIM));
+                    ui.label(
+                        egui::RichText::new(trf(
+                            "{name} ({size})",
+                            &[("name", &offer.name), ("size", &human_size(offer.size))],
+                        ))
+                        .strong(),
+                    );
+                    ui.label(
+                        egui::RichText::new(tr("The remote device wants to send you this file."))
+                            .size(11.0)
+                            .color(theme::TEXT_DIM),
+                    );
                     ui.horizontal(|ui| {
                         if ui.add(theme::primary_button(tr("Accept"))).clicked() {
                             accept = Some(offer.id);
@@ -478,7 +538,13 @@ fn show_files_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
             if let Some(id) = accept {
                 viewer.session.accept_file(id);
                 if let Some(o) = viewer.offers.iter().find(|o| o.id == id) {
-                    viewer.transfers.push(Transfer { id, name: o.name.clone(), transferred: 0, total: o.size, state: TransferState::Running });
+                    viewer.transfers.push(Transfer {
+                        id,
+                        name: o.name.clone(),
+                        transferred: 0,
+                        total: o.size,
+                        state: TransferState::Running,
+                    });
                 }
                 viewer.offers.retain(|o| o.id != id);
             }
@@ -495,9 +561,19 @@ fn show_files_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
                     ui.label(egui::RichText::new(&t.name).strong());
                     match &t.state {
                         TransferState::Running => {
-                            let frac = if t.total > 0 { t.transferred as f32 / t.total as f32 } else { 0.0 };
+                            let frac = if t.total > 0 {
+                                t.transferred as f32 / t.total as f32
+                            } else {
+                                0.0
+                            };
                             ui.horizontal(|ui| {
-                                ui.add(egui::ProgressBar::new(frac).desired_width(180.0).text(format!("{} / {}", human_size(t.transferred), human_size(t.total))));
+                                ui.add(egui::ProgressBar::new(frac).desired_width(180.0).text(
+                                    format!(
+                                        "{} / {}",
+                                        human_size(t.transferred),
+                                        human_size(t.total)
+                                    ),
+                                ));
                                 if ui.small_button("✕").on_hover_text(tr("Cancel")).clicked() {
                                     cancel = Some(t.id);
                                 }
@@ -505,14 +581,25 @@ fn show_files_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
                         }
                         TransferState::Done(path) => {
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new(tr("Completed")).size(11.0).color(theme::ONLINE));
-                                if ui.link(egui::RichText::new(tr("Show in folder")).size(11.0)).clicked() {
+                                ui.label(
+                                    egui::RichText::new(tr("Completed"))
+                                        .size(11.0)
+                                        .color(theme::ONLINE),
+                                );
+                                if ui
+                                    .link(egui::RichText::new(tr("Show in folder")).size(11.0))
+                                    .clicked()
+                                {
                                     open = Some(path.clone());
                                 }
                             });
                         }
                         TransferState::Failed(reason) => {
-                            ui.label(egui::RichText::new(trf("Failed: {reason}", &[("reason", reason)])).size(11.0).color(theme::DANGER));
+                            ui.label(
+                                egui::RichText::new(trf("Failed: {reason}", &[("reason", reason)]))
+                                    .size(11.0)
+                                    .color(theme::DANGER),
+                            );
                         }
                     }
                 }
@@ -600,39 +687,62 @@ fn drain_events(viewer: &mut ViewerState) -> Option<ViewerOutcome> {
                 viewer.offers.push(FileOffer { id, name, size });
                 viewer.show_files = true;
             }
-            Ok(ClientEvent::FileProgress { id, transferred, total }) => {
-                match viewer.transfers.iter_mut().find(|t| t.id == id) {
-                    Some(t) => {
-                        t.transferred = transferred;
-                        t.total = total;
-                    }
-                    None => {
-                        let name = viewer
-                            .offers
-                            .iter()
-                            .find(|o| o.id == id)
-                            .map(|o| o.name.clone())
-                            .unwrap_or_else(|| format!("#{id}"));
-                        viewer.transfers.push(Transfer { id, name, transferred, total, state: TransferState::Running });
-                    }
+            Ok(ClientEvent::FileProgress {
+                id,
+                transferred,
+                total,
+            }) => match viewer.transfers.iter_mut().find(|t| t.id == id) {
+                Some(t) => {
+                    t.transferred = transferred;
+                    t.total = total;
                 }
-            }
+                None => {
+                    let name = viewer
+                        .offers
+                        .iter()
+                        .find(|o| o.id == id)
+                        .map(|o| o.name.clone())
+                        .unwrap_or_else(|| format!("#{id}"));
+                    viewer.transfers.push(Transfer {
+                        id,
+                        name,
+                        transferred,
+                        total,
+                        state: TransferState::Running,
+                    });
+                }
+            },
             Ok(ClientEvent::FileDone { id, path }) => {
                 viewer.offers.retain(|o| o.id != id);
-                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 match viewer.transfers.iter_mut().find(|t| t.id == id) {
                     Some(t) => {
                         t.transferred = t.total;
                         t.state = TransferState::Done(path);
                     }
-                    None => viewer.transfers.push(Transfer { id, name, transferred: 0, total: 0, state: TransferState::Done(path) }),
+                    None => viewer.transfers.push(Transfer {
+                        id,
+                        name,
+                        transferred: 0,
+                        total: 0,
+                        state: TransferState::Done(path),
+                    }),
                 }
             }
             Ok(ClientEvent::FileFailed { id, reason }) => {
                 viewer.offers.retain(|o| o.id != id);
                 match viewer.transfers.iter_mut().find(|t| t.id == id) {
                     Some(t) => t.state = TransferState::Failed(reason),
-                    None => viewer.transfers.push(Transfer { id, name: format!("#{id}"), transferred: 0, total: 0, state: TransferState::Failed(reason) }),
+                    None => viewer.transfers.push(Transfer {
+                        id,
+                        name: format!("#{id}"),
+                        transferred: 0,
+                        total: 0,
+                        state: TransferState::Failed(reason),
+                    }),
                 }
                 viewer.show_files = true;
             }
@@ -664,7 +774,12 @@ fn upload_latest_frame(viewer: &mut ViewerState, ctx: &egui::Context) {
     let size = [img.width as usize, img.height as usize];
     // Sanea el tamaño frente al buffer para no construir una imagen inválida.
     if size[0] == 0 || size[1] == 0 || img.rgba.len() != size[0] * size[1] * 4 {
-        debug!(w = size[0], h = size[1], len = img.rgba.len(), "frame con tamaño inconsistente");
+        debug!(
+            w = size[0],
+            h = size[1],
+            len = img.rgba.len(),
+            "frame con tamaño inconsistente"
+        );
         return;
     }
 
@@ -674,8 +789,11 @@ fn upload_latest_frame(viewer: &mut ViewerState, ctx: &egui::Context) {
     match &mut viewer.texture {
         Some(tex) => tex.set(color, egui::TextureOptions::LINEAR),
         None => {
-            viewer.texture =
-                Some(ctx.load_texture("cleandesk-remote-screen", color, egui::TextureOptions::LINEAR));
+            viewer.texture = Some(ctx.load_texture(
+                "cleandesk-remote-screen",
+                color,
+                egui::TextureOptions::LINEAR,
+            ));
         }
     }
     viewer.last_frame = Some(img);
@@ -687,7 +805,10 @@ fn render_video_and_input(viewer: &mut ViewerState, ui: &mut egui::Ui) {
         ui.centered_and_justified(|ui| {
             ui.vertical_centered(|ui| {
                 ui.spinner();
-                ui.label(egui::RichText::new(tr("Waiting for the remote device's image…")).color(theme::TEXT_DIM));
+                ui.label(
+                    egui::RichText::new(tr("Waiting for the remote device's image…"))
+                        .color(theme::TEXT_DIM),
+                );
             });
         });
         return;
@@ -719,8 +840,7 @@ fn render_video_and_input(viewer: &mut ViewerState, ui: &mut egui::Ui) {
 
     // Pintamos la textura en el rect asignado.
     let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-    ui.painter()
-        .image(tex.id(), rect, uv, egui::Color32::WHITE);
+    ui.painter().image(tex.id(), rect, uv, egui::Color32::WHITE);
 
     // El teclado solo se reenvía mientras el puntero está sobre la imagen o se
     // ha hecho clic en ella; así los atajos de la propia ventana no se cuelan.
@@ -763,13 +883,20 @@ fn forward_input(
         let mut keys = Vec::new();
         for ev in &i.events {
             match ev {
-                egui::Event::PointerButton { button, pressed, .. } if mouse_ok && hovered => {
+                egui::Event::PointerButton {
+                    button, pressed, ..
+                } if mouse_ok && hovered => {
                     if let Some(mapped) = map_pointer_button(*button) {
                         buttons.push((mapped, *pressed));
                     }
                 }
                 // Ignoramos los `repeat`: el host gestiona su propio auto-repeat.
-                egui::Event::Key { key, pressed, repeat, .. } if keyboard_ok && !*repeat => {
+                egui::Event::Key {
+                    key,
+                    pressed,
+                    repeat,
+                    ..
+                } if keyboard_ok && !*repeat => {
                     if let Some(vk) = key_to_vk(*key) {
                         keys.push((vk, *pressed));
                     }
@@ -779,7 +906,11 @@ fn forward_input(
         }
         FrameInput {
             buttons,
-            scroll: if mouse_ok && hovered { i.raw_scroll_delta } else { egui::Vec2::ZERO },
+            scroll: if mouse_ok && hovered {
+                i.raw_scroll_delta
+            } else {
+                egui::Vec2::ZERO
+            },
             keys,
             modifiers: i.modifiers,
         }
@@ -788,14 +919,19 @@ fn forward_input(
     // --- Ratón ---
     if mouse_ok {
         // Movimiento: coordenadas normalizadas 0..=1 sobre la imagen mostrada.
-        if let Some(pos) = response.hover_pos().or_else(|| response.interact_pointer_pos()) {
+        if let Some(pos) = response
+            .hover_pos()
+            .or_else(|| response.interact_pointer_pos())
+        {
             if rect.width() > 0.0 && rect.height() > 0.0 {
                 let nx = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                 let ny = ((pos.y - rect.top()) / rect.height()).clamp(0.0, 1.0);
                 let this = (nx, ny);
                 if viewer.last_move != Some(this) {
                     viewer.last_move = Some(this);
-                    viewer.session.send_input(InputEvent::MouseMove { x: nx, y: ny });
+                    viewer
+                        .session
+                        .send_input(InputEvent::MouseMove { x: nx, y: ny });
                 }
             }
         }
@@ -837,21 +973,24 @@ fn sync_modifiers(viewer: &mut ViewerState, mods: egui::Modifiers) {
     let mut state = viewer.modifiers;
 
     if mods.shift != state.shift {
-        viewer
-            .session
-            .send_input(InputEvent::Key { code: VK_SHIFT, pressed: mods.shift });
+        viewer.session.send_input(InputEvent::Key {
+            code: VK_SHIFT,
+            pressed: mods.shift,
+        });
         state.shift = mods.shift;
     }
     if mods.ctrl != state.ctrl {
-        viewer
-            .session
-            .send_input(InputEvent::Key { code: VK_CONTROL, pressed: mods.ctrl });
+        viewer.session.send_input(InputEvent::Key {
+            code: VK_CONTROL,
+            pressed: mods.ctrl,
+        });
         state.ctrl = mods.ctrl;
     }
     if mods.alt != state.alt {
-        viewer
-            .session
-            .send_input(InputEvent::Key { code: VK_MENU, pressed: mods.alt });
+        viewer.session.send_input(InputEvent::Key {
+            code: VK_MENU,
+            pressed: mods.alt,
+        });
         state.alt = mods.alt;
     }
 
@@ -901,7 +1040,11 @@ fn show_chat_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
     egui::SidePanel::right("viewer-chat")
         .resizable(true)
         .default_width(260.0)
-        .frame(egui::Frame::new().fill(theme::PANEL).inner_margin(egui::Margin::same(12)))
+        .frame(
+            egui::Frame::new()
+                .fill(theme::PANEL)
+                .inner_margin(egui::Margin::same(12)),
+        )
         .show(ctx, |ui| {
             theme::section_label(ui, tr("Chat"), true);
             ui.separator();

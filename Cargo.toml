@@ -19,7 +19,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -80,12 +80,28 @@ directories = "5"
 parking_lot = "0.12"
 dashmap = "6"
 
+# Release: thin LTO with parallel codegen units. `codegen-units = 1` made the
+# final link single-threaded (minutes) for a few percent of speed.
 [profile.release]
 opt-level = 3
 lto = "thin"
-codegen-units = 1
+codegen-units = 16
 panic = "abort"
 strip = true
+debug = false
 
+# Dev/test: light optimisation for our crates, no debuginfo for dependencies
+# (full debuginfo for the whole graph was ~40 GB of artifacts).
 [profile.dev]
 opt-level = 1
+debug = "line-tables-only"
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 1
+debug = false
+
+# `cargo build --profile quick`: release speed without LTO, for local runs.
+[profile.quick]
+inherits = "release"
+lto = false

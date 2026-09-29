@@ -110,7 +110,9 @@ pub fn card() -> egui::Frame {
 
 /// Tarjeta con tinte verde (las tarjetas de acción del inicio).
 pub fn card_tinted() -> egui::Frame {
-    card().fill(CARD_TINT).stroke(Stroke::new(1.0_f32, Color32::from_rgb(214, 232, 220)))
+    card()
+        .fill(CARD_TINT)
+        .stroke(Stroke::new(1.0_f32, Color32::from_rgb(214, 232, 220)))
 }
 
 /// Tarjeta de la rejilla de sesiones recientes (sin margen interior: la
@@ -143,10 +145,14 @@ pub fn section_label(ui: &mut egui::Ui, text: &str, accent: bool) {
 
 /// Botón primario (relleno verde, texto blanco).
 pub fn primary_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(egui::RichText::new(text.to_owned()).strong().color(Color32::WHITE))
-        .fill(ACCENT)
-        .stroke(Stroke::NONE)
-        .corner_radius(CornerRadius::same(RADIUS_SM))
+    egui::Button::new(
+        egui::RichText::new(text.to_owned())
+            .strong()
+            .color(Color32::WHITE),
+    )
+    .fill(ACCENT)
+    .stroke(Stroke::NONE)
+    .corner_radius(CornerRadius::same(RADIUS_SM))
 }
 
 /// Botón secundario (blanco con borde y texto verde).
@@ -167,19 +173,27 @@ pub fn pill_button(text: &str) -> egui::Button<'static> {
 
 /// Botón cuadrado de icono con borde (copiar, candado…).
 pub fn icon_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(egui::RichText::new(text.to_owned()).size(16.0).color(TEXT_DIM))
-        .fill(Color32::WHITE)
-        .stroke(Stroke::new(1.0_f32, BORDER_SOFT))
-        .corner_radius(CornerRadius::same(RADIUS_SM))
-        .min_size(egui::vec2(40.0, 40.0))
+    egui::Button::new(
+        egui::RichText::new(text.to_owned())
+            .size(16.0)
+            .color(TEXT_DIM),
+    )
+    .fill(Color32::WHITE)
+    .stroke(Stroke::new(1.0_f32, BORDER_SOFT))
+    .corner_radius(CornerRadius::same(RADIUS_SM))
+    .min_size(egui::vec2(40.0, 40.0))
 }
 
 /// Botón peligroso (rojo) para desconectar/finalizar.
 pub fn danger_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(egui::RichText::new(text.to_owned()).strong().color(Color32::WHITE))
-        .fill(DANGER)
-        .stroke(Stroke::NONE)
-        .corner_radius(CornerRadius::same(RADIUS_SM))
+    egui::Button::new(
+        egui::RichText::new(text.to_owned())
+            .strong()
+            .color(Color32::WHITE),
+    )
+    .fill(DANGER)
+    .stroke(Stroke::NONE)
+    .corner_radius(CornerRadius::same(RADIUS_SM))
 }
 
 /// Punto de estado coloreado seguido de un texto.
@@ -199,7 +213,13 @@ pub fn big_id(ui: &mut egui::Ui, id: cleandesk_proto::CleanDeskId) {
 
 /// Rectángulo con degradado horizontal (banner) pintado con dos triángulos
 /// de la malla de egui.
-pub fn gradient_rect(painter: &egui::Painter, rect: egui::Rect, left: Color32, right: Color32, radius: f32) {
+pub fn gradient_rect(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    left: Color32,
+    right: Color32,
+    radius: f32,
+) {
     use egui::epaint::{Mesh, Vertex, WHITE_UV};
     // Fondo redondeado uniforme por debajo y degradado por encima con una
     // malla rectangular; el pequeño recorte en las esquinas se disimula con
@@ -208,10 +228,26 @@ pub fn gradient_rect(painter: &egui::Painter, rect: egui::Rect, left: Color32, r
     let inset = rect.shrink2(egui::vec2(radius * 0.5, 0.0));
     let mut mesh = Mesh::default();
     let c = |color: Color32| color;
-    mesh.vertices.push(Vertex { pos: inset.left_top(), uv: WHITE_UV, color: c(left) });
-    mesh.vertices.push(Vertex { pos: inset.right_top(), uv: WHITE_UV, color: c(right) });
-    mesh.vertices.push(Vertex { pos: inset.right_bottom(), uv: WHITE_UV, color: c(right) });
-    mesh.vertices.push(Vertex { pos: inset.left_bottom(), uv: WHITE_UV, color: c(left) });
+    mesh.vertices.push(Vertex {
+        pos: inset.left_top(),
+        uv: WHITE_UV,
+        color: c(left),
+    });
+    mesh.vertices.push(Vertex {
+        pos: inset.right_top(),
+        uv: WHITE_UV,
+        color: c(right),
+    });
+    mesh.vertices.push(Vertex {
+        pos: inset.right_bottom(),
+        uv: WHITE_UV,
+        color: c(right),
+    });
+    mesh.vertices.push(Vertex {
+        pos: inset.left_bottom(),
+        uv: WHITE_UV,
+        color: c(left),
+    });
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
     painter.add(egui::Shape::mesh(mesh));
@@ -240,15 +276,29 @@ pub fn leaf(painter: &egui::Painter, center: egui::Pos2, size: f32, alpha: u8) {
 pub fn monitor_icon(painter: &egui::Painter, center: egui::Pos2, size: f32, color: Color32) {
     let w = size;
     let h = size * 0.66;
-    let screen = egui::Rect::from_center_size(egui::pos2(center.x, center.y - size * 0.08), egui::vec2(w, h));
-    painter.rect_stroke(screen, size * 0.12, Stroke::new((size * 0.08).max(1.5), color), egui::StrokeKind::Inside);
+    let screen = egui::Rect::from_center_size(
+        egui::pos2(center.x, center.y - size * 0.08),
+        egui::vec2(w, h),
+    );
+    painter.rect_stroke(
+        screen,
+        size * 0.12,
+        Stroke::new((size * 0.08).max(1.5), color),
+        egui::StrokeKind::Inside,
+    );
     let stand_y = screen.bottom() + size * 0.14;
     painter.line_segment(
-        [egui::pos2(center.x, screen.bottom()), egui::pos2(center.x, stand_y)],
+        [
+            egui::pos2(center.x, screen.bottom()),
+            egui::pos2(center.x, stand_y),
+        ],
         Stroke::new((size * 0.08).max(1.5), color),
     );
     painter.line_segment(
-        [egui::pos2(center.x - size * 0.22, stand_y), egui::pos2(center.x + size * 0.22, stand_y)],
+        [
+            egui::pos2(center.x - size * 0.22, stand_y),
+            egui::pos2(center.x + size * 0.22, stand_y),
+        ],
         Stroke::new((size * 0.08).max(1.5), color),
     );
 }

@@ -12,12 +12,14 @@ mod imp {
     use super::RUN_VALUE;
     use crate::{build_command_line, PlatformError, Result};
     use std::path::Path;
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
 
     const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 
     fn run(args: &[&str]) -> Result<String> {
-        let out = Command::new("reg.exe").args(args).output()?;
+        // CREATE_NO_WINDOW: sin ventana de consola parpadeando sobre la GUI.
+        let out = Command::new("reg.exe").args(args).creation_flags(0x0800_0000).output()?;
         let text = String::from_utf8_lossy(&out.stdout).to_string()
             + &String::from_utf8_lossy(&out.stderr);
         if out.status.success() {

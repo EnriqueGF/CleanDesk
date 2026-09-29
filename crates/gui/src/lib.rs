@@ -50,7 +50,9 @@ pub fn run(
     let guard = match single_instance::acquire(&instance_key) {
         Ok(Instance::Primary(guard)) => Some(guard),
         Ok(Instance::AlreadyRunning) => {
-            tracing::info!("CleanDesk is already running for this data directory; asked it to show its window");
+            tracing::info!(
+                "CleanDesk is already running for this data directory; asked it to show its window"
+            );
             return Ok(());
         }
         Err(e) => {
@@ -99,9 +101,12 @@ pub fn run(
                         }
                     })
                     .map(|_| ())
-                    .unwrap_or_else(|e| tracing::warn!(error = %e, "could not spawn single-instance thread"));
+                    .unwrap_or_else(
+                        |e| tracing::warn!(error = %e, "could not spawn single-instance thread"),
+                    );
             }
-            let mut app = CleanDeskApp::new(cc, app_state, device, rt, signal_override, initial_target);
+            let mut app =
+                CleanDeskApp::new(cc, app_state, device, rt, signal_override, initial_target);
             app.show_requested = show_requested;
             Ok(Box::new(app))
         }),

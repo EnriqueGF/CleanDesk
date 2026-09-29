@@ -164,11 +164,18 @@ pub struct CleanDeskApp {
     pub alias_edit: String,
     /// Contraseña de acceso desatendido en edición.
     pub unattended_pw: String,
+    /// Mensaje de estado de la sección de acceso desatendido (dentro de la
+    /// ventana de Ajustes, no en el aviso general): (texto, es_error).
+    pub unattended_msg: Option<(String, bool)>,
     /// Estado del servicio de Windows y del arranque con la sesión (se refrescan
     /// periódicamente mientras la ventana de ajustes está abierta).
     pub service_status: cleandesk_platform::service::ServiceStatus,
     pub run_at_login: bool,
     pub platform_checked_at: Option<std::time::Instant>,
+    /// Sonda en curso del estado del servicio / arranque (hilo aparte: `sc` y
+    /// `reg` tardan cientos de ms y congelarían la interfaz).
+    pub platform_probe:
+        Option<std::sync::mpsc::Receiver<(cleandesk_platform::service::ServiceStatus, bool)>>,
     /// Marca "hay una GUI abierta" para que el host del servicio se aparte.
     _presence: Option<cleandesk_platform::presence::PresenceLock>,
 }
@@ -203,7 +210,8 @@ impl CleanDeskApp {
         let host_status = Arc::new(Mutex::new(HostStatus::Connecting));
         let host_control = HostControl::new();
         let host_restart = Arc::new(tokio::sync::Notify::new());
-        let presence = match cleandesk_platform::presence::PresenceLock::acquire(&state.data_dir()) {
+        let presence = match cleandesk_platform::presence::PresenceLock::acquire(&state.data_dir())
+        {
             Ok(lock) => Some(lock),
             Err(e) => {
                 warn!(error = %e, "no se pudo crear el lock de presencia de la GUI");
@@ -240,7 +248,8 @@ impl CleanDeskApp {
             pending_remember: None,
             notice: None,
             identity_alarm: None,
-            tray: match crate::tray::Tray::new(cc.egui_ctx.clone(), crate::tray::native_handle(cc)) {
+            tray: match crate::tray::Tray::new(cc.egui_ctx.clone(), crate::tray::native_handle(cc))
+            {
                 Ok(t) => Some(t),
                 Err(e) => {
                     warn!(error = %e, "tray icon unavailable");
@@ -271,9 +280,11 @@ impl CleanDeskApp {
             pending_perms: Permissions::empty(),
             alias_edit,
             unattended_pw: String::new(),
+            unattended_msg: None,
             service_status: cleandesk_platform::service::ServiceStatus::NotInstalled,
             run_at_login: false,
             platform_checked_at: None,
+            platform_probe: None,
             _presence: presence,
         };
 
@@ -343,16 +354,30 @@ impl CleanDeskApp {
                     }
                 }
                 Err(e) => {
-                    self.notice = Some(trf("Could not derive the key: {err}", &[("err", &e.to_string())]));
+                    self.notice = Some(trf(
+                        "Could not derive the key: {err}",
+                        &[("err", &e.to_string())],
+                    ));
                     return;
                 }
             }
-        } else if let Some(key) = self.state.addressbook.read().find_by_id(target).and_then(|e| e.unattended_key()) {
+        } else if let Some(key) = self
+            .state
+            .addressbook
+            .read()
+            .find_by_id(target)
+            .and_then(|e| e.unattended_key())
+        {
             // Equipo guardado con contraseña recordada: conexión desatendida directa.
             config.unattended_key = Some(key);
         }
 
-        let pinned = self.state.settings.read().pinned_key(target).map(str::to_string);
+        let pinned = self
+            .state
+            .settings
+            .read()
+            .pinned_key(target)
+            .map(str::to_string);
         let (tx, rx) = oneshot::channel();
         let ctx = ctx.clone();
         self.rt.spawn(async move {
@@ -405,7 +430,11 @@ impl CleanDeskApp {
                 e.name = name.clone();
             }
         }) {
-            let name = if name.trim().is_empty() { id.to_string() } else { name };
+            let name = if name.trim().is_empty() {
+                id.to_string()
+            } else {
+                name
+            };
             book.add(DeviceEntry::new(id, name));
         }
         drop(book);
@@ -423,7 +452,10 @@ impl CleanDeskApp {
             .ok()
             .and_then(|n| n.iter().find(|d| d.id == id).and_then(|d| d.mac.clone()));
         if let Some(mac) = mac {
-            self.state.addressbook.write().update(id, |e| e.mac = Some(mac.clone()));
+            self.state
+                .addressbook
+                .write()
+                .update(id, |e| e.mac = Some(mac.clone()));
         }
         self.save_settings();
     }
@@ -443,7 +475,12 @@ impl CleanDeskApp {
 
     /// Olvida la contraseña recordada de `id`.
     pub fn forget_key(&self, id: CleanDeskId) {
-        if self.state.addressbook.write().update(id, |e| e.unattended_key = None) {
+        if self
+            .state
+            .addressbook
+            .write()
+            .update(id, |e| e.unattended_key = None)
+        {
             self.save_settings();
         }
     }
@@ -464,7 +501,12 @@ impl CleanDeskApp {
                 info!(%target, "conexión establecida");
                 self.last_target = Some(target);
                 self.mark_connected(target);
-                let record = SessionRecord::start(session.session, target, self.device.hostname.clone(), "p2p");
+                let record = SessionRecord::start(
+                    session.session,
+                    target,
+                    self.device.hostname.clone(),
+                    "p2p",
+                );
                 if let Err(e) = self.state.record_session_start(record) {
                     warn!(error = %e, "no se pudo registrar el historial");
                 }
@@ -499,7 +541,8 @@ impl CleanDeskApp {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
             }
             Err(oneshot::error::TryRecvError::Closed) => {
-                self.notice = Some(tr("The connection was interrupted before it was established.").into());
+                self.notice =
+                    Some(tr("The connection was interrupted before it was established.").into());
                 self.connect = ConnectPhase::Idle;
             }
         }
@@ -508,7 +551,11 @@ impl CleanDeskApp {
     /// Actualiza la fecha de última conexión en la agenda si el equipo está guardado.
     fn mark_connected(&self, target: CleanDeskId) {
         let now = unix_now();
-        let updated = self.state.addressbook.write().update(target, |e| e.last_connection = Some(now));
+        let updated = self
+            .state
+            .addressbook
+            .write()
+            .update(target, |e| e.last_connection = Some(now));
         if updated {
             self.save_settings();
         }
@@ -538,21 +585,36 @@ impl CleanDeskApp {
                         warn!(%id, expected = %self.id, "el servidor confirmó un ID distinto");
                     }
                 }
-                HostEvent::SessionStarted { session, peer, granted } => {
+                HostEvent::SessionStarted {
+                    session,
+                    peer,
+                    granted,
+                } => {
                     let user = peer.alias.clone().unwrap_or_else(|| peer.hostname.clone());
                     let record = SessionRecord::start(session, peer.id, user, "p2p (entrante)");
                     if let Err(e) = self.state.record_session_start(record) {
                         warn!(error = %e, "no se pudo registrar el historial");
                     }
-                    self.host_session = Some(HostSession { session, peer, granted });
+                    self.host_session = Some(HostSession {
+                        session,
+                        peer,
+                        granted,
+                    });
                 }
                 HostEvent::SessionEnded { session, reason } => {
                     if let Err(e) = self.state.record_session_end(session, "closed") {
                         warn!(error = %e, "no se pudo cerrar el registro de historial");
                     }
-                    if self.host_session.as_ref().is_some_and(|s| s.session == session) {
+                    if self
+                        .host_session
+                        .as_ref()
+                        .is_some_and(|s| s.session == session)
+                    {
                         self.host_session = None;
-                        self.notice = Some(trf("Incoming session ended: {reason}", &[("reason", friendly_reason(&reason))]));
+                        self.notice = Some(trf(
+                            "Incoming session ended: {reason}",
+                            &[("reason", friendly_reason(&reason))],
+                        ));
                     }
                 }
             }
@@ -591,7 +653,10 @@ impl CleanDeskApp {
     /// "Salir" en el menú de la bandeja cierra de verdad.
     fn handle_tray(&mut self, ctx: &egui::Context) {
         use crate::tray::TrayAction;
-        if self.show_requested.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        if self
+            .show_requested
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -627,7 +692,7 @@ impl CleanDeskApp {
         ctx.request_repaint(); // mantener el modal vivo/responsivo
 
         let mut decision: Option<bool> = None; // Some(true)=aceptar, Some(false)=rechazar
-        // Tomamos datos de la primera solicitud sin mover la solicitud en sí.
+                                               // Tomamos datos de la primera solicitud sin mover la solicitud en sí.
         let (name, id, os, auth) = {
             let req = &self.pending[0];
             (
@@ -645,13 +710,23 @@ impl CleanDeskApp {
                 theme::section_label(ui, tr("Connection request"), true);
                 ui.add_space(6.0);
                 ui.label(egui::RichText::new(&name).size(18.0).strong());
-                ui.label(egui::RichText::new(id.to_string()).monospace().color(theme::TEXT_DIM));
+                ui.label(
+                    egui::RichText::new(id.to_string())
+                        .monospace()
+                        .color(theme::TEXT_DIM),
+                );
                 if !os.is_empty() {
-                    ui.label(egui::RichText::new(trf("System: {os}", &[("os", &os)])).color(theme::TEXT_DIM));
+                    ui.label(
+                        egui::RichText::new(trf("System: {os}", &[("os", &os)]))
+                            .color(theme::TEXT_DIM),
+                    );
                 }
                 ui.label(
-                    egui::RichText::new(trf("Authentication: {auth}", &[("auth", crate::approval::auth_label(auth))]))
-                        .color(theme::TEXT_DIM),
+                    egui::RichText::new(trf(
+                        "Authentication: {auth}",
+                        &[("auth", crate::approval::auth_label(auth))],
+                    ))
+                    .color(theme::TEXT_DIM),
                 );
                 ui.add_space(8.0);
                 ui.separator();
@@ -734,7 +809,8 @@ impl CleanDeskApp {
 /// remoto ya no coincide? Acepta la redacción en inglés y en español de los
 /// crates de descubrimiento/cliente.
 fn is_identity_change(s: &str) -> bool {
-    (s.contains("identity") && s.contains("changed")) || (s.contains("identidad") && s.contains("cambiado"))
+    (s.contains("identity") && s.contains("changed"))
+        || (s.contains("identidad") && s.contains("cambiado"))
 }
 
 /// Traduce los errores más comunes de conexión (ya formateados con `{e:#}`) a
@@ -788,8 +864,7 @@ fn spawn_host(
     // El host vive tanto como el runtime (que la app suelta al cerrarse). No hay
     // señal de parada explícita: reintenta el registro indefinidamente.
     rt.spawn(async move {
-        let approver: Arc<dyn cleandesk_host::Approver> =
-            Arc::new(GuiApprover::new(incoming_tx));
+        let approver: Arc<dyn cleandesk_host::Approver> = Arc::new(GuiApprover::new(incoming_tx));
 
         loop {
             let mode = match &signal_override {
@@ -815,13 +890,17 @@ fn spawn_host(
             // Observamos el evento `Registered` para marcar el host en línea.
             let (probe_tx, mut probe_rx) = mpsc::unbounded_channel::<HostEvent>();
             let events_fanout = events_tx.clone();
-            let config = HostConfig { events: Some(probe_tx), ..config };
-            let serve: std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>> =
-                if mode.is_community() {
-                    Box::pin(cleandesk_host::serve_community(config, approver.clone()))
-                } else {
-                    Box::pin(cleandesk_host::serve(config, approver.clone()))
-                };
+            let config = HostConfig {
+                events: Some(probe_tx),
+                ..config
+            };
+            let serve: std::pin::Pin<
+                Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>,
+            > = if mode.is_community() {
+                Box::pin(cleandesk_host::serve_community(config, approver.clone()))
+            } else {
+                Box::pin(cleandesk_host::serve(config, approver.clone()))
+            };
             tokio::pin!(serve);
 
             let result = loop {
@@ -886,7 +965,10 @@ pub(crate) fn unix_now() -> u64 {
 impl CleanDeskApp {
     /// Ruta del PNG de miniatura de `id`.
     fn thumb_path(&self, id: CleanDeskId) -> std::path::PathBuf {
-        self.state.data_dir().join("thumbs").join(format!("{}.png", id.value()))
+        self.state
+            .data_dir()
+            .join("thumbs")
+            .join(format!("{}.png", id.value()))
     }
 
     /// Guarda una miniatura (≈320 px de ancho) del último fotograma de una
@@ -895,12 +977,18 @@ impl CleanDeskApp {
         if frame.width == 0 || frame.height == 0 {
             return;
         }
-        let Some(src) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone()) else {
+        let Some(src) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone())
+        else {
             return;
         };
         let target_w = 320u32.min(frame.width);
         let target_h = ((frame.height as u64 * target_w as u64) / frame.width as u64).max(1) as u32;
-        let small = image::imageops::resize(&src, target_w, target_h, image::imageops::FilterType::Triangle);
+        let small = image::imageops::resize(
+            &src,
+            target_w,
+            target_h,
+            image::imageops::FilterType::Triangle,
+        );
         let path = self.thumb_path(id);
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -913,7 +1001,11 @@ impl CleanDeskApp {
     }
 
     /// Textura de la miniatura de `id`, cargándola del disco la primera vez.
-    pub fn thumbnail(&mut self, ctx: &egui::Context, id: CleanDeskId) -> Option<egui::TextureHandle> {
+    pub fn thumbnail(
+        &mut self,
+        ctx: &egui::Context,
+        id: CleanDeskId,
+    ) -> Option<egui::TextureHandle> {
         if let Some(cached) = self.thumbs.get(&id.value()) {
             return cached.clone();
         }
@@ -922,7 +1014,11 @@ impl CleanDeskApp {
             let rgba = img.to_rgba8();
             let size = [rgba.width() as usize, rgba.height() as usize];
             let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-            ctx.load_texture(format!("thumb-{}", id.value()), color, egui::TextureOptions::LINEAR)
+            ctx.load_texture(
+                format!("thumb-{}", id.value()),
+                color,
+                egui::TextureOptions::LINEAR,
+            )
         });
         self.thumbs.insert(id.value(), loaded.clone());
         loaded
@@ -941,11 +1037,17 @@ impl CleanDeskApp {
         let me = self.id;
         let ctx = ctx.clone();
         self.rt.spawn(async move {
-            let peers = cleandesk_discovery::lan::browse_all(std::time::Duration::from_millis(2500)).await;
+            let peers =
+                cleandesk_discovery::lan::browse_all(std::time::Duration::from_millis(2500)).await;
             let list: Vec<NearbyDevice> = peers
                 .into_iter()
                 .filter(|p| p.id != me)
-                .map(|p| NearbyDevice { id: p.id, alias: p.alias, public_key: p.public_key, mac: p.mac })
+                .map(|p| NearbyDevice {
+                    id: p.id,
+                    alias: p.alias,
+                    public_key: p.public_key,
+                    mac: p.mac,
+                })
                 .collect();
             if let Ok(mut guard) = nearby.lock() {
                 *guard = list;
@@ -957,20 +1059,60 @@ impl CleanDeskApp {
 
     /// ¿Se ha visto `id` en la red local en el último rastreo?
     pub fn is_nearby(&self, id: CleanDeskId) -> bool {
-        self.nearby.lock().map(|n| n.iter().any(|d| d.id == id)).unwrap_or(false)
+        self.nearby
+            .lock()
+            .map(|n| n.iter().any(|d| d.id == id))
+            .unwrap_or(false)
+    }
+
+    /// Refresca `service_status` / `run_at_login` sin bloquear: lanza la sonda
+    /// en un hilo si toca y recoge el resultado cuando llega.
+    pub fn poll_platform_status(&mut self, ctx: &egui::Context) {
+        use cleandesk_platform::{service, startup};
+        if let Some(rx) = &self.platform_probe {
+            match rx.try_recv() {
+                Ok((status, run)) => {
+                    self.service_status = status;
+                    self.run_at_login = run;
+                    self.platform_checked_at = Some(std::time::Instant::now());
+                    self.platform_probe = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.platform_probe = None,
+            }
+        }
+        let stale = self
+            .platform_checked_at
+            .is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(3));
+        if !stale {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        let spawned = std::thread::Builder::new()
+            .name("cleandesk-platform-probe".into())
+            .spawn(move || {
+                let status = service::status();
+                let run = startup::is_run_at_login().unwrap_or(false);
+                let _ = tx.send((status, run));
+                ctx.request_repaint();
+            });
+        match spawned {
+            Ok(_) => self.platform_probe = Some(rx),
+            Err(e) => {
+                warn!(error = %e, "no se pudo lanzar la sonda de plataforma");
+                self.platform_checked_at = Some(std::time::Instant::now());
+            }
+        }
     }
 
     /// Guarda la MAC de un contacto (solo si ya está en la agenda).
     pub fn remember_mac(&self, id: CleanDeskId, mac: String) {
-        let changed = self
-            .state
-            .addressbook
-            .write()
-            .update(id, |e| {
-                if e.mac.as_deref() != Some(mac.as_str()) {
-                    e.mac = Some(mac.clone());
-                }
-            });
+        let changed = self.state.addressbook.write().update(id, |e| {
+            if e.mac.as_deref() != Some(mac.as_str()) {
+                e.mac = Some(mac.clone());
+            }
+        });
         if changed {
             self.save_settings();
         }

@@ -81,6 +81,7 @@ mod imp {
     use crate::{build_command_line, PlatformError};
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -108,7 +109,8 @@ mod imp {
     use windows_service::service_dispatcher;
 
     fn sc(args: &[&str]) -> (i32, String) {
-        match Command::new("sc.exe").args(args).output() {
+        // CREATE_NO_WINDOW: sin ventana de consola parpadeando sobre la GUI.
+        match Command::new("sc.exe").args(args).creation_flags(0x0800_0000).output() {
             Ok(out) => (
                 out.status.code().unwrap_or(-1),
                 String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr),

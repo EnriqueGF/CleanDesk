@@ -175,6 +175,16 @@ $env:CLEANDESK_STUN_URLS = "stun:203.0.113.7:7421"
 - The transport uses a public STUN by default only to discover the reflexive
   IP; no session data passes through it.
 
+## Build times
+
+- `cargo build --profile quick -p cleandesk-app` is a release-speed build
+  without LTO (about half the time of `--release`); use it for local runs.
+- Dependencies are built without debuginfo and our crates with line tables
+  only, which keeps the dev target directory around 5 GB instead of 40 GB.
+- Point `target-dir` at a fast NTFS disk with free space, and set
+  `linker = "rust-lld.exe"` under `[target.x86_64-pc-windows-msvc]` in the
+  local `.cargo/config.toml` (rust-lld ships with the toolchain).
+
 ## Running the tests
 
 ```powershell

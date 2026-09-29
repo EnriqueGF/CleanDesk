@@ -80,36 +80,36 @@ pub fn key_to_vk(key: Key) -> Option<u32> {
         Key::F12 => 0x7B,
 
         // Control / edición.
-        Key::Enter => 0x0D,       // VK_RETURN
-        Key::Escape => 0x1B,      // VK_ESCAPE
-        Key::Backspace => 0x08,   // VK_BACK
-        Key::Tab => 0x09,         // VK_TAB
-        Key::Space => 0x20,       // VK_SPACE
-        Key::Delete => 0x2E,      // VK_DELETE
-        Key::Insert => 0x2D,      // VK_INSERT
-        Key::Home => 0x24,        // VK_HOME
-        Key::End => 0x23,         // VK_END
-        Key::PageUp => 0x21,      // VK_PRIOR
-        Key::PageDown => 0x22,    // VK_NEXT
+        Key::Enter => 0x0D,     // VK_RETURN
+        Key::Escape => 0x1B,    // VK_ESCAPE
+        Key::Backspace => 0x08, // VK_BACK
+        Key::Tab => 0x09,       // VK_TAB
+        Key::Space => 0x20,     // VK_SPACE
+        Key::Delete => 0x2E,    // VK_DELETE
+        Key::Insert => 0x2D,    // VK_INSERT
+        Key::Home => 0x24,      // VK_HOME
+        Key::End => 0x23,       // VK_END
+        Key::PageUp => 0x21,    // VK_PRIOR
+        Key::PageDown => 0x22,  // VK_NEXT
 
         // Flechas.
-        Key::ArrowLeft => 0x25,   // VK_LEFT
-        Key::ArrowUp => 0x26,     // VK_UP
-        Key::ArrowRight => 0x27,  // VK_RIGHT
-        Key::ArrowDown => 0x28,   // VK_DOWN
+        Key::ArrowLeft => 0x25,  // VK_LEFT
+        Key::ArrowUp => 0x26,    // VK_UP
+        Key::ArrowRight => 0x27, // VK_RIGHT
+        Key::ArrowDown => 0x28,  // VK_DOWN
 
         // Signos de puntuación con VK propio (layout US; suficiente para el MVP).
-        Key::Minus => 0xBD,       // VK_OEM_MINUS
-        Key::Plus | Key::Equals => 0xBB, // VK_OEM_PLUS
-        Key::Comma => 0xBC,       // VK_OEM_COMMA
-        Key::Period => 0xBE,      // VK_OEM_PERIOD
-        Key::Semicolon => 0xBA,   // VK_OEM_1
+        Key::Minus => 0xBD,                     // VK_OEM_MINUS
+        Key::Plus | Key::Equals => 0xBB,        // VK_OEM_PLUS
+        Key::Comma => 0xBC,                     // VK_OEM_COMMA
+        Key::Period => 0xBE,                    // VK_OEM_PERIOD
+        Key::Semicolon => 0xBA,                 // VK_OEM_1
         Key::Slash | Key::Questionmark => 0xBF, // VK_OEM_2
-        Key::Backtick => 0xC0,    // VK_OEM_3
-        Key::OpenBracket => 0xDB, // VK_OEM_4
-        Key::Backslash | Key::Pipe => 0xDC, // VK_OEM_5
-        Key::CloseBracket => 0xDD, // VK_OEM_6
-        Key::Quote => 0xDE,       // VK_OEM_7
+        Key::Backtick => 0xC0,                  // VK_OEM_3
+        Key::OpenBracket => 0xDB,               // VK_OEM_4
+        Key::Backslash | Key::Pipe => 0xDC,     // VK_OEM_5
+        Key::CloseBracket => 0xDD,              // VK_OEM_6
+        Key::Quote => 0xDE,                     // VK_OEM_7
 
         // Resto de teclas: sin equivalente fiable, se descartan.
         _ => return None,

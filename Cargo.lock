@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-app"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-capture"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "cleandesk-proto",
@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-client"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "arboard",
@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-codec"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "cleandesk-proto",
@@ -1023,7 +1023,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "cleandesk-crypto",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-crypto"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1056,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-discovery"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1081,7 +1081,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-gui"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1108,7 +1108,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-host"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "arboard",
@@ -1133,7 +1133,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-input"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "cleandesk-proto",
@@ -1144,7 +1144,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-platform"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "thiserror 2.0.21",
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-proto"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bitflags 2.13.2",
  "bytes",
@@ -1168,7 +1168,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-relay-server"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "cleandesk-discovery",
@@ -1183,7 +1183,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-signal-server"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1203,7 +1203,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-transport"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "async-trait",
