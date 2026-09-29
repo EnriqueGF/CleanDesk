@@ -8,6 +8,9 @@
 //!   as that service: a tiny supervisor that keeps a headless host alive in
 //!   the interactive console session (so unattended access works before
 //!   login and after logout).
+//! * [`update`] — self-update from GitHub Releases: check, download with
+//!   SHA-256 verification against the published `SHA256SUMS`, and hand the
+//!   MSI to `msiexec`.
 //! * [`presence`] — a lock file that tells the service's host that the GUI is
 //!   running, so exactly one of them holds the device's registration.
 //!
@@ -18,6 +21,7 @@ pub mod presence;
 pub mod single_instance;
 pub mod service;
 pub mod startup;
+pub mod update;
 
 use thiserror::Error;
 

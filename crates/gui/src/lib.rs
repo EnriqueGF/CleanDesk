@@ -16,6 +16,7 @@ mod keymap;
 mod mainwindow;
 mod theme;
 mod tray;
+mod updater;
 mod viewer;
 
 use std::sync::Arc;

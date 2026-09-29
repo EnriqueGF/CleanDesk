@@ -223,118 +223,130 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                 .stroke(egui::Stroke::new(1.0_f32, theme::BORDER)),
         )
         .show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                let who = viewer
-                    .peer
-                    .as_ref()
-                    .map(|p| p.alias.clone().unwrap_or_else(|| p.hostname.clone()))
-                    .unwrap_or_else(|| tr("remote device").into());
-                theme::status_dot(ui, theme::ACCENT, "");
-                ui.label(egui::RichText::new(who).strong());
-                ui.separator();
-
-                // Selector de monitor (spec §15).
-                if viewer.monitors.len() > 1 {
-                    ui.label(egui::RichText::new(tr("Screen:")).color(theme::TEXT_DIM));
-                    let before = viewer.monitor;
-                    egui::ComboBox::from_id_salt("viewer-monitor")
-                        .selected_text(monitor_label(&viewer.monitors, viewer.monitor))
-                        .show_ui(ui, |ui| {
-                            for m in &viewer.monitors {
-                                ui.selectable_value(
-                                    &mut viewer.monitor,
-                                    m.index,
-                                    monitor_label(&viewer.monitors, m.index),
-                                );
-                            }
-                        });
-                    if viewer.monitor != before {
-                        viewer.session.select_monitor(viewer.monitor);
-                    }
-                    ui.separator();
-                }
-
-                // Selector de calidad.
-                ui.label(egui::RichText::new(tr("Quality:")).color(theme::TEXT_DIM));
-                let before = viewer.quality;
-                egui::ComboBox::from_id_salt("viewer-quality")
-                    .selected_text(quality_label(viewer.quality))
-                    .show_ui(ui, |ui| {
-                        for profile in QUALITY_PROFILES {
-                            ui.selectable_value(
-                                &mut viewer.quality,
-                                *profile,
-                                quality_label(*profile),
-                            );
-                        }
-                    });
-                if viewer.quality != before {
-                    viewer.session.set_quality(viewer.quality);
-                }
-
-                ui.separator();
-
-                // Ajustar a ventana / pantalla completa.
-                ui.checkbox(&mut viewer.fit_to_window, tr("Fit"));
-                if ui
-                    .checkbox(&mut viewer.fullscreen, tr("Full screen"))
-                    .changed()
-                {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(viewer.fullscreen));
-                }
-                if ui
-                    .button("⟳")
-                    .on_hover_text(tr("Refresh image (request a keyframe)"))
-                    .clicked()
-                {
-                    viewer.session.request_keyframe();
-                }
-
-                ui.separator();
-                let chat_label = if viewer.unread_chat > 0 {
-                    trf("Chat ({n})", &[("n", &viewer.unread_chat.to_string())])
-                } else {
-                    tr("Chat").to_string()
-                };
-                if ui.toggle_value(&mut viewer.show_chat, chat_label).changed() && viewer.show_chat
-                {
-                    viewer.unread_chat = 0;
-                }
-                let files_label = if viewer.offers.is_empty() {
-                    tr("Files").to_string()
-                } else {
-                    trf("Files ({n})", &[("n", &viewer.offers.len().to_string())])
-                };
-                ui.add_enabled_ui(viewer.granted.contains(Permissions::FILE_TRANSFER), |ui| {
-                    ui.toggle_value(&mut viewer.show_files, files_label)
-                        .on_disabled_hover_text(tr("File transfer was not granted by the host."));
-                });
-                ui.add_enabled_ui(viewer.granted.contains(Permissions::CLIPBOARD), |ui| {
-                    if ui
-                        .toggle_value(&mut viewer.clipboard_sync, tr("Clipboard"))
-                        .on_hover_text(tr("Keep the text clipboard in sync with the remote device"))
-                        .on_disabled_hover_text(tr("Clipboard access was not granted by the host."))
-                        .changed()
-                    {
-                        if viewer.clipboard_sync {
-                            viewer.session.enable_clipboard_sync();
-                        } else {
-                            viewer.session.disable_clipboard_sync();
-                        }
-                    }
-                });
-                actions_menu(viewer, ui);
-
-                // Botón de desconexión, alineado a la derecha.
+            // Una sola fila que nunca envuelve: los controles van en un área con
+            // desplazamiento horizontal y "Desconectar" queda fijo a la derecha, así
+            // la barra no se rompe al estrechar la ventana.
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+            ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(theme::danger_button(tr("Disconnect"))).clicked() {
                         disconnect_requested = true;
                     }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        egui::ScrollArea::horizontal()
+                            .id_salt("viewer-toolbar-scroll")
+                            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                let who = viewer
+                                    .peer
+                                    .as_ref()
+                                    .map(|p| p.alias.clone().unwrap_or_else(|| p.hostname.clone()))
+                                    .unwrap_or_else(|| tr("remote device").into());
+                                theme::status_dot(ui, theme::ACCENT, "");
+                                ui.label(egui::RichText::new(who).strong());
+                                ui.separator();
+
+                                // Selector de monitor (spec §15).
+                                if viewer.monitors.len() > 1 {
+                                    ui.label(egui::RichText::new(tr("Screen:")).color(theme::TEXT_DIM));
+                                    let before = viewer.monitor;
+                                    egui::ComboBox::from_id_salt("viewer-monitor")
+                                        .selected_text(monitor_label(&viewer.monitors, viewer.monitor))
+                                        .show_ui(ui, |ui| {
+                                            for m in &viewer.monitors {
+                                                ui.selectable_value(
+                                                    &mut viewer.monitor,
+                                                    m.index,
+                                                    monitor_label(&viewer.monitors, m.index),
+                                                );
+                                            }
+                                        });
+                                    if viewer.monitor != before {
+                                        viewer.session.select_monitor(viewer.monitor);
+                                    }
+                                    ui.separator();
+                                }
+
+                                // Selector de calidad.
+                                ui.label(egui::RichText::new(tr("Quality:")).color(theme::TEXT_DIM));
+                                let before = viewer.quality;
+                                egui::ComboBox::from_id_salt("viewer-quality")
+                                    .selected_text(quality_label(viewer.quality))
+                                    .show_ui(ui, |ui| {
+                                        for profile in QUALITY_PROFILES {
+                                            ui.selectable_value(
+                                                &mut viewer.quality,
+                                                *profile,
+                                                quality_label(*profile),
+                                            );
+                                        }
+                                    });
+                                if viewer.quality != before {
+                                    viewer.session.set_quality(viewer.quality);
+                                }
+
+                                ui.separator();
+
+                                // Ajustar a ventana / pantalla completa.
+                                ui.checkbox(&mut viewer.fit_to_window, tr("Fit"));
+                                if ui
+                                    .checkbox(&mut viewer.fullscreen, tr("Full screen"))
+                                    .changed()
+                                {
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(viewer.fullscreen));
+                                }
+                                if ui
+                                    .button("⟳")
+                                    .on_hover_text(tr("Refresh image (request a keyframe)"))
+                                    .clicked()
+                                {
+                                    viewer.session.request_keyframe();
+                                }
+
+                                ui.separator();
+                                let chat_label = if viewer.unread_chat > 0 {
+                                    trf("Chat ({n})", &[("n", &viewer.unread_chat.to_string())])
+                                } else {
+                                    tr("Chat").to_string()
+                                };
+                                if ui.toggle_value(&mut viewer.show_chat, chat_label).changed() && viewer.show_chat
+                                {
+                                    viewer.unread_chat = 0;
+                                }
+                                let files_label = if viewer.offers.is_empty() {
+                                    tr("Files").to_string()
+                                } else {
+                                    trf("Files ({n})", &[("n", &viewer.offers.len().to_string())])
+                                };
+                                ui.add_enabled_ui(viewer.granted.contains(Permissions::FILE_TRANSFER), |ui| {
+                                    ui.toggle_value(&mut viewer.show_files, files_label)
+                                        .on_disabled_hover_text(tr("File transfer was not granted by the host."));
+                                });
+                                ui.add_enabled_ui(viewer.granted.contains(Permissions::CLIPBOARD), |ui| {
+                                    if ui
+                                        .toggle_value(&mut viewer.clipboard_sync, tr("Clipboard"))
+                                        .on_hover_text(tr("Keep the text clipboard in sync with the remote device"))
+                                        .on_disabled_hover_text(tr("Clipboard access was not granted by the host."))
+                                        .changed()
+                                    {
+                                        if viewer.clipboard_sync {
+                                            viewer.session.enable_clipboard_sync();
+                                        } else {
+                                            viewer.session.disable_clipboard_sync();
+                                        }
+                                    }
+                                });
+                                actions_menu(viewer, ui);
+
+                                });
+                            });
+                    });
                 });
             });
 
             // Línea de estadísticas (spec §26).
-            ui.horizontal_wrapped(|ui| {
+            ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(stats_line(viewer))
                         .size(11.0)
@@ -615,7 +627,7 @@ fn show_files_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
 }
 
 /// "1.2 MB" a partir de bytes.
-fn human_size(bytes: u64) -> String {
+pub(crate) fn human_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut v = bytes as f64;
     let mut i = 0;
@@ -1040,6 +1052,8 @@ fn show_chat_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
     egui::SidePanel::right("viewer-chat")
         .resizable(true)
         .default_width(260.0)
+        .min_width(200.0)
+        .max_width(420.0)
         .frame(
             egui::Frame::new()
                 .fill(theme::PANEL)
@@ -1061,13 +1075,15 @@ fn show_chat_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
                 });
 
             ui.separator();
-            ui.horizontal(|ui| {
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut viewer.chat_input)
-                        .hint_text(tr("Type a message…"))
-                        .desired_width(ui.available_width() - 70.0),
+            // Botón primero (a la derecha) y el campo rellena lo que queda: pedir
+            // `available_width() - 70` hacía crecer el panel en cada fotograma.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let send_clicked = ui.add(theme::primary_button(tr("Send"))).clicked();
+                let resp = ui.add_sized(
+                    [ui.available_width(), 24.0],
+                    egui::TextEdit::singleline(&mut viewer.chat_input).hint_text(tr("Type a message…")),
                 );
-                let send = ui.add(theme::primary_button(tr("Send"))).clicked()
+                let send = send_clicked
                     || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
                 if send && !viewer.chat_input.trim().is_empty() {
                     let text = std::mem::take(&mut viewer.chat_input);

@@ -129,6 +129,17 @@ Once connected, the viewer toolbar offers:
   packet to the MAC the host announced (LAN broadcast plus directed
   broadcast).
 
+## 5c. Automatic updates
+
+CleanDesk checks GitHub Releases at startup and every six hours (Settings →
+Updates, on by default; *Check now* forces it). When a newer version exists a
+banner offers **Update now**: the MSI is downloaded to `<data dir>\updates`,
+its SHA-256 is verified against the `SHA256SUMS` file published with the
+release (a release without checksums, or a mismatching file, is never
+installed), and *Install and restart* hands it to `msiexec /passive`, closes
+CleanDesk and reopens it once the upgrade finishes. `installer/build-msi.ps1`
+writes `SHA256SUMS` next to the MSI; upload both to the release.
+
 ## 6. Community relay
 
 Anyone can contribute a relay to the community. All it takes is a machine with

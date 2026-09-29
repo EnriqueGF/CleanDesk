@@ -10,6 +10,10 @@ description = "OS integration: run-at-login, Windows service install/status, lau
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+# Self-update: GitHub Releases over HTTPS (rustls).
+ureq = { version = "2.12.1", features = ["json"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8.1"

@@ -118,6 +118,8 @@ pub struct CleanDeskApp {
     tray: Option<crate::tray::Tray>,
     /// Otra instancia pidió que mostremos la ventana (mutex de instancia única).
     pub show_requested: Arc<std::sync::atomic::AtomicBool>,
+    /// Actualizador automático (GitHub Releases).
+    pub updater: crate::updater::Updater,
     /// El usuario eligió "Salir": la siguiente petición de cierre se acepta.
     quitting: bool,
     /// Página activa de la navegación superior.
@@ -258,6 +260,7 @@ impl CleanDeskApp {
             },
             quitting: false,
             show_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            updater: crate::updater::Updater::default(),
             page: Page::Home,
             last_target: None,
             thumbs: std::collections::HashMap::new(),
@@ -626,6 +629,8 @@ impl eframe::App for CleanDeskApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 0) Bandeja: mostrar/salir, y cerrar = ocultar si así está configurado.
         self.handle_tray(ctx);
+        let check_updates = self.state.settings.read().check_updates;
+        self.updater.maybe_check(check_updates, ctx);
 
         // 1) Avanzar la conexión saliente si está en curso.
         self.poll_connecting(ctx);

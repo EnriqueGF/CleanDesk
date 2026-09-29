@@ -53,6 +53,8 @@ files and provide support — using **P2P connections** whenever possible and a
   remote session, block the remote keyboard and mouse, restart the machine),
   chat, multi-monitor, quality profiles. Every action is gated by the
   permissions the host granted.
+- **Keeps itself up to date.** Checks GitHub Releases, downloads the MSI,
+  verifies its SHA-256 against the published checksums and upgrades in place.
 - **Wake-on-LAN.** Hosts announce their MAC address with their signed record;
   saved devices can be woken from the address book with one click.
 

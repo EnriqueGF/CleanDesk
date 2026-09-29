@@ -71,4 +71,13 @@ Write-Host "== light" -ForegroundColor Cyan
     -sice:ICE61 -out $msi $obj
 if ($LASTEXITCODE -ne 0) { throw "light failed" }
 
+# Checksums the in-app updater verifies against (one line per release file).
+$sums = Join-Path $out "SHA256SUMS"
+$lines = @()
+foreach ($f in (Get-ChildItem $out -File | Where-Object { $_.Name -like "CleanDesk-$Version-*" -and $_.Extension -in ".msi", ".zip" })) {
+    $h = (Get-FileHash -Algorithm SHA256 $f.FullName).Hash.ToLowerInvariant()
+    $lines += "$h *$($f.Name)"
+}
+[IO.File]::WriteAllText($sums, ($lines -join "`n") + "`n")
 Write-Host "MSI: $msi" -ForegroundColor Green
+Write-Host "SUMS: $sums" -ForegroundColor Green

@@ -53,6 +53,11 @@ pub struct Settings {
     /// (the host keeps serving). Default on.
     #[serde(default = "default_true")]
     pub minimize_to_tray: bool,
+    /// Look for new releases on GitHub at startup and every few hours, and
+    /// offer to install them (the download is verified against the
+    /// published checksums). Default on.
+    #[serde(default = "default_true")]
+    pub check_updates: bool,
 }
 
 /// Rendezvous mode.
@@ -86,6 +91,7 @@ impl Default for Settings {
             pinned_keys: Default::default(),
             language: None,
             minimize_to_tray: true,
+            check_updates: true,
         }
     }
 }

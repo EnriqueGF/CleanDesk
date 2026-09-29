@@ -49,7 +49,8 @@ history.
 - [x] Windows service (§24): start with Windows, pre-login access.
 - [x] Remote reboot, lock session, lock local input, Ctrl+Alt+Del substitute
       (§24). Real secure-attention needs the Windows service (pending).
-- [ ] Automatic updates with integrity verification (§25).
+- [x] Automatic updates with integrity verification (§25): GitHub Releases +
+      SHA256SUMS, installed through the MSI.
 
 ## Milestone 2b — Community mode ✅ (done)
 

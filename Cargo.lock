@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-app"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-capture"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "cleandesk-proto",
@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-client"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "arboard",
@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-codec"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "cleandesk-proto",
@@ -1023,7 +1023,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "cleandesk-crypto",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-crypto"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1056,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-discovery"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1081,7 +1081,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-gui"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1108,7 +1108,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-host"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "arboard",
@@ -1133,7 +1133,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-input"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "cleandesk-proto",
@@ -1144,18 +1144,21 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-platform"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
+ "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.21",
  "tracing",
+ "ureq",
  "windows 0.62.2",
  "windows-service",
 ]
 
 [[package]]
 name = "cleandesk-proto"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "bitflags 2.13.2",
  "bytes",
@@ -1168,7 +1171,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-relay-server"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "cleandesk-discovery",
@@ -1183,7 +1186,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-signal-server"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1203,7 +1206,7 @@ dependencies = [
 
 [[package]]
 name = "cleandesk-transport"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4672,6 +4675,7 @@ version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -5690,6 +5694,24 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+
+[[package]]
+name = "ureq"
+version = "2.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
+dependencies = [
+ "base64 0.22.1",
+ "flate2",
+ "log",
+ "once_cell",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "url",
+ "webpki-roots 0.26.11",
+]
 
 [[package]]
 name = "url"

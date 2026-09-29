@@ -75,6 +75,7 @@ pub fn show(app: &mut CleanDeskApp, ctx: &egui::Context) {
                     active_session_banner(app, ui, &session);
                     ui.add_space(12.0);
                 }
+                update_banner(app, ui);
                 notices(app, ui);
                 match app.page {
                     Page::Home => home_page(app, ui, ctx),
@@ -1034,6 +1035,8 @@ fn settings_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
                 ui.add_space(10.0);
                 tray_settings(app, ui);
                 ui.add_space(10.0);
+                update_settings(app, ui);
+                ui.add_space(10.0);
                 network_settings(app, ui);
                 ui.add_space(10.0);
 
@@ -1095,6 +1098,142 @@ fn tray_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     {
         app.state.settings.write().minimize_to_tray = to_tray;
         app.save_settings();
+    }
+}
+
+/// Banner de actualización disponible / en curso (página principal).
+fn update_banner(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+    use crate::updater::Phase;
+    if !app.updater.banner_visible() {
+        return;
+    }
+    let phase = app.updater.phase();
+    let mut download = false;
+    let mut install = false;
+    let mut later = false;
+    let mut open_notes: Option<String> = None;
+    theme::card_tinted().inner_margin(egui::Margin::symmetric(14, 10)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("⬆").size(18.0).color(theme::ACCENT));
+            match &phase {
+                Phase::Available(r) => {
+                    ui.label(egui::RichText::new(trf("CleanDesk {v} is available.", &[("v", &r.version_string())])).strong());
+                    if ui.add(theme::primary_button(tr("Update now"))).clicked() {
+                        download = true;
+                    }
+                    if ui.add(theme::ghost_button(tr("Release notes"))).clicked() {
+                        open_notes = Some(r.html_url.clone());
+                    }
+                    if ui.add(theme::ghost_button(tr("Later"))).clicked() {
+                        later = true;
+                    }
+                }
+                Phase::Downloading { release, done, total } => {
+                    ui.label(trf(
+                        "Downloading {v}… {done} / {total}",
+                        &[
+                            ("v", &release.version_string()),
+                            ("done", &crate::viewer::human_size(*done)),
+                            ("total", &crate::viewer::human_size(*total)),
+                        ],
+                    ));
+                    let frac = if *total > 0 { *done as f32 / *total as f32 } else { 0.0 };
+                    ui.add(egui::ProgressBar::new(frac).desired_width(220.0));
+                }
+                Phase::Ready { release, .. } => {
+                    ui.label(
+                        egui::RichText::new(trf(
+                            "Update downloaded and verified. CleanDesk will close, install {v} and reopen.",
+                            &[("v", &release.version_string())],
+                        ))
+                        .strong(),
+                    );
+                    if ui.add(theme::primary_button(tr("Install and restart"))).clicked() {
+                        install = true;
+                    }
+                }
+                Phase::Installing => {
+                    ui.spinner();
+                    ui.label(tr("Installing…"));
+                }
+                _ => {}
+            }
+        });
+    });
+    ui.add_space(10.0);
+    if download {
+        let dir = app.state.data_dir().join("updates");
+        app.updater.download(dir, ui.ctx());
+    }
+    if later {
+        app.updater.dismiss();
+    }
+    if let Some(url) = open_notes {
+        ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+    }
+    if install {
+        match app.updater.install() {
+            // El instalador ya está en marcha en otro proceso: salimos para que
+            // pueda sustituir el ejecutable (y soltamos el mutex de instancia).
+            Ok(()) => std::process::exit(0),
+            Err(e) => app.notice = Some(trf("Update failed: {err}", &[("err", &e)])),
+        }
+    }
+}
+
+/// Sub-sección "Actualizaciones" de Ajustes.
+fn update_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+    use crate::updater::Phase;
+    theme::section_label(ui, tr("Updates"), true);
+    ui.label(
+        egui::RichText::new(trf("Current version: {v}", &[("v", &crate::updater::current_version())]))
+            .size(12.0)
+            .color(theme::TEXT_DIM),
+    );
+    let mut auto = app.state.settings.read().check_updates;
+    if ui.checkbox(&mut auto, tr("Check for updates automatically")).changed() {
+        app.state.settings.write().check_updates = auto;
+        app.save_settings();
+    }
+    let mut check = false;
+    let mut download = false;
+    ui.horizontal(|ui| {
+        let phase = app.updater.phase();
+        let busy = matches!(phase, Phase::Checking | Phase::Downloading { .. } | Phase::Installing);
+        if ui.add_enabled(!busy, theme::ghost_button(tr("Check now"))).clicked() {
+            check = true;
+        }
+        match &phase {
+            Phase::Checking => {
+                ui.spinner();
+                ui.label(egui::RichText::new(tr("Checking for updates…")).size(12.0).color(theme::TEXT_DIM));
+            }
+            Phase::UpToDate => {
+                ui.label(egui::RichText::new(tr("You are up to date.")).size(12.0).color(theme::ACCENT_STRONG));
+            }
+            Phase::Available(r) => {
+                ui.label(egui::RichText::new(trf("CleanDesk {v} is available.", &[("v", &r.version_string())])).size(12.0).color(theme::ACCENT_STRONG));
+                if ui.add(theme::primary_button(tr("Update now"))).clicked() {
+                    download = true;
+                }
+            }
+            Phase::Downloading { .. } | Phase::Ready { .. } | Phase::Installing => {
+                ui.label(egui::RichText::new(tr("See the banner on the Home page.")).size(12.0).color(theme::TEXT_DIM));
+            }
+            Phase::Error(e) => {
+                ui.label(egui::RichText::new(trf("Update failed: {err}", &[("err", e)])).size(12.0).color(theme::DANGER));
+            }
+            Phase::Idle => {}
+        }
+    });
+    if check {
+        app.updater.check(ui.ctx());
+    }
+    if download {
+        let dir = app.state.data_dir().join("updates");
+        app.updater.download(dir, ui.ctx());
+        app.page = Page::Home;
+        app.show_settings = false;
     }
 }
 
