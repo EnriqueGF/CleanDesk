@@ -140,20 +140,21 @@ mod imp {
             "--data-dir",
             data_dir.to_string_lossy().as_ref(),
         ]);
-        // `sc create` wants the literal "binPath= <value>" form (space after '=').
-        let bin_arg = format!("binPath= {bin}");
+        // sc.exe parses `option=` and its value as two separate argv tokens
+        // ("start=", "auto"). Passing "start= auto" as one argument (what a
+        // quoted string with a space becomes) is rejected with exit 1639.
         match status() {
             ServiceStatus::NotInstalled => {
-                sc_ok(&["create", SERVICE_NAME, &bin_arg, "start= auto", &format!("DisplayName= {DISPLAY_NAME}")])?;
+                sc_ok(&["create", SERVICE_NAME, "binPath=", &bin, "start=", "auto", "DisplayName=", DISPLAY_NAME])?;
             }
             _ => {
                 // Already installed: update the path (exe may have moved).
-                sc_ok(&["config", SERVICE_NAME, &bin_arg, "start= auto"])?;
+                sc_ok(&["config", SERVICE_NAME, "binPath=", &bin, "start=", "auto"])?;
             }
         }
         let _ = sc(&["description", SERVICE_NAME, DESCRIPTION]);
         // Restart automatically if it ever dies.
-        let _ = sc(&["failure", SERVICE_NAME, "reset= 86400", "actions= restart/5000/restart/10000/restart/30000"]);
+        let _ = sc(&["failure", SERVICE_NAME, "reset=", "86400", "actions=", "restart/5000/restart/10000/restart/30000"]);
         if status() != ServiceStatus::Running {
             sc_ok(&["start", SERVICE_NAME])?;
         }
