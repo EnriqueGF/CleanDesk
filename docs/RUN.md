@@ -1,7 +1,14 @@
 # Trying CleanDesk locally
 
 Requirements: stable Rust (1.85+) and Visual Studio Build Tools (MSVC). To use
-CleanDesk without building it, install the MSI from the GitHub release.
+CleanDesk without building it, install the MSI from the GitHub release. The
+installer asks whether to **start CleanDesk with Windows** and whether to
+**create a desktop shortcut**; for silent deployments pass the same choices on
+the command line:
+
+```
+msiexec /i CleanDesk-0.1.3-x64.msi /qn STARTWITHWINDOWS=1 INSTALLDESKTOPSHORTCUT=0
+```
 
 ## 0. Community mode (default): no server
 
@@ -104,6 +111,23 @@ When connecting with an unattended password you can tick **Remember**: the
 machine is saved to Favorites together with the **derived key** (Argon2id of
 the password and the host ID), never the password in the clear. Cards with 🔑
 connect directly in unattended mode; press the key to forget it.
+
+## 5b. In-session features
+
+Once connected, the viewer toolbar offers:
+
+- **Clipboard**: toggles two-way text clipboard sync (needs the *Clipboard*
+  permission; the host polls every 500 ms and echoes are suppressed).
+- **Files**: drop a file on the remote screen or use *Send file…*; the host
+  stores it under `Downloads\CleanDesk` with a sanitised, de-duplicated name.
+  Files offered by the host appear in the same panel and must be accepted.
+- **Actions**: Ctrl+Alt+Del substitute, Ctrl+Shift+Esc, Win+D, lock the remote
+  session, lock/unlock the remote keyboard and mouse, restart the remote
+  device. Each entry is enabled only when the host granted the matching
+  permission; the host re-checks before acting.
+- **Wake up (Wake-on-LAN)** in the ⋮ menu of a saved device sends a magic
+  packet to the MAC the host announced (LAN broadcast plus directed
+  broadcast).
 
 ## 6. Community relay
 

@@ -29,7 +29,7 @@ tray-icon = { version = "0.25.1", default-features = false }
 # To reach the native window from the tray thread (show/raise while hidden).
 raw-window-handle = "0.6"
 # Native file picker for "Send file…" in the viewer.
-rfd = { version = "0.15.3", default-features = false, features = ["common-controls-v6"] }
+rfd = { version = "0.15.3", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

@@ -41,12 +41,14 @@ history.
 ## Milestone 2 — Robustness and UX
 
 - [x] Multi-monitor (select/switch, §15), full screen/scaling (§16).
-- [ ] Clipboard images; in-session chat (§17); transfer progress/cancellation
-      (§13).
+- [x] Text clipboard sync (§17), in-session chat, file transfer with
+      progress/cancellation (§13).
+- [ ] Clipboard images; host-initiated file transfer.
 - [x] `Auto` adaptive quality by measured RTT (§8); bandwidth as the next signal.
 - [x] Session info panel (RTT/FPS/resolution/codec/bandwidth, §26).
 - [x] Windows service (§24): start with Windows, pre-login access.
-- [ ] Remote reboot (§24).
+- [x] Remote reboot, lock session, lock local input, Ctrl+Alt+Del substitute
+      (§24). Real secure-attention needs the Windows service (pending).
 - [ ] Automatic updates with integrity verification (§25).
 
 ## Milestone 2b — Community mode ✅ (done)
@@ -68,8 +70,9 @@ history.
 
 - [ ] Accounts, cloud address book, teams and roles (§21–23).
 - [ ] MFA; PAKE for unattended access (see SECURITY.md).
-- [ ] Session recording, Wake-on-LAN, remote printing, TCP tunnels, remote
-      terminal, API, webhooks.
+- [x] Wake-on-LAN.
+- [ ] Session recording, remote printing, TCP tunnels, remote terminal, API,
+      webhooks.
 - [ ] Hardware H.264/HEVC codec (NVENC) behind the `codec` trait.
 - [ ] macOS / Linux support (per-platform capture/input layers).
 - [ ] Web client and mobile app.

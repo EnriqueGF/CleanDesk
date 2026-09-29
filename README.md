@@ -47,6 +47,14 @@ files and provide support — using **P2P connections** whenever possible and a
   tray and the host keeps serving; quit from the tray menu (configurable).
   Launching it again just brings the existing window back (single instance per
   data directory).
+- **Everything you expect in a session.** Two-way text clipboard sync, file
+  transfer (drag a file onto the remote screen; incoming files are offered and
+  confirmed), remote actions (Ctrl+Alt+Del substitute, Task Manager, lock the
+  remote session, block the remote keyboard and mouse, restart the machine),
+  chat, multi-monitor, quality profiles. Every action is gated by the
+  permissions the host granted.
+- **Wake-on-LAN.** Hosts announce their MAC address with their signed record;
+  saved devices can be woken from the address book with one click.
 
 <p align="center">
   <img src="docs/screenshots/settings.png" alt="Settings: network mode, unattended access, service" width="520">
@@ -73,11 +81,12 @@ for the per-milestone detail and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) fo
 | Input injection | `crates/input` | ✅ Implemented (tests) |
 | Session orchestration | `crates/core` | ✅ Implemented (tests) |
 | Host / viewer role | `crates/host`, `crates/client` | ✅ Implemented (brute-force protection, on-demand keyframe, RTT/FPS/kbps, Auto quality) |
-| GUI (egui) | `crates/gui` | ✅ Implemented (dark theme, cards, favorites, settings, multi-monitor viewer) |
+| GUI (egui) | `crates/gui` | ✅ Implemented (light theme, Home/Sessions/Contacts/Invitations, session cards with thumbnails, nearby devices, settings, multi-monitor viewer with actions, clipboard and files) |
 | App / entry point | `crates/app` | ✅ GUI / `--host` / `--connect` / `--signal-url` / `--data-dir` (tests) |
 | Relay (TURN fallback) | `crates/relay-server` | ✅ TURN server (RFC 5766); community mode announced in the DHT (tests) |
 | Serverless discovery | `crates/discovery` | ✅ mDNS, BitTorrent DHT (BEP 44), Nostr NIP-44 signaling, UPnP (tests + e2e) |
 | Windows integration | `crates/platform` | ✅ Start with Windows, SCM service, presence lock |
+| Installer (MSI) | `installer/` | ✅ WiX MSI with start-with-Windows and desktop-shortcut options (also silent via `msiexec` properties) |
 | Installer | `installer/` | ✅ MSI (WiX) with shortcuts and firewall rules |
 
 ---
