@@ -10,7 +10,7 @@ use cleandesk_platform::update::{self, Release};
 use tracing::{info, warn};
 
 /// Cada cuánto se vuelve a consultar GitHub con la app abierta.
-const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+const CHECK_EVERY: Duration = Duration::from_secs(60 * 60);
 
 /// Fase actual del actualizador.
 #[derive(Debug, Clone)]

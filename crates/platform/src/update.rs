@@ -272,8 +272,19 @@ mod imp {
         if let Some(exe) = relaunch {
             script.push_str(&format!(" & start \"\" \"{}\"", exe.display()));
         }
+        spawn_detached_script(&script)?;
+        Ok(())
+    }
+
+    /// Run a cmd.exe one-liner detached. `raw_arg` is essential: `arg` would
+    /// wrap the script in quotes and escape the inner ones as `\"`, which
+    /// cmd does not understand (`start` then tries to run `\` and fails with
+    /// "file not found").
+    pub(super) fn spawn_detached_script(script: &str) -> Result<()> {
         Command::new("cmd.exe")
-            .args(["/d", "/c", &script])
+            .arg("/d")
+            .arg("/c")
+            .raw_arg(script)
             .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
             .spawn()?;
         Ok(())
@@ -366,6 +377,32 @@ mod tests {
         let mut j = fixture("v1.0.0", true);
         j["tag_name"] = serde_json::Value::String("latest".into());
         assert!(release_from_json(&j, (0, 1, 4)).is_err());
+    }
+
+    /// The detached cmd script must survive cmd's quoting rules: run one that
+    /// waits on a child (like msiexec) and then "relaunches" (like CleanDesk),
+    /// using paths with spaces, and check both steps happened.
+    #[cfg(windows)]
+    #[test]
+    fn detached_script_waits_then_relaunches() {
+        let dir = std::env::temp_dir().join("cleandesk update test dir");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("first step.txt");
+        let second = dir.join("second step.txt");
+        let script = format!(
+            "start \"\" /wait cmd.exe /c \"echo 1> \"{}\"\" & start \"\" cmd.exe /c \"echo 2> \"{}\"\"",
+            first.display(),
+            second.display()
+        );
+        super::imp::spawn_detached_script(&script).expect("spawn");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline && !(first.is_file() && second.is_file()) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(first.is_file(), "first (waited) step did not run");
+        assert!(second.is_file(), "relaunch step did not run");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Talks to GitHub for real: `cargo test -p cleandesk-platform -- --ignored`.
