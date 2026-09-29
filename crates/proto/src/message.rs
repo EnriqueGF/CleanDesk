@@ -146,6 +146,10 @@ pub enum RejectReason {
     AuthFailed,
     PermissionsDenied,
     Timeout,
+    /// The host runs without a person to ask (headless service) and only
+    /// takes unattended-password connections; retry with the password.
+    /// Appended in protocol 2.3.
+    UnattendedOnly,
 }
 
 /// Signaling error codes.

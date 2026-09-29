@@ -217,6 +217,7 @@ fn spanish(en: &str) -> Option<&'static str> {
 
         // --- Ventana "Ajustes" ---
         "Language" => "Idioma",
+        "The remote device is served by its background service and only accepts unattended connections: tick \"Unattended access\" and enter its password." => "El equipo remoto lo sirve su servicio en segundo plano y solo acepta conexiones desatendidas: marca \"Acceso desatendido\" e introduce su contraseña.",
         "Several devices claim this ID. Compare the fingerprint with the owner and connect only if it matches." => "Varios equipos reclaman este ID. Compara la huella con el propietario y conecta solo si coincide.",
         "Ready to connect (privileged, hosted by the service)" => "Listo para conectar (privilegiado, lo sirve el servicio)",
         "Privileged control: drive administrator windows and UAC prompts" => "Control privilegiado: manejar ventanas de administrador y avisos de UAC",

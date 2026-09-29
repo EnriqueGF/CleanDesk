@@ -854,6 +854,8 @@ fn friendly_error(s: &str) -> String {
         tr("the remote device is offline.").into()
     } else if s.contains("Busy") {
         tr("the remote device already has an active session.").into()
+    } else if s.contains("UnattendedOnly") {
+        tr("The remote device is served by its background service and only accepts unattended connections: tick \"Unattended access\" and enter its password.").into()
     } else if s.contains("UserDeclined") {
         tr("the remote device declined the connection.").into()
     } else if s.contains("AuthFailed") {

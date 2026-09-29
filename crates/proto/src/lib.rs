@@ -39,12 +39,14 @@ pub use quality::QualityProfile;
 ///   `SessionMessage::{RequestKeyframe, Ping, Pong}`.
 /// * 2.1 — `SessionMessage::RemoteAction` and the file-transfer data format
 ///   (`files::FileChunk` on the `files` channel).
+/// * 2.3 — `RejectReason::UnattendedOnly` (headless host refusing an
+///   interactive request), so viewers can tell the user to use the password.
 /// * 2.2 — session channel binding: `SessionMessage::IdentityProof` is the
 ///   first message each peer sends on the control channel (an Ed25519
 ///   signature over the session id and both DTLS certificate fingerprints),
 ///   so a rendezvous in the middle of the DTLS handshake is detected. Also
 ///   `FileTransferMsg::Refused` (a cancel that carries the reason).
-pub const PROTOCOL_VERSION: Version = Version { major: 2, minor: 2 };
+pub const PROTOCOL_VERSION: Version = Version { major: 2, minor: 3 };
 
 /// Default TCP port for the signaling (CleanDesk Server) WebSocket endpoint.
 ///

@@ -181,6 +181,11 @@ fn load_state(data_dir: &Option<PathBuf>) -> Result<Arc<AppState>> {
 }
 
 fn main() -> Result<()> {
+    // Before anything touches the screen: physical pixels everywhere, or the
+    // headless host clicks off-target on scaled displays.
+    if let Err(e) = cleandesk_platform::dpi::make_process_dpi_aware() {
+        eprintln!("warning: could not set DPI awareness: {e}");
+    }
     let opts = parse_args(std::env::args().skip(1), |k| std::env::var(k).ok())?;
     if opts.help {
         print_help();
@@ -197,6 +202,8 @@ fn main() -> Result<()> {
         Mode::Service => default_log("service.log"),
         Mode::InstallService | Mode::UninstallService => default_log("service-install.log"),
         Mode::Host if std::env::var_os("CLEANDESK_HELPER").is_some() => default_log("host.log"),
+        // The GUI has no console: keep a log next to the data for support.
+        Mode::Gui | Mode::Connect(_) => default_log("gui.log"),
         _ => None,
     });
     init_logging(log_file.as_ref())?;
@@ -406,7 +413,7 @@ impl Approver for HeadlessApprover {
             }
             _ => {
                 tracing::warn!(from = %from.id, "refusing non-unattended request in headless mode");
-                Decision::Reject(RejectReason::UserDeclined)
+                Decision::Reject(RejectReason::UnattendedOnly)
             }
         }
     }
@@ -483,7 +490,7 @@ mod tests {
         }
         assert!(matches!(
             default.on_request(&dev, Permissions::full(), AuthKind::Interactive).await,
-            Decision::Reject(RejectReason::UserDeclined)
+            Decision::Reject(RejectReason::UnattendedOnly)
         ));
         let full = HeadlessApprover::from_vars(|k| (k == ENV_UNATTENDED_FULL).then(|| "1".to_string()));
         match full.on_request(&dev, Permissions::full(), AuthKind::UnattendedPassword).await {

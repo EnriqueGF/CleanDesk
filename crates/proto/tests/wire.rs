@@ -254,7 +254,7 @@ fn version_compatibility_is_major_only() {
     let v = Version { major: PROTOCOL_VERSION.major + 1, minor: 0 };
     assert!(!PROTOCOL_VERSION.compatible_with(v));
     assert_eq!(Version { major: 2, minor: 1 }.to_string(), "2.1");
-    assert_eq!(PROTOCOL_VERSION, Version { major: 2, minor: 2 });
+    assert_eq!(PROTOCOL_VERSION, Version { major: 2, minor: 3 });
 }
 
 #[test]
@@ -272,4 +272,23 @@ fn cleandesk_id_edge_cases() {
     assert!(CleanDeskId::new(12_345_678_901).is_err());
     // A huge numeric string doesn't panic on u64 overflow either.
     assert!(CleanDeskId::parse("99999999999999999999999").is_err());
+}
+
+#[test]
+fn reject_reasons_roundtrip_in_json_and_postcard() {
+    use cleandesk_proto::message::RejectReason;
+    for r in [
+        RejectReason::UserDeclined,
+        RejectReason::Busy,
+        RejectReason::AuthFailed,
+        RejectReason::PermissionsDenied,
+        RejectReason::Timeout,
+        RejectReason::UnattendedOnly,
+    ] {
+        let json = serde_json::to_string(&r).unwrap();
+        assert_eq!(serde_json::from_str::<RejectReason>(&json).unwrap(), r);
+        let bin = encode_payload(&r).unwrap();
+        assert_eq!(decode_payload::<RejectReason>(&bin).unwrap(), r);
+    }
+    assert_eq!(serde_json::to_string(&RejectReason::UnattendedOnly).unwrap(), "\"unattended_only\"");
 }
