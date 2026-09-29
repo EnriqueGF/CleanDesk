@@ -677,6 +677,21 @@ async fn run_session_inner(
                             None => debug!("clipboard update ignored (not granted)"),
                         }
                     }
+                    SessionMessage::PasteClipboard { content } => {
+                        if granted.contains(Permissions::CLIPBOARD | Permissions::CONTROL_KEYBOARD) {
+                            if let Some(sync) = &clipboard {
+                                if sync.apply_remote_confirmed(content).await {
+                                    let mon = media.monitor();
+                                    for ev in clipboard_paste_keys(&pressed) {
+                                        pressed.observe(ev);
+                                        if let Err(e) = injector.inject(ev, &mon) {
+                                            debug!(error = %e, "clipboard paste injection failed");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     SessionMessage::Clipboard(ClipboardData::Image { .. }) => {
                         debug!("image clipboard not supported");
                     }
@@ -933,6 +948,30 @@ pub struct PressedState {
     buttons: HashSet<MouseButton>,
 }
 
+/// Paste with Ctrl+V and restore the modifiers previously held by the viewer.
+fn clipboard_paste_keys(pressed: &PressedState) -> Vec<InputEvent> {
+    let mut keys = Vec::new();
+    for code in [0x10, 0x12] {
+        if pressed.keys.contains(&code) {
+            keys.push(InputEvent::Key { code, pressed: false });
+        }
+    }
+    if !pressed.keys.contains(&0x11) {
+        keys.push(InputEvent::Key { code: 0x11, pressed: true });
+    }
+    keys.push(InputEvent::Key { code: 0x56, pressed: true });
+    keys.push(InputEvent::Key { code: 0x56, pressed: false });
+    if !pressed.keys.contains(&0x11) {
+        keys.push(InputEvent::Key { code: 0x11, pressed: false });
+    }
+    for code in [0x10, 0x12] {
+        if pressed.keys.contains(&code) {
+            keys.push(InputEvent::Key { code, pressed: true });
+        }
+    }
+    keys
+}
+
 impl PressedState {
     /// Record a press/release the host is about to inject.
     pub fn observe(&mut self, ev: InputEvent) {
@@ -1004,6 +1043,28 @@ fn default_monitor() -> MonitorInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clipboard_paste_preserves_held_modifiers() {
+        let mut state = PressedState::default();
+        for code in [0x10, 0x11, 0x12] {
+            state.observe(InputEvent::Key { code, pressed: true });
+        }
+        let initial_keys = state.keys.clone();
+        let paste = clipboard_paste_keys(&state);
+        assert_eq!(paste, vec![
+            InputEvent::Key { code: 0x10, pressed: false },
+            InputEvent::Key { code: 0x12, pressed: false },
+            InputEvent::Key { code: 0x56, pressed: true },
+            InputEvent::Key { code: 0x56, pressed: false },
+            InputEvent::Key { code: 0x10, pressed: true },
+            InputEvent::Key { code: 0x12, pressed: true },
+        ]);
+        for ev in paste {
+            state.observe(ev);
+        }
+        assert_eq!(state.keys, initial_keys);
+    }
 
     #[test]
     fn input_gating_follows_permissions() {

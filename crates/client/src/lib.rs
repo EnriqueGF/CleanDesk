@@ -209,6 +209,7 @@ pub struct ClientSession {
     /// Outbound side of the built-in clipboard sync; `None` until enabled.
     clipboard: Arc<Mutex<Option<clipboard::ClipboardSync>>>,
     clipboard_tx: mpsc::UnboundedSender<String>,
+    host_protocol_minor: Arc<AtomicU32>,
 }
 
 impl std::fmt::Debug for ClientSession {
@@ -270,8 +271,24 @@ impl ClientSession {
         let _ = self.control_tx.send(SessionMessage::Clipboard(ClipboardData::Text { content: text }));
     }
 
+    /// Whether the host supports applying text before injecting paste.
+    pub fn supports_clipboard_paste(&self) -> bool {
+        self.host_protocol_minor.load(Ordering::Relaxed) >= 4
+    }
+
+    /// Set the remote clipboard and paste only after the host applied it.
+    pub fn paste_clipboard(&self, text: String) {
+        if !self.supports_clipboard_paste()
+            || !self.current_permissions().contains(Permissions::CLIPBOARD | Permissions::CONTROL_KEYBOARD)
+            || text.len() > clipboard::MAX_TEXT_LEN
+        {
+            return;
+        }
+        let _ = self.control_tx.send(SessionMessage::PasteClipboard { content: text });
+    }
+
     /// Turn on automatic two-way text clipboard sync: local changes are sent
-    /// to the host every 500 ms and host changes are applied locally (the
+    /// to the host every 100 ms and host changes are applied locally (the
     /// `Clipboard` event is still emitted). Idempotent; everything is gated
     /// on the `CLIPBOARD` permission. Safe to call from a GUI thread.
     pub fn enable_clipboard_sync(&self) {
@@ -456,6 +473,7 @@ pub(crate) async fn connect_over(
     let (files_tx, files_rx) = mpsc::unbounded_channel::<FileCommand>();
     let (clipboard_tx, clipboard_rx) = mpsc::unbounded_channel::<String>();
     let granted_live = Arc::new(AtomicU32::new(granted.bits()));
+    let host_protocol_minor = Arc::new(AtomicU32::new(0));
     let clipboard: Arc<Mutex<Option<clipboard::ClipboardSync>>> = Arc::new(Mutex::new(None));
 
     let _ = cev_tx.try_send(ClientEvent::Connected);
@@ -470,7 +488,12 @@ pub(crate) async fn connect_over(
         control_tx.clone(),
         UnattendedCredential::from_config(&config),
         config.target,
-        Dispatch { files_tx: files_tx.clone(), granted: granted_live.clone(), clipboard: clipboard.clone() },
+        Dispatch {
+            files_tx: files_tx.clone(),
+            granted: granted_live.clone(),
+            clipboard: clipboard.clone(),
+            host_protocol_minor: host_protocol_minor.clone(),
+        },
     ));
 
     // File transfers.
@@ -548,6 +571,7 @@ pub(crate) async fn connect_over(
         granted_live,
         clipboard,
         clipboard_tx,
+        host_protocol_minor,
     })
 }
 
@@ -620,6 +644,7 @@ struct Dispatch {
     files_tx: mpsc::UnboundedSender<FileCommand>,
     granted: Arc<AtomicU32>,
     clipboard: Arc<Mutex<Option<clipboard::ClipboardSync>>>,
+    host_protocol_minor: Arc<AtomicU32>,
 }
 
 /// Background: apply offer/answer/ICE from the server to the peer.
@@ -795,6 +820,7 @@ async fn dispatch_incoming(
                 let Ok(msg) = frame::decode_payload::<SessionMessage>(&bytes) else { continue };
                 match msg {
                     SessionMessage::Hello { info, protocol } => {
+                        shared.host_protocol_minor.store(u32::from(protocol.minor), Ordering::Relaxed);
                         if !protocol.compatible_with(PROTOCOL_VERSION) {
                             warn!(%protocol, "host speaks an incompatible protocol");
                         }

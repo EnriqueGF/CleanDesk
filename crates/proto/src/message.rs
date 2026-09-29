@@ -230,6 +230,9 @@ pub enum SessionMessage {
     /// fingerprints, so a relay that terminated DTLS in the middle cannot
     /// forward it. Added in 2.2.
     IdentityProof { public_key_b64: String, signature_b64: String },
+    /// Viewer → host: apply text, then inject Ctrl+V after the clipboard write
+    /// succeeds. Requires clipboard and keyboard permissions. Added in 2.4.
+    PasteClipboard { content: String },
 }
 
 /// Privileged one-shot actions a viewer may request from the host.

@@ -83,12 +83,13 @@ fn every_session_message() -> Vec<SessionMessage> {
             public_key_b64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
             signature_b64: "c2ln".into(),
         },
+        SessionMessage::PasteClipboard { content: "Texto con ñ y 日本語\nsegunda línea".into() },
     ]
 }
 
 /// postcard variant tags (the first byte of each encoded message), pinned.
-const EXPECTED_SESSION_TAGS: [u8; 19] =
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+const EXPECTED_SESSION_TAGS: [u8; 20] =
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
 
 /// Every `RemoteAction`, in declaration order, with its pinned tag.
 fn every_remote_action() -> Vec<RemoteAction> {
@@ -254,7 +255,7 @@ fn version_compatibility_is_major_only() {
     let v = Version { major: PROTOCOL_VERSION.major + 1, minor: 0 };
     assert!(!PROTOCOL_VERSION.compatible_with(v));
     assert_eq!(Version { major: 2, minor: 1 }.to_string(), "2.1");
-    assert_eq!(PROTOCOL_VERSION, Version { major: 2, minor: 3 });
+    assert_eq!(PROTOCOL_VERSION, Version { major: 2, minor: 4 });
 }
 
 #[test]

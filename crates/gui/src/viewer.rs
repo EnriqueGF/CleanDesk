@@ -126,6 +126,7 @@ impl ViewerState {
     /// Crea el estado del visor a partir de una sesión recién establecida.
     pub fn new(session: ClientSession) -> Self {
         let granted = session.granted;
+        session.enable_clipboard_sync();
         Self {
             session,
             granted,
@@ -146,7 +147,7 @@ impl ViewerState {
             fullscreen: false,
             modifiers: ModifierState::default(),
             last_move: None,
-            clipboard_sync: false,
+            clipboard_sync: true,
             local_input_locked: false,
             transfers: Vec::new(),
             offers: Vec::new(),
@@ -876,7 +877,8 @@ fn forward_input(
     response: &egui::Response,
 ) {
     let mouse_ok = viewer.mouse_allowed();
-    let keyboard_ok = viewer.keyboard_allowed() && (response.hovered() || response.has_focus());
+    let keyboard_ok = viewer.keyboard_allowed()
+        && (response.has_focus() || (response.hovered() && !ui.ctx().wants_keyboard_input()));
     if !mouse_ok && !keyboard_ok {
         return;
     }
@@ -887,12 +889,14 @@ fn forward_input(
         scroll: egui::Vec2,
         keys: Vec<(u32, bool)>,
         modifiers: egui::Modifiers,
+        clipboard_events: Vec<egui::Event>,
     }
 
     let hovered = response.hovered();
     let input = ui.input(|i| {
         let mut buttons = Vec::new();
         let mut keys = Vec::new();
+        let mut clipboard_events = Vec::new();
         for ev in &i.events {
             match ev {
                 egui::Event::PointerButton {
@@ -913,6 +917,9 @@ fn forward_input(
                         keys.push((vk, *pressed));
                     }
                 }
+                egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) if keyboard_ok => {
+                    clipboard_events.push(ev.clone());
+                }
                 _ => {}
             }
         }
@@ -925,6 +932,7 @@ fn forward_input(
             },
             keys,
             modifiers: i.modifiers,
+            clipboard_events,
         }
     });
 
@@ -974,9 +982,83 @@ fn forward_input(
                 .session
                 .send_input(InputEvent::Key { code: vk, pressed });
         }
+        for event in input.clipboard_events {
+            if let egui::Event::Paste(text) = &event {
+                if viewer.clipboard_sync
+                    && viewer.granted.contains(Permissions::CLIPBOARD)
+                    && viewer.session.supports_clipboard_paste()
+                {
+                    viewer.session.paste_clipboard(text.clone());
+                    continue;
+                }
+            }
+            for event in clipboard_shortcut(&event, viewer.modifiers) {
+                viewer.session.send_input(event);
+            }
+        }
     } else if viewer.modifiers.shift || viewer.modifiers.ctrl || viewer.modifiers.alt {
         // El foco salió de la imagen con modificadores pulsados: suéltalos.
         sync_modifiers(viewer, egui::Modifiers::NONE);
+    }
+}
+
+// egui-winit consumes the key-down for Ctrl+C/X/V and emits these events.
+// Preserve the modifier already held on the host, including Shift+Insert.
+fn clipboard_shortcut(event: &egui::Event, modifiers: ModifierState) -> Vec<InputEvent> {
+    let code = match event {
+        egui::Event::Copy => 0x43,
+        egui::Event::Cut => 0x58,
+        egui::Event::Paste(_) => 0x56,
+        _ => return Vec::new(),
+    };
+    let mut keys = Vec::new();
+    for (code, held) in [(VK_SHIFT, modifiers.shift), (VK_MENU, modifiers.alt)] {
+        if held {
+            keys.push(InputEvent::Key { code, pressed: false });
+        }
+    }
+    if !modifiers.ctrl {
+        keys.push(InputEvent::Key { code: VK_CONTROL, pressed: true });
+    }
+    keys.push(InputEvent::Key { code, pressed: true });
+    keys.push(InputEvent::Key { code, pressed: false });
+    if !modifiers.ctrl {
+        keys.push(InputEvent::Key { code: VK_CONTROL, pressed: false });
+    }
+    for (code, held) in [(VK_SHIFT, modifiers.shift), (VK_MENU, modifiers.alt)] {
+        if held {
+            keys.push(InputEvent::Key { code, pressed: true });
+        }
+    }
+    keys
+}
+
+#[cfg(test)]
+mod clipboard_tests {
+    use super::*;
+
+    #[test]
+    fn copy_and_cut_restore_the_consumed_key_down() {
+        let modifiers = ModifierState { ctrl: true, ..Default::default() };
+        for (event, code) in [(egui::Event::Copy, 0x43), (egui::Event::Cut, 0x58)] {
+            assert_eq!(clipboard_shortcut(&event, modifiers), vec![
+                InputEvent::Key { code, pressed: true },
+                InputEvent::Key { code, pressed: false },
+            ]);
+        }
+    }
+
+    #[test]
+    fn shift_insert_paste_restores_shift_without_leaving_control_down() {
+        let modifiers = ModifierState { shift: true, ..Default::default() };
+        assert_eq!(clipboard_shortcut(&egui::Event::Paste("texto".into()), modifiers), vec![
+            InputEvent::Key { code: VK_SHIFT, pressed: false },
+            InputEvent::Key { code: VK_CONTROL, pressed: true },
+            InputEvent::Key { code: 0x56, pressed: true },
+            InputEvent::Key { code: 0x56, pressed: false },
+            InputEvent::Key { code: VK_CONTROL, pressed: false },
+            InputEvent::Key { code: VK_SHIFT, pressed: true },
+        ]);
     }
 }
 

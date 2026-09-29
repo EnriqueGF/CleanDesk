@@ -46,7 +46,8 @@ pub use quality::QualityProfile;
 ///   signature over the session id and both DTLS certificate fingerprints),
 ///   so a rendezvous in the middle of the DTLS handshake is detected. Also
 ///   `FileTransferMsg::Refused` (a cancel that carries the reason).
-pub const PROTOCOL_VERSION: Version = Version { major: 2, minor: 3 };
+/// * 2.4 — ordered clipboard paste (`SessionMessage::PasteClipboard`).
+pub const PROTOCOL_VERSION: Version = Version { major: 2, minor: 4 };
 
 /// Default TCP port for the signaling (CleanDesk Server) WebSocket endpoint.
 ///
