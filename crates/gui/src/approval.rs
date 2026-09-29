@@ -76,6 +76,15 @@ impl Approver for GuiApprover {
         requested: Permissions,
         auth: AuthKind,
     ) -> Decision {
+        // Acceso desatendido: la autoridad es la contraseña, no un humano. El
+        // host aún exige el reto/respuesta HMAC después de este `Accept`, así
+        // que conceder aquí lo pedido no salta ninguna comprobación: si la
+        // contraseña no cuadra, el host corta la sesión. Sin prompt, como
+        // espera cualquier acceso desatendido.
+        if matches!(auth, AuthKind::UnattendedPassword) {
+            tracing::info!(from = %from.id, "unattended request accepted automatically (password verified by challenge)");
+            return Decision::Accept(requested);
+        }
         let (tx, rx) = oneshot::channel();
         let pending = PendingRequest {
             from: from.clone(),
