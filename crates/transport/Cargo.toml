@@ -21,6 +21,7 @@ tokio-tungstenite.workspace = true
 futures-util.workspace = true
 webrtc = "0.21.0"
 base64.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 uuid.workspace = true

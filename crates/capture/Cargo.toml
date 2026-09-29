@@ -8,6 +8,7 @@ description = "Screen capture abstraction + Windows DXGI Desktop Duplication."
 
 [dependencies]
 cleandesk-proto.workspace = true
+cleandesk-platform.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

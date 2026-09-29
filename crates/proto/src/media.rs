@@ -31,6 +31,12 @@ pub const MAX_CHUNK_PAYLOAD: usize = 16 * 1024 - 256;
 /// caller bug or a hostile peer trying to make the receiver buffer forever.
 pub const MAX_CHUNKS_PER_FRAME: u16 = u16::MAX;
 
+/// Upper bound on the bytes a [`Reassembler`] holds for the frame in
+/// progress. `count` × [`MAX_CHUNK_PAYLOAD`] would allow ~1 GiB, far beyond
+/// any real frame (the decoder caps decompression at 64 MiB anyway), so a
+/// peer announcing a huge `count` and drip-feeding chunks cannot pin memory.
+pub const MAX_BUFFERED_BYTES: usize = 64 * 1024 * 1024;
+
 /// One slice of a [`VideoFrame`], carried as a single data-channel message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrameChunk {
@@ -95,9 +101,12 @@ pub struct Reassembler {
     height: u32,
     timestamp_us: u64,
     parts: BTreeMap<u16, Vec<u8>>,
+    /// Sum of the payload lengths in `parts`, kept so the cap check is O(1).
+    buffered: usize,
     /// Frames that were started but abandoned because a newer frame arrived
-    /// first. Consumers use this to decide whether they need to ask the
-    /// sender for a fresh keyframe.
+    /// first (or the frame outgrew [`MAX_BUFFERED_BYTES`]). Consumers use
+    /// this to decide whether they need to ask the sender for a fresh
+    /// keyframe.
     dropped: u64,
 }
 
@@ -108,10 +117,13 @@ impl Reassembler {
 
     /// Feed a chunk. Returns `Some(frame)` once the frame it belongs to is
     /// complete. Chunks from superseded (older) frames are ignored, as are
-    /// malformed chunks (zero `count`, `index >= count`, or a header that
-    /// disagrees with the chunks already held for the same sequence).
+    /// malformed chunks (zero `count`, `index >= count`, a payload larger
+    /// than [`MAX_CHUNK_PAYLOAD`], or a header that disagrees with the chunks
+    /// already held for the same sequence). A frame that would exceed
+    /// [`MAX_BUFFERED_BYTES`] is abandoned (counted in
+    /// [`Self::dropped_frames`]) and its later chunks ignored.
     pub fn push(&mut self, chunk: FrameChunk) -> Option<VideoFrame> {
-        if chunk.count == 0 || chunk.index >= chunk.count {
+        if chunk.count == 0 || chunk.index >= chunk.count || chunk.payload.len() > MAX_CHUNK_PAYLOAD {
             return None;
         }
         match self.seq {
@@ -135,9 +147,22 @@ impl Reassembler {
             None => self.reset_to(&chunk),
         }
 
+        // A re-delivered index replaces the old copy: account for it before
+        // checking the budget so duplicates cannot inflate the count.
+        let replaced = self.parts.get(&chunk.index).map_or(0, Vec::len);
+        if self.buffered - replaced + chunk.payload.len() > MAX_BUFFERED_BYTES {
+            // Evict the whole frame: whatever the peer sends next for it is
+            // stale (below `seq`) or a duplicate and gets ignored.
+            self.dropped += 1;
+            self.parts.clear();
+            self.buffered = 0;
+            self.count = 0;
+            return None;
+        }
+        self.buffered = self.buffered - replaced + chunk.payload.len();
         self.parts.insert(chunk.index, chunk.payload);
 
-        if self.parts.len() == self.count as usize {
+        if self.count != 0 && self.parts.len() == self.count as usize {
             let total: usize = self.parts.values().map(Vec::len).sum();
             let mut data = Vec::with_capacity(total);
             for (_, part) in std::mem::take(&mut self.parts) {
@@ -155,6 +180,7 @@ impl Reassembler {
             // anything older) are dropped instead of restarting the frame.
             self.seq = Some(frame.sequence);
             self.count = 0;
+            self.buffered = 0;
             Some(frame)
         } else {
             None
@@ -188,6 +214,7 @@ impl Reassembler {
         self.height = chunk.height;
         self.timestamp_us = chunk.timestamp_us;
         self.parts.clear();
+        self.buffered = 0;
     }
 }
 
@@ -331,6 +358,59 @@ mod tests {
         let done = r.push(hostile(1, 2, 3)).unwrap();
         assert_eq!(done.width, 8);
         assert_eq!(done.data.len(), 12);
+    }
+
+    #[test]
+    fn oversized_payload_is_rejected() {
+        let mut r = Reassembler::new();
+        let mut big = hostile(1, 0, 2);
+        big.payload = vec![0; MAX_CHUNK_PAYLOAD + 1];
+        assert!(r.push(big).is_none());
+        assert!(!r.in_progress(), "an oversized chunk must not even start a frame");
+        let mut ok = hostile(1, 0, 2);
+        ok.payload = vec![0; MAX_CHUNK_PAYLOAD];
+        assert!(r.push(ok).is_none());
+        assert!(r.in_progress());
+    }
+
+    #[test]
+    fn buffered_bytes_are_capped_and_the_frame_evicted() {
+        let mut r = Reassembler::new();
+        let per = MAX_CHUNK_PAYLOAD;
+        let fits = MAX_BUFFERED_BYTES / per; // chunks that fit under the cap
+        let count = (fits + 2) as u16;
+        for i in 0..fits as u16 {
+            let mut c = hostile(1, i, count);
+            c.payload = vec![0; per];
+            assert!(r.push(c).is_none());
+        }
+        assert!(r.in_progress());
+        assert_eq!(r.dropped_frames(), 0);
+        // The chunk that crosses the cap evicts everything held so far...
+        let mut c = hostile(1, fits as u16, count);
+        c.payload = vec![0; per];
+        assert!(r.push(c).is_none());
+        assert!(!r.in_progress());
+        assert_eq!(r.buffered, 0);
+        assert_eq!(r.dropped_frames(), 1);
+        // ...and the frame can never complete afterwards.
+        let mut c = hostile(1, (fits + 1) as u16, count);
+        c.payload = vec![0; per];
+        assert!(r.push(c).is_none());
+        assert!(r.push(hostile(1, 0, count)).is_none());
+        // A newer frame proceeds normally.
+        assert!(r.push(hostile(2, 0, 1)).is_some());
+    }
+
+    #[test]
+    fn duplicate_chunks_do_not_inflate_the_buffer_accounting() {
+        let mut r = Reassembler::new();
+        let mut c = hostile(1, 0, 3);
+        c.payload = vec![0; 1000];
+        for _ in 0..50 {
+            assert!(r.push(c.clone()).is_none());
+        }
+        assert_eq!(r.buffered, 1000);
     }
 
     #[test]

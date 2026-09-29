@@ -22,10 +22,74 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::{mouse_move_absolute, InputInjector, VirtualScreen};
 
 /// `InputInjector` implemented with the Windows `SendInput` API.
-pub struct WinInputInjector;
+///
+/// Events are handed to a dedicated OS thread: `SendInput` only reaches the
+/// desktop the *calling thread* is attached to, and following the input
+/// desktop (UAC prompts, lock screen) means calling `SetThreadDesktop`, which
+/// must not happen on shared async worker threads. The thread re-checks the
+/// input desktop every [`ATTACH_INTERVAL`] and after any failed injection.
+pub struct WinInputInjector {
+    tx: std::sync::mpsc::Sender<Job>,
+}
+
+struct Job {
+    ev: InputEvent,
+    monitor: MonitorInfo,
+}
+
+/// How often the injector thread looks for a desktop switch.
+const ATTACH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
+
+impl Default for WinInputInjector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WinInputInjector {
+    pub fn new() -> Self {
+        let (tx, rx) = std::sync::mpsc::channel::<Job>();
+        let spawned = std::thread::Builder::new()
+            .name("cleandesk-input".into())
+            .spawn(move || injector_thread(rx));
+        if let Err(e) = spawned {
+            tracing::error!(error = %e, "could not spawn the input thread; input will be dropped");
+        }
+        Self { tx }
+    }
+}
+
+fn injector_thread(rx: std::sync::mpsc::Receiver<Job>) {
+    let mut last_attach = std::time::Instant::now() - ATTACH_INTERVAL;
+    let mut force_attach = true;
+    while let Ok(job) = rx.recv() {
+        if force_attach || last_attach.elapsed() >= ATTACH_INTERVAL {
+            last_attach = std::time::Instant::now();
+            force_attach = false;
+            match cleandesk_platform::desktop::attach_input_desktop() {
+                Ok(true) => tracing::info!("input thread followed the input desktop"),
+                Ok(false) => {}
+                Err(e) => tracing::debug!(error = %e, "could not follow the input desktop"),
+            }
+        }
+        if let Err(e) = inject_now(job.ev, &job.monitor) {
+            tracing::warn!(error = %e, "input injection failed");
+            force_attach = true;
+        }
+    }
+    tracing::debug!("input thread stopped");
+}
 
 impl InputInjector for WinInputInjector {
     fn inject(&mut self, ev: InputEvent, monitor: &MonitorInfo) -> anyhow::Result<()> {
+        self.tx
+            .send(Job { ev, monitor: monitor.clone() })
+            .map_err(|_| anyhow::anyhow!("input thread is gone"))
+    }
+}
+
+/// Inject one event on the calling thread's desktop.
+fn inject_now(ev: InputEvent, monitor: &MonitorInfo) -> anyhow::Result<()> {
         match ev {
             InputEvent::MouseMove { x, y } => {
                 let vs = virtual_screen();
@@ -65,7 +129,6 @@ impl InputInjector for WinInputInjector {
                 send(&[key_input(code, flags)])
             }
         }
-    }
 }
 
 /// Read the virtual-desktop rectangle from the OS. Impure (the only Win32 query

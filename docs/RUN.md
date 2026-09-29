@@ -129,6 +129,25 @@ Once connected, the viewer toolbar offers:
   packet to the MAC the host announced (LAN broadcast plus directed
   broadcast).
 
+## 5b2. Privileged control (administrator windows and UAC)
+
+Windows silently drops input sent from an ordinary process to an elevated
+(administrator) window, and UAC prompts live on a separate *secure desktop*.
+Settings → System → **Privileged control** enables the two ways CleanDesk gets
+around that:
+
+- **Service installed (recommended).** The CleanDesk service hosts as
+  LocalSystem. Its capture and input threads follow the input desktop, so the
+  viewer sees and can answer UAC prompts and the lock screen. While the GUI
+  is open it does *not* take over hosting in this mode, so only unattended
+  (password) connections are accepted.
+- **No service.** CleanDesk relaunches itself elevated at startup (one UAC
+  prompt). Administrator windows on the normal desktop become controllable;
+  the UAC secure desktop still needs the service.
+
+Both paths only decide *who may be driven*; who may connect is still governed
+by the approval dialog, the unattended password and the granted permissions.
+
 ## 5c. Automatic updates
 
 CleanDesk checks GitHub Releases at startup and every six hours (Settings →

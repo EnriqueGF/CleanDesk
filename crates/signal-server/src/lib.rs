@@ -33,7 +33,9 @@
 //! callee a dialog / an auth attempt) and a budget of malformed messages
 //! before the socket is closed. WebSocket messages are capped at
 //! [`MAX_WS_MESSAGE_BYTES`], the TLS/WS handshake and registration have
-//! deadlines, and a connection that never registers is dropped.
+//! deadlines, and a connection that never registers is dropped. Per source
+//! IP, [`state::IpLimits`] caps concurrent sockets (refused before the
+//! WebSocket upgrade, so they cost nothing) and registration attempts.
 
 pub mod state;
 
@@ -85,12 +87,31 @@ pub async fn run(listener: TcpListener) -> Result<()> {
 pub async fn run_with_state(listener: TcpListener, state: Arc<ServerState>) -> Result<()> {
     loop {
         let (stream, peer_addr) = listener.accept().await?;
+        // Cheapest possible refusal: before any handshake work.
+        if !state.ip_limits().try_acquire(peer_addr.ip()) {
+            drop(stream);
+            continue;
+        }
         let state = state.clone();
         tokio::spawn(async move {
+            let slot = IpSlot { state: state.clone(), ip: peer_addr.ip() };
             if let Err(e) = handle_connection(stream, peer_addr, state).await {
                 debug!(%peer_addr, error = %e, "connection closed");
             }
+            drop(slot);
         });
+    }
+}
+
+/// Releases the per-IP connection slot however the task ends.
+struct IpSlot {
+    state: Arc<ServerState>,
+    ip: std::net::IpAddr,
+}
+
+impl Drop for IpSlot {
+    fn drop(&mut self) {
+        self.state.ip_limits().release(self.ip);
     }
 }
 
@@ -106,6 +127,7 @@ enum Phase {
 
 struct Conn {
     id: ConnId,
+    ip: std::net::IpAddr,
     phase: Phase,
     connect_limit: RateLimiter,
     bad_messages: u32,
@@ -157,6 +179,7 @@ async fn handle_connection(
 
     let mut conn = Conn {
         id: state.next_conn_id(),
+        ip: peer_addr.ip(),
         phase: Phase::Unregistered,
         connect_limit: RateLimiter::new(CONNECT_BURST, CONNECT_WINDOW),
         bad_messages: 0,
@@ -250,6 +273,12 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
                 debug!(%id, "ignoring duplicate Register");
                 let _ = conn.tx.send(err(ErrorCode::BadRequest, "already registered"));
                 return conn.strike();
+            }
+            // Counted before the key is even parsed: the point is to bound
+            // the work one address can make the server do.
+            if !state.ip_limits().allow_registration(conn.ip) {
+                let _ = conn.tx.send(err(ErrorCode::RateLimited, "too many registrations from this address"));
+                return Flow::Close;
             }
             // The claimed ID must be the one derived from the key. This is
             // what makes CleanDesk IDs unforgeable without the private key.

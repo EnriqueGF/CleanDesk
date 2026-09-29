@@ -101,6 +101,15 @@ impl DxgiCapturer {
         if self.duplication.is_some() {
             return Ok(());
         }
+        // Desktop Duplication only sees the desktop this thread is attached
+        // to. After a UAC switch the old duplication dies with ACCESS_LOST; a
+        // LocalSystem host re-attaches here and keeps showing the secure
+        // desktop. For ordinary processes this is a harmless no-op.
+        match cleandesk_platform::desktop::attach_input_desktop() {
+            Ok(true) => tracing::info!("capture thread followed the input desktop"),
+            Ok(false) => {}
+            Err(e) => tracing::debug!(error = %e, "could not follow the input desktop"),
+        }
         let entry = self
             .monitors
             .get(self.selected)

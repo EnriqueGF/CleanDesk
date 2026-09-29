@@ -3,6 +3,11 @@
 //! Hosts announce `<id>._cleandesk._tcp.local.` with a TXT record carrying
 //! the CleanDesk ID, the public key and the direct-signaling port. Viewers
 //! browse for a specific ID. No Internet, no configuration.
+//!
+//! The TXT record is **unsigned**: anything on the LAN can announce any
+//! `id`/`pk` pair. What comes out of here is a hint about where to dial and
+//! which key to expect; the direct handshake is what proves the key, and a
+//! key seen here must not be pinned until that handshake succeeded.
 
 use crate::{DiscoveryError, Result};
 use cleandesk_proto::CleanDeskId;
@@ -158,6 +163,12 @@ async fn browse(timeout: Duration, mut on_peer: impl FnMut(LanPeer) -> bool) {
 }
 
 fn peer_from_resolved(info: &mdns_sd::ResolvedService) -> Option<LanPeer> {
+    // A host speaking another rendezvous version would fail the direct
+    // handshake anyway; skipping it here yields "not found" rather than an
+    // authentication error that looks like an attack.
+    if info.get_property_val_str("v") != Some(crate::RENDEZVOUS_VERSION.to_string().as_str()) {
+        return None;
+    }
     let id = CleanDeskId::parse(info.get_property_val_str("id")?).ok()?;
     let public_key = info.get_property_val_str("pk")?.to_string();
     let port = info.get_port();

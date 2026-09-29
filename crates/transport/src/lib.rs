@@ -16,7 +16,7 @@ pub mod peer;
 pub mod signaling;
 
 pub use error::TransportError;
-pub use peer::{Channel, IceConfig, PeerConnection, TurnServer};
+pub use peer::{fingerprint_from_sdp, fingerprint_of_der, Channel, IceConfig, PeerConnection, TurnServer};
 pub use signaling::{ChallengeSigner, QueueOut, SignalOut, SignalingClient};
 
 /// Crate version string, handy for diagnostics.

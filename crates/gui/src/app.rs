@@ -77,7 +77,6 @@ pub enum Page {
 pub struct NearbyDevice {
     pub id: CleanDeskId,
     pub alias: Option<String>,
-    pub public_key: String,
     pub mac: Option<String>,
 }
 
@@ -180,6 +179,11 @@ pub struct CleanDeskApp {
         Option<std::sync::mpsc::Receiver<(cleandesk_platform::service::ServiceStatus, bool)>>,
     /// Marca "hay una GUI abierta" para que el host del servicio se aparte.
     _presence: Option<cleandesk_platform::presence::PresenceLock>,
+    /// El servicio (LocalSystem) hace de host mientras la ventana está abierta
+    /// (control privilegiado): la GUI no registra el ID ni acepta sesiones.
+    pub hosted_by_service: bool,
+    /// Este proceso corre elevado (control de ventanas de administrador).
+    pub elevated: bool,
 }
 
 impl CleanDeskApp {
@@ -212,16 +216,31 @@ impl CleanDeskApp {
         let host_status = Arc::new(Mutex::new(HostStatus::Connecting));
         let host_control = HostControl::new();
         let host_restart = Arc::new(tokio::sync::Notify::new());
-        let presence = match cleandesk_platform::presence::PresenceLock::acquire(&state.data_dir())
-        {
-            Ok(lock) => Some(lock),
-            Err(e) => {
-                warn!(error = %e, "no se pudo crear el lock de presencia de la GUI");
-                None
+        // Control privilegiado con el servicio en marcha: el host del servicio
+        // (LocalSystem) sigue sirviendo y la GUI no toma el relevo. Sin el lock
+        // de presencia el servicio no se aparta.
+        let elevated = cleandesk_platform::elevation::is_elevated();
+        let hosted_by_service = state.settings.read().privileged_control
+            && cleandesk_platform::service::status() == cleandesk_platform::service::ServiceStatus::Running;
+        let presence = if hosted_by_service {
+            info!("privileged control: the CleanDesk service keeps hosting; GUI will not register");
+            None
+        } else {
+            match cleandesk_platform::presence::PresenceLock::acquire(&state.data_dir()) {
+                Ok(lock) => Some(lock),
+                Err(e) => {
+                    warn!(error = %e, "no se pudo crear el lock de presencia de la GUI");
+                    None
+                }
             }
         };
 
         // Arranca el host en segundo plano (best-effort).
+        if hosted_by_service {
+            if let Ok(mut s) = host_status.lock() {
+                *s = HostStatus::Online;
+            }
+        } else {
         spawn_host(
             rt.clone(),
             state.clone(),
@@ -234,6 +253,7 @@ impl CleanDeskApp {
             host_status.clone(),
             cc.egui_ctx.clone(),
         );
+        }
 
         let mut app = Self {
             state,
@@ -242,6 +262,8 @@ impl CleanDeskApp {
             signal_override,
             host_restart,
             rt,
+            hosted_by_service,
+            elevated,
             connect: ConnectPhase::Idle,
             connect_input: String::new(),
             connect_password: String::new(),
@@ -381,6 +403,10 @@ impl CleanDeskApp {
             .read()
             .pinned_key(target)
             .map(str::to_string);
+        // La clave fijada (TOFU) es la que el host debe demostrar en el
+        // enlace de identidad, en cualquier modo de red; sin clave fijada, la
+        // primera sesión la fija tras verificarla.
+        config.expected_host_key = pinned.clone();
         let (tx, rx) = oneshot::channel();
         let ctx = ctx.clone();
         self.rt.spawn(async move {
@@ -441,14 +467,9 @@ impl CleanDeskApp {
             book.add(DeviceEntry::new(id, name));
         }
         drop(book);
-        // Si el equipo se anuncia en la LAN ya conocemos su clave: la fijamos
-        // ahora para que la primera conexion ya verifique la identidad.
-        if let Some(key) = self.nearby_public_key(id) {
-            let mut settings = self.state.settings.write();
-            if settings.pinned_key(id).is_none() {
-                settings.pin_key(id, &key);
-            }
-        }
+        // La clave anunciada por mDNS NO se fija: el TXT no va firmado y
+        // cualquiera en la LAN podría colarnos una clave para un ID ajeno. La
+        // fijación (TOFU) ocurre solo tras una sesión que demuestre la clave.
         let mac = self
             .nearby
             .lock()
@@ -814,8 +835,9 @@ impl CleanDeskApp {
 /// remoto ya no coincide? Acepta la redacción en inglés y en español de los
 /// crates de descubrimiento/cliente.
 fn is_identity_change(s: &str) -> bool {
-    (s.contains("identity") && s.contains("changed"))
-        || (s.contains("identidad") && s.contains("cambiado"))
+    let l = s.to_ascii_lowercase();
+    (l.contains("identity") && (l.contains("changed") || l.contains("mismatch")))
+        || (l.contains("identidad") && l.contains("cambiado"))
 }
 
 /// Traduce los errores más comunes de conexión (ya formateados con `{e:#}`) a
@@ -826,6 +848,8 @@ fn friendly_error(s: &str) -> String {
         tr("the remote device's identity has changed; verify its fingerprint before trusting the new key.").into()
     } else if s.contains("not announced") || s.contains("no está anunciado") {
         tr("the remote device is not announced (is it on, with CleanDesk running?).").into()
+    } else if s.contains("several keys claim this id") {
+        tr("Several devices claim this ID. Compare the fingerprint with the owner and connect only if it matches.").into()
     } else if s.contains("TargetOffline") {
         tr("the remote device is offline.").into()
     } else if s.contains("Busy") {
@@ -1050,7 +1074,6 @@ impl CleanDeskApp {
                 .map(|p| NearbyDevice {
                     id: p.id,
                     alias: p.alias,
-                    public_key: p.public_key,
                     mac: p.mac,
                 })
                 .collect();
@@ -1121,15 +1144,6 @@ impl CleanDeskApp {
         if changed {
             self.save_settings();
         }
-    }
-
-    /// Clave pública anunciada por un equipo cercano (para fijarla al guardar
-    /// el contacto sin esperar a la primera conexión).
-    pub fn nearby_public_key(&self, id: CleanDeskId) -> Option<String> {
-        self.nearby
-            .lock()
-            .ok()
-            .and_then(|n| n.iter().find(|d| d.id == id).map(|d| d.public_key.clone()))
     }
 
     /// Texto de invitación listo para pegar en un chat o correo.

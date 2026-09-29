@@ -46,4 +46,9 @@ pub enum TransportError {
     /// The server deviated from the registration protocol.
     #[error("registration protocol error: {0}")]
     RegisterProtocol(String),
+
+    /// The DTLS certificate fingerprints are not available yet (no
+    /// description set, or the handshake has not completed).
+    #[error("DTLS fingerprint unavailable: {0}")]
+    FingerprintUnavailable(&'static str),
 }

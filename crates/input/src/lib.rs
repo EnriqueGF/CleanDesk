@@ -99,6 +99,13 @@ impl InputInjector for WinInputInjector {
 }
 
 /// Construct the platform input injector.
+#[cfg(windows)]
+pub fn new_injector() -> Box<dyn InputInjector> {
+    Box::new(WinInputInjector::new())
+}
+
+/// Construct the platform input injector (stub off Windows).
+#[cfg(not(windows))]
 pub fn new_injector() -> Box<dyn InputInjector> {
     Box::new(WinInputInjector)
 }

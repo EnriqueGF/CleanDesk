@@ -10,6 +10,10 @@
 //!   the fresh entry.
 //! * `Accept`/`Reject` are only honoured from the session's callee; `Signal`
 //!   from either endpoint. Anyone else gets silently dropped.
+//! * Per source IP, at most [`MAX_CONNS_PER_IP`] sockets at once and
+//!   [`REGISTRATIONS_PER_IP`] registrations per minute ([`IpLimits`]): the
+//!   per-connection budgets alone would let one machine open thousands of
+//!   sockets and grind registrations (each costs an Ed25519 verify).
 
 use cleandesk_proto::{
     id::CleanDeskId,
@@ -17,9 +21,102 @@ use cleandesk_proto::{
     session::{DeviceInfo, SessionId},
 };
 use dashmap::DashMap;
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::info;
+use tracing::{info, warn};
+
+/// Concurrent WebSocket connections accepted from one IP.
+pub const MAX_CONNS_PER_IP: usize = 20;
+/// `Register` attempts accepted from one IP per [`REGISTRATION_WINDOW`].
+pub const REGISTRATIONS_PER_IP: u32 = 30;
+pub const REGISTRATION_WINDOW: Duration = Duration::from_secs(60);
+/// Above this many tracked IPs, buckets that have fully refilled are dropped
+/// (they carry no information any more), bounding memory under a scan from
+/// many addresses.
+const IP_TABLE_SOFT_CAP: usize = 10_000;
+
+/// Per-IP abuse limits shared by every connection. NAT means several honest
+/// devices can share an address, so the numbers are generous for people and
+/// tight for scripts.
+pub struct IpLimits {
+    conns: DashMap<IpAddr, usize>,
+    registrations: DashMap<IpAddr, RateLimiter>,
+    max_conns: usize,
+    reg_burst: u32,
+    reg_window: Duration,
+}
+
+impl Default for IpLimits {
+    fn default() -> Self {
+        Self::new(MAX_CONNS_PER_IP, REGISTRATIONS_PER_IP, REGISTRATION_WINDOW)
+    }
+}
+
+impl IpLimits {
+    pub fn new(max_conns: usize, reg_burst: u32, reg_window: Duration) -> Self {
+        Self {
+            conns: DashMap::new(),
+            registrations: DashMap::new(),
+            max_conns: max_conns.max(1),
+            reg_burst,
+            reg_window,
+        }
+    }
+
+    /// Count a new connection from `ip`; `false` means the cap is reached
+    /// and the socket must be dropped (nothing was counted).
+    pub fn try_acquire(&self, ip: IpAddr) -> bool {
+        let mut entry = self.conns.entry(ip).or_insert(0);
+        if *entry >= self.max_conns {
+            warn!(%ip, count = *entry, "connection cap per IP reached; dropping");
+            return false;
+        }
+        *entry += 1;
+        true
+    }
+
+    /// Release a connection counted by [`Self::try_acquire`].
+    pub fn release(&self, ip: IpAddr) {
+        if let Some(mut entry) = self.conns.get_mut(&ip) {
+            *entry = entry.saturating_sub(1);
+            if *entry == 0 {
+                drop(entry);
+                self.conns.remove_if(&ip, |_, n| *n == 0);
+            }
+        }
+    }
+
+    pub fn connections(&self, ip: IpAddr) -> usize {
+        self.conns.get(&ip).map(|n| *n).unwrap_or(0)
+    }
+
+    /// May `ip` start another registration now?
+    pub fn allow_registration(&self, ip: IpAddr) -> bool {
+        self.allow_registration_at(ip, Instant::now())
+    }
+
+    /// [`Self::allow_registration`] with an injected clock.
+    pub fn allow_registration_at(&self, ip: IpAddr, now: Instant) -> bool {
+        if self.registrations.len() > IP_TABLE_SOFT_CAP {
+            self.registrations.retain(|_, rl| !rl.is_replenished_at(now));
+        }
+        let allowed = self
+            .registrations
+            .entry(ip)
+            .or_insert_with(|| RateLimiter::new(self.reg_burst, self.reg_window))
+            .allow_at(now);
+        if !allowed {
+            warn!(%ip, "registration rate limit per IP exceeded");
+        }
+        allowed
+    }
+
+    pub fn tracked_ips(&self) -> usize {
+        self.registrations.len()
+    }
+}
 
 /// Identifies one WebSocket connection for the life of the process.
 pub type ConnId = u64;
@@ -61,11 +158,22 @@ pub struct ServerState {
     peers: DashMap<CleanDeskId, Peer>,
     sessions: DashMap<SessionId, Session>,
     next_conn: AtomicU64,
+    ip_limits: IpLimits,
 }
 
 impl ServerState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// State with custom per-IP limits (tests, or an operator behind a
+    /// large NAT).
+    pub fn with_ip_limits(ip_limits: IpLimits) -> Self {
+        Self { ip_limits, ..Self::default() }
+    }
+
+    pub fn ip_limits(&self) -> &IpLimits {
+        &self.ip_limits
     }
 
     /// Hand out a fresh connection identifier.
@@ -216,6 +324,13 @@ impl RateLimiter {
             false
         }
     }
+
+    /// Would the bucket be full at `now`? A full bucket is indistinguishable
+    /// from a fresh one, so its entry can be forgotten.
+    pub fn is_replenished_at(&self, now: std::time::Instant) -> bool {
+        let elapsed = now.saturating_duration_since(self.last).as_secs_f64();
+        self.tokens + elapsed * self.refill_per_sec >= self.capacity
+    }
 }
 
 #[cfg(test)]
@@ -316,6 +431,49 @@ mod tests {
         st.open_session(Uuid::new_v4(), id(100_000_003), id(100_000_004));
         st.unregister(id(100_000_001), 1);
         assert_eq!(st.session_count(), 1);
+    }
+
+    #[test]
+    fn per_ip_connection_cap() {
+        let limits = IpLimits::new(2, 30, Duration::from_secs(60));
+        let a: IpAddr = "203.0.113.1".parse().unwrap();
+        let b: IpAddr = "203.0.113.2".parse().unwrap();
+        assert!(limits.try_acquire(a));
+        assert!(limits.try_acquire(a));
+        assert!(!limits.try_acquire(a), "third socket from the same IP is refused");
+        assert_eq!(limits.connections(a), 2, "the refused one was not counted");
+        assert!(limits.try_acquire(b), "another IP is unaffected");
+        limits.release(a);
+        assert!(limits.try_acquire(a), "a closed socket frees a slot");
+        limits.release(a);
+        limits.release(a);
+        assert_eq!(limits.connections(a), 0);
+        limits.release(a);
+        assert_eq!(limits.connections(a), 0, "never underflows");
+    }
+
+    #[test]
+    fn per_ip_registration_rate_and_table_bound() {
+        let limits = IpLimits::new(20, 2, Duration::from_secs(2));
+        let a: IpAddr = "203.0.113.1".parse().unwrap();
+        let t0 = Instant::now();
+        assert!(limits.allow_registration_at(a, t0));
+        assert!(limits.allow_registration_at(a, t0));
+        assert!(!limits.allow_registration_at(a, t0), "burst spent");
+        assert!(limits.allow_registration_at("203.0.113.2".parse().unwrap(), t0), "other IP has its own bucket");
+        assert!(limits.allow_registration_at(a, t0 + Duration::from_secs(1)), "one token per second");
+        // A scan from many addresses must not grow the table without bound:
+        // once over the soft cap, replenished buckets are dropped.
+        let later = t0 + Duration::from_secs(3);
+        for i in 0..(IP_TABLE_SOFT_CAP as u32 + 5) {
+            let ip = IpAddr::V4(std::net::Ipv4Addr::from(0x0A00_0000 + i));
+            assert!(limits.allow_registration_at(ip, later));
+        }
+        assert!(limits.tracked_ips() <= IP_TABLE_SOFT_CAP + 5);
+        // Everything so far is replenished after a window; the next call
+        // prunes the table down to (nearly) nothing.
+        let _ = limits.allow_registration_at(a, later + Duration::from_secs(10));
+        assert!(limits.tracked_ips() < 10, "tracked {}", limits.tracked_ips());
     }
 
     #[test]

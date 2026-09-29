@@ -79,12 +79,16 @@ fn every_session_message() -> Vec<SessionMessage> {
         SessionMessage::Ping { nonce: 0xDEAD_BEEF_CAFE },
         SessionMessage::Pong { nonce: 0xDEAD_BEEF_CAFE },
         SessionMessage::RemoteAction { action: RemoteAction::LockLocalInput { locked: true } },
+        SessionMessage::IdentityProof {
+            public_key_b64: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+            signature_b64: "c2ln".into(),
+        },
     ]
 }
 
 /// postcard variant tags (the first byte of each encoded message), pinned.
-const EXPECTED_SESSION_TAGS: [u8; 18] =
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+const EXPECTED_SESSION_TAGS: [u8; 19] =
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 
 /// Every `RemoteAction`, in declaration order, with its pinned tag.
 fn every_remote_action() -> Vec<RemoteAction> {
@@ -105,9 +109,10 @@ fn every_file_msg() -> Vec<FileTransferMsg> {
         FileTransferMsg::Cancel { transfer_id: 1 },
         FileTransferMsg::Progress { transfer_id: 1, transferred: 2 },
         FileTransferMsg::Complete { transfer_id: 1 },
+        FileTransferMsg::Refused { transfer_id: 1, reason: "too large".into() },
     ]
 }
-const EXPECTED_FILE_TAGS: [u8; 5] = [0, 1, 2, 3, 4];
+const EXPECTED_FILE_TAGS: [u8; 6] = [0, 1, 2, 3, 4, 5];
 
 #[test]
 fn every_session_message_roundtrips_through_postcard() {
@@ -249,7 +254,7 @@ fn version_compatibility_is_major_only() {
     let v = Version { major: PROTOCOL_VERSION.major + 1, minor: 0 };
     assert!(!PROTOCOL_VERSION.compatible_with(v));
     assert_eq!(Version { major: 2, minor: 1 }.to_string(), "2.1");
-    assert_eq!(PROTOCOL_VERSION, Version { major: 2, minor: 1 });
+    assert_eq!(PROTOCOL_VERSION, Version { major: 2, minor: 2 });
 }
 
 #[test]

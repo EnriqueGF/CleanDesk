@@ -44,6 +44,34 @@ pub fn run(
     signal_override: Option<String>,
     initial_target: Option<CleanDeskId>,
 ) -> anyhow::Result<()> {
+    // Control privilegiado sin servicio: nos relanzamos elevados (UAC) para
+    // que el host pueda manejar ventanas de administrador. `--elevated`
+    // evita bucles si la elevación "funciona" pero no se refleja en el token.
+    {
+        use cleandesk_platform::{elevation, service};
+        let settings = app_state.settings.read();
+        let wants = settings.privileged_control;
+        drop(settings);
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        let already_tried = args.iter().any(|a| a == "--elevated");
+        if wants && !already_tried && !elevation::is_elevated() && service::status() != service::ServiceStatus::Running {
+            match std::env::current_exe() {
+                Ok(exe) => {
+                    let mut relaunch = args.clone();
+                    relaunch.push("--elevated".into());
+                    match elevation::relaunch_elevated(&exe, &relaunch) {
+                        Ok(()) => {
+                            tracing::info!("relaunched elevated for privileged control");
+                            return Ok(());
+                        }
+                        Err(e) => tracing::warn!(error = %e, "elevation unavailable; continuing without privileged control"),
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "could not locate the executable"),
+            }
+        }
+    }
+
     // Una sola instancia por carpeta de datos: si ya hay otra, le pedimos que
     // se muestre (puede estar en la bandeja) y salimos sin abrir ventana.
     use cleandesk_platform::single_instance::{self, Instance};

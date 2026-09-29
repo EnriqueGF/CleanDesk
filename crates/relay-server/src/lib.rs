@@ -18,6 +18,11 @@
 //! | `CLEANDESK_RELAY_REALM` | `cleandesk` | Authentication realm; part of the long-term credential hash. |
 //! | `CLEANDESK_RELAY_USERS` | *(none)* | Comma-separated `user:password` list. **At least one entry is mandatory** — the server refuses to start as an open relay. |
 //! | `CLEANDESK_RELAY_MIN_PORT` / `CLEANDESK_RELAY_MAX_PORT` | *(any port)* | Optional inclusive range for relay allocations (useful to open a single firewall range). Both must be set together. |
+//! | `CLEANDESK_RELAY_COMMUNITY` | `0` | `1` accepts the public community credential and announces the relay on the DHT. |
+//! | `CLEANDESK_RELAY_ALLOW_PRIVATE_PEERS` | `0` | `1` relays towards loopback / link-local / private / multicast peers too (only for a relay that serves one private network). See [`guard`]. |
+//! | `CLEANDESK_RELAY_ALLOCATION_MAX_SECS` | `86400` | Lifetime cap per allocation; `0` = unlimited. |
+//! | `CLEANDESK_RELAY_ALLOCATION_MAX_BYTES` | `0` (private) / `17179869184` (community) | Bytes relayed per allocation, both directions; `0` = unlimited. |
+//! | `CLEANDESK_RELAY_IDENTITY` | `cleandesk-relay-identity.pem` | Ed25519 key the community relay signs its DHT record with (created if missing). |
 //!
 //! [`RelayConfig::from_env`] reads the real process environment;
 //! [`RelayConfig::from_vars`] takes any iterator of `(key, value)` pairs so the
@@ -25,13 +30,18 @@
 //! server and returns a [`RelayHandle`] that reports the bound address and
 //! shuts the server down on request. The binary in `main.rs` is a thin wrapper.
 
+pub mod guard;
+
 use std::{
     collections::HashMap,
     fmt,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    path::PathBuf,
     sync::Arc,
     time::Duration,
 };
+
+use guard::{GuardedRelayGenerator, PeerPolicy, Quotas};
 
 use tokio::net::UdpSocket;
 use tracing::{debug, info, warn};
@@ -60,6 +70,22 @@ pub const ENV_USERS: &str = "CLEANDESK_RELAY_USERS";
 pub const ENV_COMMUNITY: &str = "CLEANDESK_RELAY_COMMUNITY";
 pub const ENV_MIN_PORT: &str = "CLEANDESK_RELAY_MIN_PORT";
 pub const ENV_MAX_PORT: &str = "CLEANDESK_RELAY_MAX_PORT";
+/// `1` relays to loopback/link-local/private/multicast peers (default: refused).
+pub const ENV_ALLOW_PRIVATE_PEERS: &str = "CLEANDESK_RELAY_ALLOW_PRIVATE_PEERS";
+/// Per-allocation lifetime cap in seconds (`0` = unlimited).
+pub const ENV_ALLOCATION_MAX_SECS: &str = "CLEANDESK_RELAY_ALLOCATION_MAX_SECS";
+/// Per-allocation byte cap, both directions (`0` = unlimited).
+pub const ENV_ALLOCATION_MAX_BYTES: &str = "CLEANDESK_RELAY_ALLOCATION_MAX_BYTES";
+/// Path of the relay's Ed25519 identity (PEM) used to sign its DHT record.
+pub const ENV_IDENTITY: &str = "CLEANDESK_RELAY_IDENTITY";
+
+/// Default allocation lifetime cap: one day.
+pub const DEFAULT_ALLOCATION_MAX_SECS: u64 = 24 * 60 * 60;
+/// Default per-allocation byte cap in community mode (16 GiB): generous for
+/// a long desktop session, bounded for an open relay.
+pub const DEFAULT_COMMUNITY_ALLOCATION_MAX_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+/// Default identity file, relative to the working directory.
+pub const DEFAULT_IDENTITY_PATH: &str = "cleandesk-relay-identity.pem";
 
 /// Errors produced while turning environment variables into a [`RelayConfig`].
 #[derive(Debug, thiserror::Error)]
@@ -136,6 +162,12 @@ pub struct RelayConfig {
     /// Community mode: accept the public CleanDesk community credentials and
     /// announce this relay on the BitTorrent DHT so any client can find it.
     pub community: bool,
+    /// Relay to loopback / link-local / private / multicast peers.
+    pub allow_private_peers: bool,
+    /// Per-allocation limits (`0` = unlimited).
+    pub quotas: Quotas,
+    /// Where the relay's signing identity lives (community mode).
+    pub identity_path: PathBuf,
 }
 
 impl RelayConfig {
@@ -207,6 +239,19 @@ impl RelayConfig {
             _ => return Err(ConfigError::PartialPortRange),
         };
 
+        let allow_private_peers =
+            matches!(get(ENV_ALLOW_PRIVATE_PEERS).map(str::trim), Some("1" | "true" | "yes" | "on"));
+        let max_secs = match get(ENV_ALLOCATION_MAX_SECS) {
+            Some(v) => parse(ENV_ALLOCATION_MAX_SECS, v)?,
+            None => DEFAULT_ALLOCATION_MAX_SECS,
+        };
+        let max_bytes = match get(ENV_ALLOCATION_MAX_BYTES) {
+            Some(v) => parse(ENV_ALLOCATION_MAX_BYTES, v)?,
+            None if community => DEFAULT_COMMUNITY_ALLOCATION_MAX_BYTES,
+            None => 0,
+        };
+        let identity_path = PathBuf::from(get(ENV_IDENTITY).unwrap_or(DEFAULT_IDENTITY_PATH).trim());
+
         Ok(Self {
             bind,
             port,
@@ -215,7 +260,15 @@ impl RelayConfig {
             users,
             port_range,
             community,
+            allow_private_peers,
+            quotas: Quotas { max_secs, max_bytes },
+            identity_path,
         })
+    }
+
+    /// The policy applied to every relay socket.
+    pub fn peer_policy(&self) -> PeerPolicy {
+        PeerPolicy { allow_private: self.allow_private_peers, quotas: self.quotas }
     }
 
     /// Whether the advertised IP is a loopback address, i.e. the relay can only
@@ -361,11 +414,17 @@ pub async fn run(config: RelayConfig) -> Result<RelayHandle, RelayError> {
         );
     }
 
+    if config.allow_private_peers {
+        warn!(
+            "{ENV_ALLOW_PRIVATE_PEERS} is set: this relay will forward traffic to loopback, \
+             link-local, private and multicast addresses reachable from this machine"
+        );
+    }
+
     // Relay sockets are bound on the same interface as the listener but the
     // address handed to clients is the public one (NAT/cloud mapping).
     let net = Arc::new(Net::new(None));
-    let relay_addr_generator: Box<dyn RelayAddressGenerator + Send + Sync> = match config.port_range
-    {
+    let inner_generator: Box<dyn RelayAddressGenerator + Send + Sync> = match config.port_range {
         Some(PortRange { min, max }) => Box::new(RelayAddressGeneratorRanges {
             relay_address: config.public_ip,
             min_port: min,
@@ -380,6 +439,9 @@ pub async fn run(config: RelayConfig) -> Result<RelayHandle, RelayError> {
             net,
         }),
     };
+    // Every relay socket goes through the peer filter and the quotas.
+    let relay_addr_generator: Box<dyn RelayAddressGenerator + Send + Sync> =
+        Box::new(GuardedRelayGenerator::new(inner_generator, config.peer_policy()));
 
     let server = Server::new(ServerConfig {
         conn_configs: vec![ConnConfig {
@@ -400,6 +462,8 @@ pub async fn run(config: RelayConfig) -> Result<RelayHandle, RelayError> {
         realm = %config.realm,
         users = config.users.len(),
         port_range = ?config.port_range,
+        allow_private_peers = config.allow_private_peers,
+        quotas = ?config.quotas,
         "CleanDesk Relay (TURN/UDP) listening"
     );
 
@@ -520,6 +584,33 @@ mod tests {
             (ENV_MAX_PORT, "5000"),
         ]));
         assert!(matches!(res, Err(ConfigError::BadPortRange { .. })));
+    }
+
+    #[test]
+    fn peer_filter_and_quota_defaults() {
+        let cfg = RelayConfig::from_vars(vars(&[(ENV_USERS, "a:1")])).unwrap();
+        assert!(!cfg.allow_private_peers, "private peers refused unless opted in");
+        assert_eq!(cfg.quotas, Quotas { max_secs: DEFAULT_ALLOCATION_MAX_SECS, max_bytes: 0 });
+        assert_eq!(cfg.identity_path, PathBuf::from(DEFAULT_IDENTITY_PATH));
+        let cfg = RelayConfig::from_vars(vars(&[(ENV_COMMUNITY, "1")])).unwrap();
+        assert!(!cfg.allow_private_peers, "community mode never implies private peers");
+        assert_eq!(cfg.quotas.max_bytes, DEFAULT_COMMUNITY_ALLOCATION_MAX_BYTES);
+        assert!(cfg.users.iter().any(|u| u.username == cleandesk_discovery::COMMUNITY_TURN_USER));
+        let cfg = RelayConfig::from_vars(vars(&[
+            (ENV_USERS, "a:1"),
+            (ENV_ALLOW_PRIVATE_PEERS, "yes"),
+            (ENV_ALLOCATION_MAX_SECS, "0"),
+            (ENV_ALLOCATION_MAX_BYTES, "1024"),
+            (ENV_IDENTITY, "/srv/relay.pem"),
+        ]))
+        .unwrap();
+        assert!(cfg.allow_private_peers);
+        assert_eq!(cfg.quotas, Quotas { max_secs: 0, max_bytes: 1024 });
+        assert_eq!(cfg.identity_path, PathBuf::from("/srv/relay.pem"));
+        assert!(matches!(
+            RelayConfig::from_vars(vars(&[(ENV_USERS, "a:1"), (ENV_ALLOCATION_MAX_BYTES, "lots")])),
+            Err(ConfigError::Invalid { var: ENV_ALLOCATION_MAX_BYTES, .. })
+        ));
     }
 
     #[test]

@@ -96,11 +96,9 @@ mod imp {
     use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
     use windows::Win32::System::RemoteDesktop::WTSGetActiveConsoleSessionId;
     use windows::Win32::System::Threading::{
-        CreateProcessAsUserW, GetCurrentProcess, GetExitCodeProcess, OpenProcessToken, TerminateProcess,
+        CreateProcessAsUserW, GetCurrentProcess, OpenProcessToken, TerminateProcess,
         WaitForSingleObject, CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION, STARTUPINFOW,
     };
-    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
-    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
     use windows_service::service::{
         ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus as WsStatus,
         ServiceType,
@@ -183,46 +181,9 @@ mod imp {
         s.encode_wide().chain(std::iter::once(0)).collect()
     }
 
-    /// Run `exe args...` elevated via the UAC prompt and wait for it to finish.
-    fn run_elevated(exe: &Path, args: &[&str]) -> Result<i32> {
-        let verb = wide(OsStr::new("runas"));
-        let file = wide(exe.as_os_str());
-        let params = wide(OsStr::new(&build_command_line(args.iter().copied())));
-        let mut info = SHELLEXECUTEINFOW {
-            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-            fMask: SEE_MASK_NOCLOSEPROCESS,
-            lpVerb: windows::core::PCWSTR(verb.as_ptr()),
-            lpFile: windows::core::PCWSTR(file.as_ptr()),
-            lpParameters: windows::core::PCWSTR(params.as_ptr()),
-            nShow: SW_HIDE.0,
-            ..Default::default()
-        };
-        // SAFETY: all wide strings outlive the call; `info` is fully initialised.
-        unsafe {
-            if ShellExecuteExW(&mut info).is_err() {
-                // ERROR_CANCELLED (1223) means the user pressed "No" on UAC.
-                let err = windows::core::Error::from_thread();
-                return Err(if err.code().0 as u32 & 0xFFFF == 1223 {
-                    PlatformError::ElevationDeclined
-                } else {
-                    PlatformError::Win(err.to_string())
-                });
-            }
-            let h = info.hProcess;
-            if h.is_invalid() {
-                return Err(PlatformError::Win("no process handle from ShellExecuteEx".into()));
-            }
-            let _ = WaitForSingleObject(h, 120_000);
-            let mut code = 0u32;
-            let _ = GetExitCodeProcess(h, &mut code);
-            let _ = CloseHandle(h);
-            Ok(code as i32)
-        }
-    }
-
     /// Ask (with a UAC prompt) to install and start the service for `exe`.
     pub fn request_install(exe: &Path, data_dir: &Path) -> Result<()> {
-        let code = run_elevated(exe, &["--install-service", "--data-dir", &data_dir.to_string_lossy()])?;
+        let code = crate::elevation::run_elevated_wait(exe, &["--install-service", "--data-dir", &data_dir.to_string_lossy()])?;
         if code != 0 {
             return Err(PlatformError::Other(format!(
                 "installation exited with code {code}; see service-install.log in the data folder"
@@ -233,7 +194,7 @@ mod imp {
 
     /// Ask (with a UAC prompt) to stop and remove the service.
     pub fn request_uninstall(exe: &Path) -> Result<()> {
-        let code = run_elevated(exe, &["--uninstall-service"])?;
+        let code = crate::elevation::run_elevated_wait(exe, &["--uninstall-service"])?;
         if code != 0 {
             return Err(PlatformError::Other(format!("uninstall exited with code {code}")));
         }

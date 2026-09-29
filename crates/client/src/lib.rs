@@ -8,6 +8,13 @@
 //! * surfaces control-plane events (permissions, stats, chat, disconnect) to the
 //!   embedding UI, and answers the host's unattended-auth challenge if any.
 //!
+//! Before any of that, right after DTLS comes up, both peers exchange an
+//! `IdentityProof` (see `cleandesk_crypto::session`): the host's Ed25519 key
+//! is bound to this very DTLS session, so no rendezvous — server, LAN link,
+//! DHT or Nostr — can sit in the middle. The verified key is returned in
+//! [`ClientSession::peer_public_key`] for the UI to pin (trust on first use)
+//! and checked against [`ClientConfig::expected_host_key`] when one is known.
+//!
 //! The UI drives a [`ClientSession`]: it pulls decoded frames from `frames`,
 //! reads [`ClientEvent`]s from `events`, and pushes input / quality / chat /
 //! clipboard / files / remote actions back. Everything the viewer sends is
@@ -25,7 +32,10 @@
 use anyhow::{bail, Context, Result};
 use bytes::Bytes;
 use cleandesk_codec::{DecodedImage, TileDecoder, VideoDecoder};
-use cleandesk_crypto::identity::Identity;
+use cleandesk_crypto::{
+    identity::{derive_id_from_public_key_b64, Identity},
+    session::{sign_session_proof, verify_peer_session_proof, SessionRole},
+};
 use cleandesk_proto::{
     frame,
     id::CleanDeskId,
@@ -63,6 +73,35 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Minimum spacing between keyframe requests.
 pub const KEYFRAME_REQUEST_INTERVAL: Duration = Duration::from_millis(500);
 
+/// How long the host has, once the peer connection is up, to send its
+/// `IdentityProof`.
+pub const PROOF_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Failures of [`connect`] / [`connect_community`] that the UI treats
+/// specially (everything else is a plain `anyhow` error with context).
+#[derive(Debug, thiserror::Error)]
+pub enum ClientError {
+    /// The host proved a key that differs from the one this device remembers
+    /// (or was told to expect) for that ID. Either the machine was
+    /// reinstalled or someone is impersonating it: never connect silently.
+    #[error("the remote device's identity has changed: expected key {expected}, but it proved {actual}")]
+    IdentityMismatch { expected: String, actual: String },
+    /// The host never sent its proof.
+    #[error("the host did not prove its identity within {0:?}")]
+    ProofTimeout(Duration),
+    /// The host's proof did not verify (wrong key for the ID, wrong session,
+    /// or fingerprints that do not match this DTLS session — a relay in the
+    /// middle).
+    #[error("the host's identity proof is invalid: {0}")]
+    ProofRejected(String),
+    /// The host sent something else before its proof.
+    #[error("protocol violation: {0} before the identity proof")]
+    ProofProtocol(&'static str),
+    /// The link closed before the proof arrived.
+    #[error("the session closed before the host proved its identity")]
+    ProofClosed,
+}
+
 /// Configuration for opening a viewer session.
 #[derive(Clone)]
 pub struct ClientConfig {
@@ -86,6 +125,13 @@ pub struct ClientConfig {
     /// Where files the host sends are stored. `None` means
     /// [`default_downloads_dir`] (`<Downloads>/CleanDesk`).
     pub downloads_dir: Option<PathBuf>,
+    /// The host's Ed25519 public key (base64) this session must end up
+    /// talking to. Community mode fills it from the resolved record; in
+    /// server mode the caller sets it from its pinned keys. When the host
+    /// proves a different key, `connect` fails with
+    /// [`ClientError::IdentityMismatch`]. `None` = trust on first use (the
+    /// proven key is still returned in [`ClientSession::peer_public_key`]).
+    pub expected_host_key: Option<String>,
 }
 
 impl ClientConfig {
@@ -102,6 +148,7 @@ impl ClientConfig {
             unattended_key: None,
             ice: IceConfig::from_env(),
             downloads_dir: None,
+            expected_host_key: None,
         }
     }
 }
@@ -142,8 +189,8 @@ pub struct ClientSession {
     /// Which rendezvous path carried the signaling ("servidor", "LAN",
     /// "directo", "nostr"), for the UI.
     pub via: &'static str,
-    /// The host's Ed25519 public key (base64) when the path authenticated it
-    /// (community mode); the UI pins it in the address book.
+    /// The host's Ed25519 public key (base64), proven over this DTLS session
+    /// (`IdentityProof`) in every mode; the UI pins it in the address book.
     pub peer_public_key: Option<String>,
     /// The host's MAC address as announced in its rendezvous record, for
     /// Wake-on-LAN from the address book (community mode only).
@@ -302,13 +349,18 @@ pub async fn connect(config: ClientConfig) -> Result<ClientSession> {
 }
 
 /// The rendezvous-independent part of [`connect`]: request, wait for the
-/// host's answer, negotiate WebRTC over `signal`/`events_rx`, wire the session.
+/// host's answer, negotiate WebRTC over `signal`/`events_rx`, bind identities
+/// over the DTLS session, wire the session.
+///
+/// `rendezvous_key` is the host key the rendezvous itself authenticated
+/// (community mode's direct/Nostr links); it must agree with the key proven
+/// on the channel, and is otherwise only informational.
 pub(crate) async fn connect_over(
     config: ClientConfig,
     signal: Arc<dyn SignalOut>,
     mut events_rx: mpsc::Receiver<SignalMessage>,
     via: &'static str,
-    peer_public_key: Option<String>,
+    rendezvous_key: Option<String>,
     peer_mac: Option<String>,
 ) -> Result<ClientSession> {
     // Signal intended unattended auth to the server via a (non-secret) proof
@@ -349,7 +401,7 @@ pub(crate) async fn connect_over(
 
     // Establish the peer connection as the answerer.
     let mut peer = PeerConnection::new(config.ice.clone(), false).await?;
-    let incoming = peer.incoming()?;
+    let mut incoming = peer.incoming()?;
     let mut ice_out = peer.ice_candidates()?;
     let peer = Arc::new(peer);
 
@@ -376,6 +428,25 @@ pub(crate) async fn connect_over(
         .await
         .context("peer connection failed")?;
     info!("viewer connected");
+
+    // Channel binding before anything else. On any failure the peer
+    // connection is closed so nothing stays half-open.
+    let host_key = match bind_identity(&peer, &mut incoming, &config, session).await {
+        Ok(key) => key,
+        Err(e) => {
+            let _ = peer.close().await;
+            return Err(e);
+        }
+    };
+    let expected = config.expected_host_key.as_ref().or(rendezvous_key.as_ref());
+    if let Some(expected) = expected {
+        if *expected != host_key {
+            warn!(target = %config.target, "host proved a key that differs from the expected one");
+            let _ = peer.close().await;
+            return Err(ClientError::IdentityMismatch { expected: expected.clone(), actual: host_key }.into());
+        }
+    }
+    info!(host_key = %host_key, "host identity bound to the DTLS session");
 
     // Wire up the session channels.
     let (frames_tx, frames_rx) = mpsc::channel::<DecodedImage>(3);
@@ -466,7 +537,7 @@ pub(crate) async fn connect_over(
         session,
         granted,
         via,
-        peer_public_key,
+        peer_public_key: Some(host_key),
         peer_mac,
         frames: frames_rx,
         events: cev_rx,
@@ -478,6 +549,70 @@ pub(crate) async fn connect_over(
         clipboard,
         clipboard_tx,
     })
+}
+
+/// Mutual channel binding, viewer side: send our `IdentityProof` over this
+/// session's DTLS fingerprints, then wait (at most [`PROOF_TIMEOUT`]) for the
+/// host's and verify it against our view of the fingerprints and against the
+/// ID we dialed. Returns the host's verified public key (base64).
+async fn bind_identity(
+    peer: &PeerConnection,
+    incoming: &mut mpsc::Receiver<(Channel, Bytes)>,
+    config: &ClientConfig,
+    session: SessionId,
+) -> Result<String> {
+    let (local_fp, remote_fp) = peer.dtls_fingerprints().await.context("DTLS fingerprints unavailable")?;
+    let signature_b64 = sign_session_proof(&config.identity, &session, &local_fp, &remote_fp, SessionRole::Viewer);
+    let proof = SessionMessage::IdentityProof { public_key_b64: config.identity.public_key_b64(), signature_b64 };
+    let bytes = frame::encode_payload(&proof).context("encoding identity proof")?;
+    peer.send(Channel::Control, Bytes::from(bytes)).await.context("sending identity proof")?;
+
+    let deadline = tokio::time::sleep(PROOF_TIMEOUT);
+    tokio::pin!(deadline);
+    loop {
+        let next = tokio::select! {
+            _ = &mut deadline => return Err(ClientError::ProofTimeout(PROOF_TIMEOUT).into()),
+            next = incoming.recv() => next,
+        };
+        let Some((ch, bytes)) = next else { return Err(ClientError::ProofClosed.into()) };
+        if ch != Channel::Control {
+            // Nothing else is honoured until the host is bound.
+            continue;
+        }
+        let msg = frame::decode_payload::<SessionMessage>(&bytes)
+            .map_err(|_| ClientError::ProofProtocol("an undecodable control message"))?;
+        return match msg {
+            SessionMessage::IdentityProof { public_key_b64, signature_b64 } => {
+                verify_host_proof(&public_key_b64, &signature_b64, config.target, session, &local_fp, &remote_fp)
+            }
+            SessionMessage::Disconnect { reason } => bail!("the host closed the session: {reason}"),
+            other => {
+                debug!(?other, "control message before identity proof");
+                Err(ClientError::ProofProtocol("a control message").into())
+            }
+        };
+    }
+}
+
+/// The host's key must derive to the ID we dialed (so a different device
+/// cannot answer for it) and its signature must cover *our* fingerprints,
+/// swapped, under the `Host` role.
+fn verify_host_proof(
+    public_key_b64: &str,
+    signature_b64: &str,
+    target: CleanDeskId,
+    session: SessionId,
+    local_fp: &str,
+    remote_fp: &str,
+) -> Result<String> {
+    let derived = derive_id_from_public_key_b64(public_key_b64)
+        .map_err(|e| ClientError::ProofRejected(format!("bad public key: {e}")))?;
+    if derived != target {
+        return Err(ClientError::ProofRejected(format!("key derives to {derived}, not to {target}")).into());
+    }
+    verify_peer_session_proof(public_key_b64, &session, local_fp, remote_fp, SessionRole::Viewer, signature_b64)
+        .map_err(|_| ClientError::ProofRejected("signature does not cover this DTLS session".into()))?;
+    Ok(public_key_b64.to_string())
 }
 
 /// Session-wide shared state the inbound dispatcher updates or forwards to.
@@ -716,6 +851,9 @@ async fn dispatch_incoming(
                         let _ = cev_tx.send(ClientEvent::Disconnected(reason)).await;
                         break;
                     }
+                    // Binding happened before this task started; a late
+                    // proof never re-binds.
+                    SessionMessage::IdentityProof { .. } => debug!("duplicate identity proof ignored"),
                     _ => {}
                 }
             }

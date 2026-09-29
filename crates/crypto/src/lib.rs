@@ -8,6 +8,9 @@
 //! * [`token`] — random, expiring session tokens for trusted devices.
 //! * [`proof`] — an HMAC challenge/response the host uses to verify a caller
 //!   knows the unattended password, without the password crossing the wire.
+//! * [`session`] — the session channel-binding proof: an Ed25519 signature
+//!   over the session id and both DTLS fingerprints, so the identity is tied
+//!   to the actual encrypted channel and a rendezvous cannot sit in the middle.
 //!
 //! Transport encryption itself (DTLS/SRTP) is provided by the WebRTC stack in
 //! `cleandesk-transport`; this crate covers identity and authentication.
@@ -15,6 +18,7 @@
 pub mod identity;
 pub mod password;
 pub mod proof;
+pub mod session;
 pub mod token;
 
 use thiserror::Error;

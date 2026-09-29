@@ -58,6 +58,12 @@ pub struct Settings {
     /// published checksums). Default on.
     #[serde(default = "default_true")]
     pub check_updates: bool,
+    /// Privileged control (spec §24): let viewers drive administrator windows
+    /// and UAC prompts. With the CleanDesk service installed the service hosts
+    /// as LocalSystem; otherwise the app relaunches itself elevated. Off by
+    /// default because it prompts for elevation at startup.
+    #[serde(default)]
+    pub privileged_control: bool,
 }
 
 /// Rendezvous mode.
@@ -92,6 +98,7 @@ impl Default for Settings {
             language: None,
             minimize_to_tray: true,
             check_updates: true,
+            privileged_control: false,
         }
     }
 }

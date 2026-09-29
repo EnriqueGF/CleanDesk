@@ -86,6 +86,8 @@ enum SenderEvent {
     Ack(u64),
     Done,
     Cancelled { by_peer: bool },
+    /// The host refused (or aborted) the transfer and said why.
+    Refused(String),
 }
 
 struct OutgoingHandle {
@@ -207,6 +209,15 @@ pub(crate) async fn run_files(ctx: FilesCtx, mut rx: mpsc::UnboundedReceiver<Fil
                         info!(transfer_id, "file transfer cancelled by the host");
                         discard(&mut writers, transfer_id).await;
                         ctx.emit(ClientEvent::FileFailed { id: transfer_id, reason: "cancelled by the host".into() }).await;
+                    }
+                }
+                FileTransferMsg::Refused { transfer_id, reason } => {
+                    if let Some(h) = outgoing.remove(&transfer_id) {
+                        let _ = h.tx.send(SenderEvent::Refused(reason));
+                    } else if incoming.remove(transfer_id).is_some() {
+                        info!(transfer_id, %reason, "file transfer refused by the host");
+                        discard(&mut writers, transfer_id).await;
+                        ctx.emit(ClientEvent::FileFailed { id: transfer_id, reason: format!("refused by the host: {reason}") }).await;
                     }
                 }
             },
@@ -337,6 +348,9 @@ async fn send_file_inner(
             Some(SenderEvent::Cancelled { by_peer }) => {
                 return Err(SendFailure { reason: if by_peer { "refused by the host".into() } else { "cancelled".into() }, notify_peer: !by_peer });
             }
+            Some(SenderEvent::Refused(reason)) => {
+                return Err(SendFailure { reason: format!("refused by the host: {reason}"), notify_peer: false });
+            }
             Some(_) => {}
             None => return Err(local_failure("session ended")),
         }
@@ -385,6 +399,9 @@ async fn send_file_inner(
             Some(SenderEvent::Cancelled { by_peer }) => {
                 return Err(SendFailure { reason: if by_peer { "rejected by the host".into() } else { "cancelled".into() }, notify_peer: !by_peer });
             }
+            Some(SenderEvent::Refused(reason)) => {
+                return Err(SendFailure { reason: format!("rejected by the host: {reason}"), notify_peer: false });
+            }
             Some(_) => {}
             None => return Err(local_failure("session ended")),
         }
@@ -396,6 +413,9 @@ fn apply_event(ev: SenderEvent, out: &mut Outgoing) -> Result<(), SendFailure> {
         SenderEvent::Ack(n) => out.on_ack(n),
         SenderEvent::Cancelled { by_peer } => {
             return Err(SendFailure { reason: if by_peer { "cancelled by the host".into() } else { "cancelled".into() }, notify_peer: !by_peer });
+        }
+        SenderEvent::Refused(reason) => {
+            return Err(SendFailure { reason: format!("aborted by the host: {reason}"), notify_peer: false });
         }
         // A premature Done is meaningless while we are still sending.
         SenderEvent::Accepted | SenderEvent::Done => {}

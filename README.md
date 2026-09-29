@@ -26,10 +26,12 @@ files and provide support — using **P2P connections** whenever possible and a
   WebRTC handshake directly or over public Nostr relays, and then talk
   **directly to each other** over DTLS. Nobody in the project (or you) has to
   host anything.
-- **End-to-end encrypted by design.** Video, input and control ride WebRTC
-  data channels (DTLS). Rendezvous systems only ever see signed hints; the
-  first session pins the remote key (trust on first use) and the fingerprint is
-  one click away.
+- **End-to-end encrypted and identity-bound.** Video, input and control ride
+  WebRTC data channels (DTLS), and both peers sign the DTLS fingerprints of
+  the actual connection with their Ed25519 identity before anything else is
+  exchanged, so no rendezvous system (server, relay, DHT, LAN) can sit in the
+  middle. The first session pins the remote key (trust on first use) and the
+  fingerprint is one click away.
 - **Fast and light.** Native Rust, DXGI Desktop Duplication, a tile-based codec
   that only re-encodes what changed, adaptive quality driven by measured RTT.
 - **Unattended access done right.** Argon2id-hashed password, HMAC
@@ -53,6 +55,9 @@ files and provide support — using **P2P connections** whenever possible and a
   remote session, block the remote keyboard and mouse, restart the machine),
   chat, multi-monitor, quality profiles. Every action is gated by the
   permissions the host granted.
+- **Privileged control.** With the service installed, viewers can drive
+  administrator windows and UAC prompts (the service hosts as LocalSystem and
+  follows the secure desktop); without it, CleanDesk can run elevated.
 - **Keeps itself up to date.** Checks GitHub Releases, downloads the MSI,
   verifies its SHA-256 against the published checksums and upgrades in place.
 - **Wake-on-LAN.** Hosts announce their MAC address with their signed record;

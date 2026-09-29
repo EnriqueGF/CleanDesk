@@ -89,6 +89,12 @@ minting the session.
    `input` and `files` are reliable and ordered (losing a *key-up* would leave
    a key stuck).
    Encryption is end-to-end **DTLS**, negotiated between the peers.
+   The first message each peer sends on `control` is an `IdentityProof`: an
+   Ed25519 signature over the session id and both DTLS certificate
+   fingerprints (session channel binding, protocol 2.2). Nothing else is
+   sent or honoured until both proofs verify; for unattended sessions the
+   host does not even introduce itself (`Hello`/`Monitors`) before the
+   password challenge succeeds.
 6. The host captures → encodes → sends `VideoFrame`; the viewer decodes and
    paints; the viewer sends `InputEvent`; the host injects them according to
    permissions.

@@ -54,6 +54,8 @@ Device, user, start, end, duration, connection type, status.
 
 ## 13. File transfer
 Send/download, drag&drop, folders, progress, cancel. Encrypted channel.
+The host bounds incoming files (per-file size cap, at most 4 in flight,
+free disk space kept) and refuses with a reason.
 
 ## 14. Shared clipboard
 Text and URLs (MVP); images/files optional. Can be disabled via permissions.
@@ -72,6 +74,11 @@ Encrypted communications, device authentication, unique IDs, protection
 against unauthorized connections, session validation, token expiry,
 brute-force protection, access logging, visual confirmation of an active
 session. Unattended credentials never in plain text.
+Each P2P session is bound to the devices' identities: both peers sign the
+session id and the DTLS fingerprints (`IdentityProof`) before anything else
+travels on the control channel, so no rendezvous can sit in the middle.
+Brute-force protection is per verified caller key and global (a rotating
+attacker locks unattended access for everyone for a doubling window).
 
 ## 19. Connection architecture
 - **CleanDesk Client:** capture, inputs, encoding, sessions, files.

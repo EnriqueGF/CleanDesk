@@ -219,6 +219,13 @@ pub enum SessionMessage {
     /// Viewer → host: a one-shot privileged action (spec section 6). The host
     /// checks the matching permission before acting. Added in 2.1.
     RemoteAction { action: RemoteAction },
+    /// Both directions, **the first message on the control channel** (before
+    /// `Hello`): binds the peer's Ed25519 identity to this very DTLS session.
+    /// `signature_b64` signs `cleandesk_crypto::session::session_proof_message`
+    /// over the session id and the sender's own and remote DTLS certificate
+    /// fingerprints, so a relay that terminated DTLS in the middle cannot
+    /// forward it. Added in 2.2.
+    IdentityProof { public_key_b64: String, signature_b64: String },
 }
 
 /// Privileged one-shot actions a viewer may request from the host.
@@ -268,6 +275,8 @@ pub struct MonitorInfo {
 /// progress with `Progress` (which doubles as flow control: the sender keeps
 /// at most a window of bytes beyond the last ack in flight) and, after
 /// verifying the size, answers `Complete` back. Either side may `Cancel`.
+///
+/// Externally tagged (postcard). **Append-only**, like [`SessionMessage`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileTransferMsg {
     /// Announce an outgoing file/folder tree.
@@ -280,6 +289,9 @@ pub enum FileTransferMsg {
     Progress { transfer_id: u64, transferred: u64 },
     /// Sender: all bytes sent. Receiver: all bytes verified and stored.
     Complete { transfer_id: u64 },
+    /// Receiver: like `Cancel`, with a human-readable reason (too large, no
+    /// disk space, too many transfers in flight...). Added in 2.2.
+    Refused { transfer_id: u64, reason: String },
 }
 
 // ---------------------------------------------------------------------------

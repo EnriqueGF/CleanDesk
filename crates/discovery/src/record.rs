@@ -20,6 +20,15 @@ use std::net::SocketAddr;
 /// Records older than this are treated as stale (host probably offline).
 pub const MAX_RECORD_AGE_SECS: u64 = 45 * 60;
 
+/// Records dated more than this far in the future are rejected. Without an
+/// upper bound a record with `ts = u64::MAX` would never go stale and, being
+/// "newest", would win every by-ID lookup forever.
+pub const MAX_FUTURE_SKEW_SECS: u64 = 5 * 60;
+
+/// Version of the signed [`RelayRecord`]. Before it existed relays announced
+/// only an unauthenticated `announce_peer` on the infohash.
+pub const RELAY_RECORD_VERSION: u8 = 1;
+
 /// Upper bound the DHT enforces on a mutable value.
 pub const MAX_RECORD_BYTES: usize = 1000;
 
@@ -116,10 +125,7 @@ impl Record {
         }
         verify_b64_sig(&self.pk, &self.signing_bytes(), &self.sig)
             .map_err(|_| DiscoveryError::BadRecord("bad signature".into()))?;
-        if self.ts.saturating_add(MAX_RECORD_AGE_SECS) < now {
-            return Err(DiscoveryError::BadRecord("record is stale".into()));
-        }
-        Ok(())
+        check_freshness(self.ts, now)
     }
 
     /// The CleanDesk ID this record's key derives to.
@@ -152,6 +158,113 @@ impl Record {
     pub fn public_key_bytes(&self) -> Result<[u8; 32]> {
         Ok(cleandesk_crypto::identity::decode_public_key(&self.pk)?)
     }
+}
+
+/// Stale or too-far-in-the-future timestamps are both rejected.
+fn check_freshness(ts: u64, now: u64) -> Result<()> {
+    if ts.saturating_add(MAX_RECORD_AGE_SECS) < now {
+        return Err(DiscoveryError::BadRecord("record is stale".into()));
+    }
+    if ts > now.saturating_add(MAX_FUTURE_SKEW_SECS) {
+        return Err(DiscoveryError::BadRecord("record is dated in the future".into()));
+    }
+    Ok(())
+}
+
+/// What a community relay publishes about itself: "the relay with Ed25519
+/// key *K* serves TURN at `addr`, as of *T*", signed by *K*. Stored as a
+/// BEP 44 mutable item under [`relay_index_key`]`(addr)` so a client that
+/// learned `addr` from the (unauthenticated) `get_peers` directory can fetch
+/// and verify it before handing the address to ICE.
+///
+/// What it proves: the record was produced by the holder of `pk` and names
+/// that exact address, so the relay has a stable identity clients can pin or
+/// block and a stranger cannot inject arbitrary addresses by `announce_peer`
+/// alone. What it does **not** prove: that `pk`'s owner controls `addr` (the
+/// DHT cannot attest that); a hostile operator can still run a relay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelayRecord {
+    /// [`RELAY_RECORD_VERSION`].
+    pub v: u8,
+    /// The relay's Ed25519 public key, base64.
+    pub pk: String,
+    /// Public TURN endpoint (`host:port`, UDP).
+    pub addr: SocketAddr,
+    /// Unix seconds when produced.
+    pub ts: u64,
+    /// Ed25519 signature (base64) over [`RelayRecord::signing_bytes`].
+    #[serde(default)]
+    pub sig: String,
+}
+
+impl RelayRecord {
+    pub fn new(identity: &Identity, addr: SocketAddr, ts: u64) -> Self {
+        let mut r = Self { v: RELAY_RECORD_VERSION, pk: identity.public_key_b64(), addr, ts, sig: String::new() };
+        r.sig = identity.sign_b64(&r.signing_bytes());
+        r
+    }
+
+    pub fn signing_bytes(&self) -> Vec<u8> {
+        let mut h = Sha256::new();
+        h.update(NAMESPACE.as_bytes());
+        h.update(b":relay-record:");
+        h.update([self.v]);
+        h.update(self.pk.as_bytes());
+        h.update([0]);
+        h.update(self.addr.to_string().as_bytes());
+        h.update([0]);
+        h.update(self.ts.to_le_bytes());
+        h.finalize().to_vec()
+    }
+
+    /// Verify version, signature, freshness and — when the record was fetched
+    /// for a particular address — that it names that address.
+    pub fn verify(&self, now: u64, expected_addr: Option<SocketAddr>) -> Result<()> {
+        if self.v != RELAY_RECORD_VERSION {
+            return Err(DiscoveryError::BadRecord(format!("unsupported relay record version {}", self.v)));
+        }
+        verify_b64_sig(&self.pk, &self.signing_bytes(), &self.sig)
+            .map_err(|_| DiscoveryError::BadRecord("bad relay record signature".into()))?;
+        if let Some(expected) = expected_addr {
+            if self.addr != expected {
+                return Err(DiscoveryError::BadRecord("relay record names another address".into()));
+            }
+        }
+        check_freshness(self.ts, now)
+    }
+
+    pub fn to_json(&self) -> Result<Vec<u8>> {
+        let bytes = serde_json::to_vec(self)?;
+        if bytes.len() > MAX_RECORD_BYTES {
+            return Err(DiscoveryError::BadRecord(format!("relay record too large: {} bytes", bytes.len())));
+        }
+        Ok(bytes)
+    }
+
+    pub fn from_json(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() > MAX_RECORD_BYTES {
+            return Err(DiscoveryError::BadRecord("relay record too large".into()));
+        }
+        Ok(serde_json::from_slice(bytes)?)
+    }
+}
+
+/// The DHT index keypair for a relay address: derived from `host:port`
+/// alone so a client can look the relay's signed record up knowing only the
+/// address `get_peers` returned. Anyone can write the slot, which is why the
+/// record inside is self-signed and must name the same address.
+pub fn relay_index_key(addr: SocketAddr) -> SigningKey {
+    let mut h = Sha256::new();
+    h.update(NAMESPACE.as_bytes());
+    h.update(b":relay-index:");
+    h.update(addr.to_string().as_bytes());
+    let seed: [u8; 32] = h.finalize().into();
+    SigningKey::from_bytes(&seed)
+}
+
+/// Salt for [`RelayRecord`] items.
+pub fn relay_record_salt() -> Vec<u8> {
+    format!("{NAMESPACE}:relay-record").into_bytes()
 }
 
 /// The DHT "index" keypair for a CleanDesk ID: derived from the ID alone, so
@@ -250,6 +363,12 @@ mod tests {
         assert!(t.verify(1000).is_err());
         assert!(r.verify(1000 + MAX_RECORD_AGE_SECS + 1).is_err(), "stale");
         assert!(r.verify(1000 + MAX_RECORD_AGE_SECS).is_ok());
+        // A record dated too far ahead of the viewer's clock is rejected: it
+        // would otherwise never expire and always be "the newest".
+        assert!(r.verify(1000 - MAX_FUTURE_SKEW_SECS).is_ok(), "small skew tolerated");
+        assert!(r.verify(1000 - MAX_FUTURE_SKEW_SECS - 1).is_err(), "future-dated");
+        let far = Record::new(&id, None, vec![], None, u64::MAX);
+        assert!(far.verify(1000).is_err(), "u64::MAX ts must not win forever");
         // A record signed by another key never matches this ID.
         let other = Record::new(&ident(), None, vec![], None, 1000);
         assert!(!other.matches_id(id.derive_id()));
@@ -295,6 +414,32 @@ mod tests {
         assert!(r.mac.as_ref().unwrap().len() <= 17);
         assert!(r.to_json().unwrap().len() <= MAX_RECORD_BYTES);
         r.verify(u64::MAX).unwrap();
+    }
+
+    #[test]
+    fn relay_record_roundtrip_binding_and_tampering() {
+        let relay = ident();
+        let addr: SocketAddr = "203.0.113.7:7421".parse().unwrap();
+        let r = RelayRecord::new(&relay, addr, 5000);
+        let back = RelayRecord::from_json(&r.to_json().unwrap()).unwrap();
+        assert_eq!(back, r);
+        back.verify(5000, Some(addr)).unwrap();
+        back.verify(5000, None).unwrap();
+        // Fetched under another address's index slot: refused even if valid.
+        assert!(back.verify(5000, Some("203.0.113.8:7421".parse().unwrap())).is_err());
+        let mut t = r.clone();
+        t.addr = "203.0.113.8:7421".parse().unwrap();
+        assert!(t.verify(5000, None).is_err(), "address is signed");
+        let mut t = r.clone();
+        t.pk = ident().public_key_b64();
+        assert!(t.verify(5000, None).is_err(), "key swap breaks the signature");
+        let mut t = r.clone();
+        t.v = 0;
+        assert!(t.verify(5000, None).is_err(), "old unsigned-era version refused");
+        assert!(r.verify(5000 + MAX_RECORD_AGE_SECS + 1, None).is_err(), "stale");
+        assert!(r.verify(5000 - MAX_FUTURE_SKEW_SECS - 1, None).is_err(), "future");
+        assert_eq!(relay_index_key(addr).to_bytes(), relay_index_key(addr).to_bytes());
+        assert_ne!(relay_index_key(addr).to_bytes(), relay_index_key("203.0.113.7:7422".parse().unwrap()).to_bytes());
     }
 
     #[test]

@@ -18,7 +18,7 @@ use cleandesk_proto::{
     session::DeviceInfo,
     Version, PROTOCOL_VERSION,
 };
-use cleandesk_signal_server::state::ServerState;
+use cleandesk_signal_server::state::{IpLimits, ServerState};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,9 +28,13 @@ use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 async fn start_server() -> (String, Arc<ServerState>) {
+    start_server_with(ServerState::new()).await
+}
+
+async fn start_server_with(state: ServerState) -> (String, Arc<ServerState>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = Arc::new(ServerState::new());
+    let state = Arc::new(state);
     let st = state.clone();
     tokio::spawn(async move {
         let _ = cleandesk_signal_server::run_with_state(listener, st).await;
@@ -333,4 +337,56 @@ async fn connect_requests_are_rate_limited() {
         }
     }
     assert!(limited, "spamming ConnectRequest must trip the rate limiter");
+}
+
+#[tokio::test]
+async fn connections_per_ip_are_capped() {
+    let (url, state) = start_server_with(ServerState::with_ip_limits(IpLimits::new(2, 30, Duration::from_secs(60)))).await;
+    let _a = open(&url).await;
+    let _b = open(&url).await;
+    // The third socket is dropped before the WebSocket upgrade: either the
+    // connect fails outright or the stream ends at once.
+    match tokio_tungstenite::connect_async(&url).await {
+        Err(_) => {}
+        Ok((mut ws, _)) => expect_closed(&mut ws).await,
+    }
+    let ip = "127.0.0.1".parse().unwrap();
+    assert_eq!(state.ip_limits().connections(ip), 2);
+    // Closing one frees a slot.
+    drop(_a);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while state.ip_limits().connections(ip) != 1 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("slot released after close");
+    let mut c = open(&url).await;
+    send(&mut c, &SignalMessage::Ping { nonce: 9 }).await;
+    assert!(matches!(recv(&mut c).await, SignalMessage::Pong { nonce: 9 }));
+}
+
+#[tokio::test]
+async fn registrations_per_ip_are_rate_limited() {
+    let (url, _state) = start_server_with(ServerState::with_ip_limits(IpLimits::new(20, 2, Duration::from_secs(60)))).await;
+    let a = Identity::generate();
+    let b = Identity::generate();
+    let mut ws_a = open(&url).await;
+    register(&mut ws_a, &a, "a").await;
+    let mut ws_b = open(&url).await;
+    register(&mut ws_b, &b, "b").await;
+    // Third registration attempt from the same address within the window:
+    // refused before the key is looked at, and the socket is closed.
+    let c = Identity::generate();
+    let mut ws_c = open(&url).await;
+    send(
+        &mut ws_c,
+        &SignalMessage::Register { device: dev(c.derive_id(), "c"), protocol: PROTOCOL_VERSION, public_key: c.public_key_b64() },
+    )
+    .await;
+    assert!(matches!(recv(&mut ws_c).await, SignalMessage::Error { code: ErrorCode::RateLimited, .. }));
+    expect_closed(&mut ws_c).await;
+    // Already-registered devices keep working.
+    send(&mut ws_a, &SignalMessage::Ping { nonce: 1 }).await;
+    assert!(matches!(recv(&mut ws_a).await, SignalMessage::Pong { nonce: 1 }));
 }

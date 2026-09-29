@@ -9,10 +9,18 @@
 //! viewer → host   Register { device, protocol, public_key: V }
 //! viewer → host   RegisterChallenge { nonce: nv }
 //! host   → viewer RegisterChallenge { nonce: nh }
-//! viewer → host   RegisterProof { signature: sign_V(prefix || nh) }
-//! host   → viewer RegisterProof { signature: sign_H(prefix || nv) }
+//! viewer → host   RegisterProof { signature: sign_V(direct("viewer", nh, H, V)) }
+//! host   → viewer RegisterProof { signature: sign_H(direct("host", nv, H, V)) }
 //! host   → viewer Registered { id: host id }
 //! ```
+//!
+//! `direct(role, nonce, H, V)` is [`direct_proof_message`]: it has its own
+//! prefix (never the server registration one) and covers the nonce, **both**
+//! public keys and the signer's role. So a signature made here is useless
+//! anywhere else: an attacker who connects to a host's direct port cannot
+//! relay a CleanDesk Server's registration nonce to it and use the host's
+//! answer to register the host's ID on that server, nor replay one side's
+//! proof to the other.
 //!
 //! The viewer already knows (and has verified) the host's key from the LAN
 //! or DHT record, and checks it derives to the ID it dialed. The host learns
@@ -25,12 +33,7 @@
 use crate::{DiscoveryError, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use cleandesk_crypto::identity::{derive_id_from_public_key_b64, random_bytes, verify_b64_sig, Identity};
-use cleandesk_proto::{
-    frame::FrameCodec,
-    message::{register_proof_message, SignalMessage},
-    session::DeviceInfo,
-    CleanDeskId, PROTOCOL_VERSION,
-};
+use cleandesk_proto::{frame::FrameCodec, message::SignalMessage, session::DeviceInfo, CleanDeskId, PROTOCOL_VERSION};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -45,6 +48,54 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Dial timeout per endpoint.
 pub const DIAL_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// Largest nonce either side accepts (ours are 32 bytes).
+const MAX_NONCE: usize = 64;
+
+/// Domain-separation prefix of the direct handshake proof. Deliberately
+/// distinct from the server registration prefix (`cleandesk-register-v1:`).
+pub const DIRECT_PROOF_PREFIX: &[u8] = b"cleandesk-direct-v1:";
+
+/// Which side of the direct link is signing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectRole {
+    Host,
+    Viewer,
+}
+
+/// The message `role` signs to prove its key on a direct link: it covers the
+/// peer's nonce, the host's and the viewer's public keys (base64, as sent on
+/// the wire) and the signer's role, under [`DIRECT_PROOF_PREFIX`] and the
+/// rendezvous version. Fields are NUL-separated; keys are base64 so they
+/// cannot contain NUL, and the nonce goes last so it may be any bytes.
+pub fn direct_proof_message(role: DirectRole, nonce: &[u8], host_public_key_b64: &str, viewer_public_key_b64: &str) -> Vec<u8> {
+    let role_tag: &[u8] = match role {
+        DirectRole::Host => b"host",
+        DirectRole::Viewer => b"viewer",
+    };
+    let mut out = Vec::with_capacity(
+        DIRECT_PROOF_PREFIX.len() + 16 + host_public_key_b64.len() + viewer_public_key_b64.len() + nonce.len(),
+    );
+    out.extend_from_slice(DIRECT_PROOF_PREFIX);
+    out.push(crate::RENDEZVOUS_VERSION);
+    out.push(0);
+    out.extend_from_slice(role_tag);
+    out.push(0);
+    out.extend_from_slice(host_public_key_b64.as_bytes());
+    out.push(0);
+    out.extend_from_slice(viewer_public_key_b64.as_bytes());
+    out.push(0);
+    out.extend_from_slice(nonce);
+    out
+}
+
+fn decode_nonce(b64: &str) -> Result<Vec<u8>> {
+    let nonce = B64.decode(b64).map_err(|e| DiscoveryError::Protocol(e.to_string()))?;
+    if nonce.is_empty() || nonce.len() > MAX_NONCE {
+        return Err(DiscoveryError::Protocol("bad nonce length".into()));
+    }
+    Ok(nonce)
+}
 
 /// One authenticated, framed connection.
 pub struct DirectLink {
@@ -160,18 +211,21 @@ async fn host_handshake(stream: TcpStream, identity: &Identity) -> Result<Direct
     let SignalMessage::RegisterChallenge { nonce: viewer_nonce } = link.recv_step().await? else {
         return Err(DiscoveryError::Protocol("expected viewer challenge".into()));
     };
-    let viewer_nonce = B64.decode(viewer_nonce).map_err(|e| DiscoveryError::Protocol(e.to_string()))?;
+    let viewer_nonce = decode_nonce(&viewer_nonce)?;
+    let host_pk = identity.public_key_b64();
 
     let my_nonce = random_bytes(32);
     link.send(&SignalMessage::RegisterChallenge { nonce: B64.encode(&my_nonce) }).await?;
     let SignalMessage::RegisterProof { signature } = link.recv_step().await? else {
         return Err(DiscoveryError::Protocol("expected viewer proof".into()));
     };
-    verify_b64_sig(&public_key, &register_proof_message(&my_nonce), &signature)
+    verify_b64_sig(&public_key, &direct_proof_message(DirectRole::Viewer, &my_nonce, &host_pk, &public_key), &signature)
         .map_err(|_| DiscoveryError::AuthFailed("bad viewer proof".into()))?;
 
+    // Signed only after the viewer proved its key, and bound to that key: a
+    // stranger cannot harvest this signature for use anywhere else.
     link.send(&SignalMessage::RegisterProof {
-        signature: identity.sign_b64(&register_proof_message(&viewer_nonce)),
+        signature: identity.sign_b64(&direct_proof_message(DirectRole::Host, &viewer_nonce, &host_pk, &public_key)),
     })
     .await?;
     link.send(&SignalMessage::Registered { id: identity.derive_id() }).await?;
@@ -206,27 +260,29 @@ pub async fn dial(
         peer_id: host_id,
         peer_device: None,
     };
-    link.send(&SignalMessage::Register {
-        device,
-        protocol: PROTOCOL_VERSION,
-        public_key: identity.public_key_b64(),
-    })
-    .await?;
+    let viewer_pk = identity.public_key_b64();
+    link.send(&SignalMessage::Register { device, protocol: PROTOCOL_VERSION, public_key: viewer_pk.clone() }).await?;
     let my_nonce = random_bytes(32);
     link.send(&SignalMessage::RegisterChallenge { nonce: B64.encode(&my_nonce) }).await?;
 
     let SignalMessage::RegisterChallenge { nonce } = link.recv_step().await? else {
         return Err(DiscoveryError::Protocol("expected host challenge".into()));
     };
-    let nonce = B64.decode(nonce).map_err(|e| DiscoveryError::Protocol(e.to_string()))?;
-    link.send(&SignalMessage::RegisterProof { signature: identity.sign_b64(&register_proof_message(&nonce)) })
-        .await?;
+    let nonce = decode_nonce(&nonce)?;
+    link.send(&SignalMessage::RegisterProof {
+        signature: identity.sign_b64(&direct_proof_message(DirectRole::Viewer, &nonce, host_public_key, &viewer_pk)),
+    })
+    .await?;
 
     let SignalMessage::RegisterProof { signature } = link.recv_step().await? else {
         return Err(DiscoveryError::Protocol("expected host proof".into()));
     };
-    verify_b64_sig(host_public_key, &register_proof_message(&my_nonce), &signature)
-        .map_err(|_| DiscoveryError::AuthFailed("bad host proof".into()))?;
+    verify_b64_sig(
+        host_public_key,
+        &direct_proof_message(DirectRole::Host, &my_nonce, host_public_key, &viewer_pk),
+        &signature,
+    )
+    .map_err(|_| DiscoveryError::AuthFailed("bad host proof".into()))?;
     let SignalMessage::Registered { id } = link.recv_step().await? else {
         return Err(DiscoveryError::Protocol("expected Registered".into()));
     };
@@ -240,9 +296,97 @@ pub async fn dial(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cleandesk_proto::message::register_proof_message;
 
     fn dev(id: CleanDeskId) -> DeviceInfo {
         DeviceInfo { id, alias: None, hostname: "v".into(), os: "t".into(), app_version: "0".into() }
+    }
+
+    /// The attack this closes: a stranger opens a direct link to the host,
+    /// hands it a CleanDesk Server's registration nonce as "its" challenge,
+    /// and forwards the host's signature to the server. The host's direct
+    /// proof must never verify as a registration proof, and vice versa.
+    #[test]
+    fn direct_proof_and_registration_proof_are_not_interchangeable() {
+        let host = Identity::generate();
+        let viewer = Identity::generate();
+        let (h, v) = (host.public_key_b64(), viewer.public_key_b64());
+        let nonce = random_bytes(32);
+
+        let direct_sig = host.sign_b64(&direct_proof_message(DirectRole::Host, &nonce, &h, &v));
+        assert!(verify_b64_sig(&h, &direct_proof_message(DirectRole::Host, &nonce, &h, &v), &direct_sig).is_ok());
+        assert!(
+            verify_b64_sig(&h, &register_proof_message(&nonce), &direct_sig).is_err(),
+            "a direct-link signature must not register the host on a server"
+        );
+
+        let register_sig = host.sign_b64(&register_proof_message(&nonce));
+        assert!(
+            verify_b64_sig(&h, &direct_proof_message(DirectRole::Host, &nonce, &h, &v), &register_sig).is_err(),
+            "a registration signature must not authenticate a direct link"
+        );
+        // Different prefixes: no choice of nonce can make the messages collide.
+        assert!(!direct_proof_message(DirectRole::Host, &nonce, &h, &v).starts_with(b"cleandesk-register"));
+        assert!(direct_proof_message(DirectRole::Host, &nonce, &h, &v).starts_with(DIRECT_PROOF_PREFIX));
+    }
+
+    /// One side's proof cannot be replayed as the other side's, and a proof
+    /// made for one viewer key is invalid for another (no relaying a host's
+    /// answer to a third party).
+    #[test]
+    fn direct_proof_is_bound_to_role_and_both_keys() {
+        let host = Identity::generate();
+        let viewer = Identity::generate();
+        let other = Identity::generate();
+        let (h, v, o) = (host.public_key_b64(), viewer.public_key_b64(), other.public_key_b64());
+        let nonce = random_bytes(32);
+        let sig = host.sign_b64(&direct_proof_message(DirectRole::Host, &nonce, &h, &v));
+        assert!(verify_b64_sig(&h, &direct_proof_message(DirectRole::Viewer, &nonce, &h, &v), &sig).is_err());
+        assert!(verify_b64_sig(&h, &direct_proof_message(DirectRole::Host, &nonce, &h, &o), &sig).is_err());
+        assert!(verify_b64_sig(&h, &direct_proof_message(DirectRole::Host, &nonce, &o, &v), &sig).is_err());
+        let mut other_nonce = nonce.clone();
+        other_nonce[0] ^= 1;
+        assert!(verify_b64_sig(&h, &direct_proof_message(DirectRole::Host, &other_nonce, &h, &v), &sig).is_err());
+    }
+
+    /// A viewer running the previous handshake (proof over the registration
+    /// message) is refused by a current host, which never sends its own proof.
+    #[tokio::test]
+    async fn legacy_handshake_is_refused() {
+        let host = Identity::generate();
+        let viewer = Identity::generate();
+        let listener = DirectListener::bind(0).await.unwrap();
+        let ep: SocketAddr = format!("127.0.0.1:{}", listener.port()).parse().unwrap();
+        let host_pk = host.public_key_b64();
+        let host_id = host.derive_id();
+        let accept = tokio::spawn(async move {
+            tokio::time::timeout(Duration::from_secs(3), listener.accept(&host)).await
+        });
+        let stream = TcpStream::connect(ep).await.unwrap();
+        let mut link = DirectLink {
+            stream,
+            codec: FrameCodec::new(),
+            peer_public_key: host_pk.clone(),
+            peer_id: host_id,
+            peer_device: None,
+        };
+        link.send(&SignalMessage::Register {
+            device: dev(viewer.derive_id()),
+            protocol: PROTOCOL_VERSION,
+            public_key: viewer.public_key_b64(),
+        })
+        .await
+        .unwrap();
+        link.send(&SignalMessage::RegisterChallenge { nonce: B64.encode(random_bytes(32)) }).await.unwrap();
+        let SignalMessage::RegisterChallenge { nonce } = link.recv_step().await.unwrap() else {
+            panic!("expected the host challenge")
+        };
+        let nonce = B64.decode(nonce).unwrap();
+        link.send(&SignalMessage::RegisterProof { signature: viewer.sign_b64(&register_proof_message(&nonce)) })
+            .await
+            .unwrap();
+        assert!(!matches!(link.recv_step().await, Ok(SignalMessage::RegisterProof { .. })));
+        assert!(accept.await.unwrap().is_err(), "no link for a legacy viewer");
     }
 
     #[tokio::test]
@@ -285,14 +429,18 @@ mod tests {
         let viewer = Identity::generate();
         let listener = DirectListener::bind(0).await.unwrap();
         let ep: SocketAddr = format!("127.0.0.1:{}", listener.port()).parse().unwrap();
-        tokio::spawn(async move {
+        let accept = tokio::spawn(async move {
             // The impostor answers with its own key; the viewer expects `real`.
-            let _ = listener.accept(&impostor).await;
+            tokio::time::timeout(Duration::from_secs(3), listener.accept(&impostor)).await
         });
         let err = dial(ep, &viewer, dev(viewer.derive_id()), &real.public_key_b64(), real.derive_id())
             .await
             .unwrap_err();
-        assert!(matches!(err, DiscoveryError::AuthFailed(_)), "got {err}");
+        // The viewer's proof is bound to the key it expects (`real`), so the
+        // impostor cannot even verify it and closes before sending its own
+        // proof; had it sent one, the host-proof check fails as AuthFailed.
+        assert!(matches!(err, DiscoveryError::AuthFailed(_) | DiscoveryError::Protocol(_)), "got {err}");
+        assert!(accept.await.unwrap().is_err(), "the impostor never obtains a link either");
         // Dialing with a key that does not derive to the id fails before any I/O.
         let err = dial(ep, &viewer, dev(viewer.derive_id()), &real.public_key_b64(), impostor_id)
             .await

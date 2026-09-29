@@ -217,6 +217,15 @@ fn spanish(en: &str) -> Option<&'static str> {
 
         // --- Ventana "Ajustes" ---
         "Language" => "Idioma",
+        "Several devices claim this ID. Compare the fingerprint with the owner and connect only if it matches." => "Varios equipos reclaman este ID. Compara la huella con el propietario y conecta solo si coincide.",
+        "Ready to connect (privileged, hosted by the service)" => "Listo para conectar (privilegiado, lo sirve el servicio)",
+        "Privileged control: drive administrator windows and UAC prompts" => "Control privilegiado: manejar ventanas de administrador y avisos de UAC",
+        "With the service installed, the service (LocalSystem) hosts and can show the UAC secure desktop; only unattended (password) connections are accepted then. Without the service, CleanDesk asks for elevation when it starts." => "Con el servicio instalado, el servicio (LocalSystem) hace de host y puede mostrar el escritorio seguro de UAC; entonces solo se aceptan conexiones desatendidas (con contraseña). Sin el servicio, CleanDesk pide elevación al arrancar.",
+        "Restart CleanDesk to apply privileged control." => "Reinicia CleanDesk para aplicar el control privilegiado.",
+        "Active: the service hosts as LocalSystem" => "Activo: el servicio hace de host como LocalSystem",
+        "Active: running elevated (administrator windows; UAC prompts need the service)" => "Activo: en ejecución elevada (ventanas de administrador; los avisos de UAC requieren el servicio)",
+        "Not active in this run (elevation declined or pending restart)" => "No activo en esta ejecución (elevación rechazada o pendiente de reinicio)",
+        "Off: administrator windows cannot be controlled" => "Desactivado: no se pueden controlar ventanas de administrador",
         "Updates" => "Actualizaciones",
         "Current version: {v}" => "Versión actual: {v}",
         "Check for updates automatically" => "Buscar actualizaciones automáticamente",

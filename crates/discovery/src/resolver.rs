@@ -8,6 +8,17 @@
 //! Every result is a verified [`Record`] (signature valid, key derives to the
 //! ID, fresh). If a pinned key is supplied and the record's key differs, the
 //! result is refused: that is the "the host's identity changed" alarm.
+//!
+//! # What the LAN path can and cannot say
+//!
+//! mDNS TXT records are **unsigned**: anything on the LAN can announce any
+//! `id`/`pk` pair. The announcement is therefore only a *hint* about where to
+//! dial; the key is checked to derive to the ID (a non-matching one is simply
+//! ignored, it is not evidence of anything) and the direct handshake proves
+//! possession of it. A key learned on the LAN must never be pinned by itself:
+//! pin only after a handshake succeeded against it. The DHT record carries a
+//! signature and is a stronger hint, but it is the handshake that
+//! authenticates in every case.
 
 use crate::dht::DhtNode;
 use crate::lan;
@@ -43,32 +54,36 @@ impl Resolver {
 
     /// Resolve `id`. `pinned_key` is the base64 key remembered from a previous
     /// session, if any.
+    ///
+    /// Errors worth distinguishing: [`DiscoveryError::AuthFailed`] (the key
+    /// found is not the pinned one) and [`DiscoveryError::AmbiguousIdentity`]
+    /// (several keys claim the ID and none is pinned); everything else is
+    /// "not found".
     pub async fn resolve(&self, id: CleanDeskId, pinned_key: Option<&str>) -> Result<Resolved> {
         // 1. LAN. Without a DHT this is the only path, so wait longer.
         let lan_budget = if self.dht.is_some() { LAN_TIMEOUT } else { LAN_TIMEOUT * 3 };
         if let Some(peer) = lan::find(id, lan_budget).await {
-            match self.check_pin(&peer.public_key, pinned_key) {
-                Ok(()) => {
-                    // The LAN answer carries no signed record; the direct
-                    // handshake proves the key, so we synthesise a minimal one.
-                    let record = Record {
-                        v: crate::RENDEZVOUS_VERSION,
-                        pk: peer.public_key.clone(),
-                        nostr: None,
-                        ep: peer.endpoints.clone(),
-                        ts: unix_now(),
-                        alias: peer.alias.clone(),
-                        mac: peer.mac.clone(),
-                        sig: String::new(),
-                    };
-                    if record.matches_id(id) {
-                        info!(%id, "resolved on the LAN");
-                        return Ok(Resolved { endpoints: peer.endpoints, record, via: "LAN" });
-                    }
-                    warn!(%id, "LAN announcement key does not derive to the id; ignoring");
-                }
-                Err(e) => return Err(e),
+            // The LAN answer carries no signed record; the direct handshake
+            // proves the key, so we synthesise a minimal one.
+            let record = Record {
+                v: crate::RENDEZVOUS_VERSION,
+                pk: peer.public_key.clone(),
+                nostr: None,
+                ep: peer.endpoints.clone(),
+                ts: unix_now(),
+                alias: peer.alias.clone(),
+                mac: peer.mac.clone(),
+                sig: String::new(),
+            };
+            // Binding first: an announcement whose key does not even derive
+            // to the ID is noise from the LAN, not an identity change, so it
+            // must not trip the pin alarm.
+            if record.matches_id(id) {
+                check_pin(&record.pk, pinned_key)?;
+                info!(%id, "resolved on the LAN");
+                return Ok(Resolved { endpoints: peer.endpoints, record, via: "LAN" });
             }
+            warn!(%id, "LAN announcement key does not derive to the id; ignoring");
         }
 
         let Some(dht) = &self.dht else {
@@ -88,9 +103,9 @@ impl Resolver {
             }
         }
 
-        // 3. By ID.
-        if let Some(record) = dht.lookup_by_id(id).await {
-            self.check_pin(&record.pk, pinned_key)?;
+        // 3. By ID. `AmbiguousIdentity` propagates as is.
+        if let Some(record) = dht.lookup_by_id(id, pinned_key).await? {
+            check_pin(&record.pk, pinned_key)?;
             info!(%id, "resolved on the DHT by id");
             return Ok(Resolved { endpoints: record.ep.clone(), record, via: "DHT" });
         }
@@ -99,14 +114,15 @@ impl Resolver {
             "the device is not announced (is it on, with CleanDesk running?)".into(),
         ))
     }
+}
 
-    fn check_pin(&self, found: &str, pinned: Option<&str>) -> Result<()> {
-        match pinned {
-            Some(p) if p != found => Err(DiscoveryError::AuthFailed(
-                "the remote device identity changed from the pinned one; verify its fingerprint before trusting the new key".into(),
-            )),
-            _ => Ok(()),
-        }
+/// The "identity changed" alarm: a pinned key that differs from the one found.
+fn check_pin(found: &str, pinned: Option<&str>) -> Result<()> {
+    match pinned {
+        Some(p) if p != found => Err(DiscoveryError::AuthFailed(
+            "the remote device identity changed from the pinned one; verify its fingerprint before trusting the new key".into(),
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -116,9 +132,8 @@ mod tests {
 
     #[test]
     fn pin_mismatch_is_refused() {
-        let r = Resolver::new(None);
-        assert!(r.check_pin("A", Some("A")).is_ok());
-        assert!(r.check_pin("A", None).is_ok());
-        assert!(matches!(r.check_pin("B", Some("A")), Err(DiscoveryError::AuthFailed(_))));
+        assert!(check_pin("A", Some("A")).is_ok());
+        assert!(check_pin("A", None).is_ok());
+        assert!(matches!(check_pin("B", Some("A")), Err(DiscoveryError::AuthFailed(_))));
     }
 }

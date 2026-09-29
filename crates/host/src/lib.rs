@@ -11,12 +11,16 @@
 //! interactive GUI (a human clicks Accept) and headless/unattended modes.
 //!
 //! Safety properties this module guarantees:
+//! * Nothing is sent or honoured on a session until the viewer proved, with
+//!   its Ed25519 key, that it sits at the far end of *this* DTLS session
+//!   (`IdentityProof`, see `cleandesk_crypto::session`), so a rendezvous
+//!   cannot sit in the middle even though it relayed the SDP fingerprints.
 //! * No input is injected before the session is authenticated and never
 //!   beyond the granted [`Permissions`].
 //! * Every key/button the viewer pressed is released when the session ends,
 //!   however it ends, so a dropped connection never leaves a stuck modifier.
-//! * Unattended authentication is rate-limited per caller ([`AuthThrottle`])
-//!   and bounded in time ([`AUTH_TIMEOUT`]).
+//! * Unattended authentication is rate-limited per verified caller key and
+//!   globally ([`AuthThrottle`]) and bounded in time ([`AUTH_TIMEOUT`]).
 
 mod clipboard;
 pub mod community;
@@ -25,14 +29,17 @@ mod media;
 mod throttle;
 
 pub use community::{serve_community, CommunityOptions};
-pub use files::default_downloads_dir;
+pub use files::{default_downloads_dir, DEFAULT_MAX_FILE_SIZE, FREE_SPACE_MARGIN, MAX_CONCURRENT_INCOMING};
 pub use media::MediaControl;
 pub use throttle::AuthThrottle;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
-use cleandesk_crypto::identity::Identity;
+use cleandesk_crypto::{
+    identity::{derive_id_from_public_key_b64, Identity},
+    session::{sign_session_proof, verify_peer_session_proof, SessionRole},
+};
 use cleandesk_proto::{
     frame,
     files::FileChunk,
@@ -46,6 +53,7 @@ use cleandesk_proto::{
     PROTOCOL_VERSION,
 };
 use cleandesk_transport::{Channel, IceConfig, PeerConnection, SignalOut, SignalingClient};
+use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -68,6 +76,10 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long an unattended viewer has to answer the challenge.
 pub const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long the viewer has, once the peer connection is up, to send its
+/// `IdentityProof`. Short on purpose: the proof needs no user interaction.
+pub const PROOF_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Interval between `Stats` pushes and RTT pings.
 const STATS_INTERVAL: Duration = Duration::from_secs(2);
@@ -98,6 +110,9 @@ pub struct HostConfig {
     /// Where files sent by the viewer are stored. `None` means
     /// [`default_downloads_dir`] (`<Downloads>/CleanDesk`).
     pub downloads_dir: Option<PathBuf>,
+    /// Largest single file a viewer may send, in bytes
+    /// ([`DEFAULT_MAX_FILE_SIZE`] = 8 GiB). Larger offers are refused.
+    pub max_file_size: u64,
 }
 
 impl HostConfig {
@@ -114,6 +129,7 @@ impl HostConfig {
             control: None,
             community: CommunityOptions::default(),
             downloads_dir: None,
+            max_file_size: DEFAULT_MAX_FILE_SIZE,
         }
     }
 }
@@ -178,11 +194,13 @@ impl Approver for AutoAccept {
     }
 }
 
-/// What a finished session reports back to the main loop.
+/// What a session reports back to the main loop.
 #[derive(Debug)]
 pub(crate) enum SessionOutcome {
-    AuthFailed { peer: cleandesk_proto::CleanDeskId },
-    AuthSucceeded { peer: cleandesk_proto::CleanDeskId },
+    /// An unattended challenge was answered wrongly by the viewer whose
+    /// verified public key is `caller` (already counted in the throttle;
+    /// reported so the main loop logs lockouts in one place).
+    AuthFailed { caller: String },
     Ended { session: SessionId, reason: String },
 }
 
@@ -236,25 +254,36 @@ pub(crate) struct HostCore {
     approver: Arc<dyn Approver>,
     outcome_tx: mpsc::UnboundedSender<SessionOutcome>,
     pub(crate) outcome_rx: mpsc::UnboundedReceiver<SessionOutcome>,
-    throttle: AuthThrottle,
+    /// Shared with the session task, which is the only place the viewer's
+    /// *verified* key (the throttle's key) is known.
+    throttle: Arc<Mutex<AuthThrottle>>,
     active: Option<ActiveSession>,
 }
 
 impl HostCore {
     pub(crate) fn new(config: HostConfig, approver: Arc<dyn Approver>) -> Self {
         let (outcome_tx, outcome_rx) = mpsc::unbounded_channel();
-        Self { config, approver, outcome_tx, outcome_rx, throttle: AuthThrottle::default(), active: None }
+        Self {
+            config,
+            approver,
+            outcome_tx,
+            outcome_rx,
+            throttle: Arc::new(Mutex::new(AuthThrottle::default())),
+            active: None,
+        }
     }
 
     /// Feed one signaling message that arrived over `out`'s link.
     pub(crate) async fn on_signal(&mut self, msg: SignalMessage, out: &Arc<dyn SignalOut>) {
-        handle_signal(msg, &self.config, &self.approver, out, &self.outcome_tx, &mut self.throttle, &mut self.active).await;
+        handle_signal(msg, &self.config, &self.approver, out, &self.outcome_tx, &self.throttle, &mut self.active).await;
     }
 
     pub(crate) fn on_outcome(&mut self, outcome: SessionOutcome) {
         match outcome {
-            SessionOutcome::AuthFailed { peer } => self.throttle.record_failure(peer, Instant::now()),
-            SessionOutcome::AuthSucceeded { peer } => self.throttle.record_success(peer),
+            SessionOutcome::AuthFailed { caller } => {
+                let locked = self.throttle.lock().locked_for(&caller, Instant::now());
+                warn!(%caller, ?locked, "unattended authentication failed");
+            }
             SessionOutcome::Ended { session, reason } => {
                 if self.active.as_ref().is_some_and(|a| a.session == session) {
                     self.active = None;
@@ -291,7 +320,7 @@ async fn handle_signal(
     approver: &Arc<dyn Approver>,
     signal: &Arc<dyn SignalOut>,
     outcome_tx: &mpsc::UnboundedSender<SessionOutcome>,
-    throttle: &mut AuthThrottle,
+    throttle: &Arc<Mutex<AuthThrottle>>,
     active: &mut Option<ActiveSession>,
 ) {
     match msg {
@@ -303,14 +332,22 @@ async fn handle_signal(
             info!(%session, from = %from.id, ?requested, ?auth, "incoming request");
 
             if matches!(auth, AuthKind::UnattendedPassword) {
-                // Unattended requests need a configured key and a caller that
-                // is not locked out for guessing.
+                // Unattended requests need a configured key and the global
+                // breaker must not be tripped. The per-caller lockout is
+                // checked in the session, once the caller's key is verified
+                // (the id here is only what the rendezvous told us).
                 if config.unattended_key.is_none() {
                     let _ = signal.send(reject(session, RejectReason::AuthFailed)).await;
                     return;
                 }
-                if let Some(wait) = throttle.locked_for(from.id, Instant::now()) {
-                    warn!(from = %from.id, ?wait, "unattended auth locked out");
+                let global_wait = {
+                    let now = Instant::now();
+                    let mut t = throttle.lock();
+                    t.prune(now);
+                    t.global_locked_for(now)
+                };
+                if let Some(wait) = global_wait {
+                    warn!(from = %from.id, ?wait, "unattended auth globally locked out");
                     let _ = signal.send(reject(session, RejectReason::AuthFailed)).await;
                     return;
                 }
@@ -336,6 +373,7 @@ async fn handle_signal(
                 auth,
                 config: config.clone(),
                 outcome_tx: outcome_tx.clone(),
+                throttle: throttle.clone(),
             };
             match establish(signal.clone(), ctx).await {
                 Ok(a) => *active = Some(a),
@@ -379,6 +417,7 @@ struct SessionCtx {
     auth: AuthKind,
     config: HostConfig,
     outcome_tx: mpsc::UnboundedSender<SessionOutcome>,
+    throttle: Arc<Mutex<AuthThrottle>>,
 }
 
 /// Handle to an established session; dropping it tears the session down.
@@ -487,6 +526,28 @@ async fn run_session_inner(
     }
     info!("session connected");
 
+    // Channel binding comes first: until the viewer proved it owns the key
+    // at the far end of this DTLS session, nothing else is sent or honoured.
+    let viewer_key = match bind_identity(&peer, incoming, ctx).await {
+        Ok(key) => key,
+        Err(reason) => {
+            warn!(%reason, "session channel binding failed; closing");
+            send_ctrl(&peer, &SessionMessage::Disconnect { reason: reason.clone() }).await;
+            return reason;
+        }
+    };
+    info!(%viewer_key, "viewer identity bound to the DTLS session");
+
+    let unattended = matches!(ctx.auth, AuthKind::UnattendedPassword);
+    if unattended {
+        let locked = ctx.throttle.lock().locked_for(&viewer_key, Instant::now());
+        if let Some(wait) = locked {
+            warn!(%viewer_key, ?wait, "unattended auth locked out for this caller");
+            send_ctrl(&peer, &SessionMessage::Disconnect { reason: "auth locked out".into() }).await;
+            return "authentication locked out".to_string();
+        }
+    }
+
     // Enumerate monitors once (throwaway capturer; dropped before the capture
     // thread starts so Desktop Duplication is never held twice).
     let monitors = cleandesk_capture::new_capturer()
@@ -499,19 +560,17 @@ async fn run_session_inner(
         .cloned()
         .unwrap_or_else(default_monitor);
 
-    send_ctrl(&peer, &SessionMessage::Hello { protocol: PROTOCOL_VERSION, info: ctx.config.device.clone() }).await;
-    send_ctrl(&peer, &SessionMessage::Monitors { monitors: monitors.clone() }).await;
-
     // Interactive sessions are already authorized by the human who clicked
-    // Accept; unattended sessions must pass the challenge/response first.
-    let mut authed = !matches!(ctx.auth, AuthKind::UnattendedPassword);
+    // Accept; unattended sessions must pass the challenge/response first, and
+    // until then learn nothing about this machine (not even Hello/Monitors).
+    let mut authed = !unattended;
     let challenge = cleandesk_crypto::proof::Challenge::issue();
     let media = MediaControl::new(ctx.quality, monitor.clone());
     let mut media_started = false;
     let auth_deadline = Instant::now() + AUTH_TIMEOUT;
 
     if authed {
-        media_started = start_all(&peer, &media, ctx).await;
+        media_started = start_all(&peer, &media, &monitors, ctx).await;
     } else {
         send_ctrl(&peer, &SessionMessage::AuthChallenge { challenge_b64: challenge.to_b64() }).await;
     }
@@ -529,7 +588,7 @@ async fn run_session_inner(
         clipboard = Some(clipboard::ClipboardSync::start(clip_tx.clone()));
     }
     let downloads = ctx.config.downloads_dir.clone().unwrap_or_else(default_downloads_dir);
-    let mut files = files::FileReceiver::new(downloads);
+    let mut files = files::FileReceiver::new(downloads, ctx.config.max_file_size);
     // Whether we currently hold the host's local input blocked; must be
     // undone on every exit path.
     let mut local_input_blocked = false;
@@ -581,16 +640,16 @@ async fn run_session_inner(
                         if ok {
                             info!("unattended authentication succeeded");
                             authed = true;
-                            let _ = ctx.outcome_tx.send(SessionOutcome::AuthSucceeded { peer: ctx.peer.id });
+                            ctx.throttle.lock().record_success(&viewer_key);
                             if !media_started {
-                                media_started = start_all(&peer, &media, ctx).await;
+                                media_started = start_all(&peer, &media, &monitors, ctx).await;
                             }
                             if clipboard.is_none() && granted.contains(Permissions::CLIPBOARD) {
                                 clipboard = Some(clipboard::ClipboardSync::start(clip_tx.clone()));
                             }
                         } else {
-                            warn!("unattended authentication failed");
-                            let _ = ctx.outcome_tx.send(SessionOutcome::AuthFailed { peer: ctx.peer.id });
+                            ctx.throttle.lock().record_failure(&viewer_key, Instant::now());
+                            let _ = ctx.outcome_tx.send(SessionOutcome::AuthFailed { caller: viewer_key.clone() });
                             send_ctrl(&peer, &SessionMessage::Disconnect { reason: "auth failed".into() }).await;
                             break "authentication failed".to_string();
                         }
@@ -656,6 +715,9 @@ async fn run_session_inner(
                         break format!("the viewer ended the session ({reason})");
                     }
                     SessionMessage::Heartbeat | SessionMessage::Hello { .. } => {}
+                    // A second proof after binding is meaningless; never
+                    // re-bind mid-session.
+                    SessionMessage::IdentityProof { .. } => debug!("duplicate identity proof ignored"),
                     other => debug!(?other, "unhandled control message"),
                 }
             }
@@ -685,8 +747,80 @@ fn file_msg_id(msg: &FileTransferMsg) -> u64 {
         | FileTransferMsg::Accept { transfer_id }
         | FileTransferMsg::Cancel { transfer_id }
         | FileTransferMsg::Progress { transfer_id, .. }
-        | FileTransferMsg::Complete { transfer_id } => *transfer_id,
+        | FileTransferMsg::Complete { transfer_id }
+        | FileTransferMsg::Refused { transfer_id, .. } => *transfer_id,
     }
+}
+
+/// Mutual channel binding, host side: send our `IdentityProof` over this
+/// session's DTLS fingerprints, then wait (at most [`PROOF_TIMEOUT`]) for the
+/// viewer's and verify it. Returns the viewer's verified public key (base64).
+///
+/// Anything but an `IdentityProof` on the control channel before the proof
+/// is a protocol violation and fails the binding; other channels are ignored
+/// meanwhile. The error string doubles as the `Disconnect` reason.
+async fn bind_identity(
+    peer: &PeerConnection,
+    incoming: &mut mpsc::Receiver<(Channel, Bytes)>,
+    ctx: &SessionCtx,
+) -> Result<String, String> {
+    let (local_fp, remote_fp) = peer
+        .dtls_fingerprints()
+        .await
+        .map_err(|e| format!("DTLS fingerprints unavailable: {e}"))?;
+    let signature_b64 =
+        sign_session_proof(&ctx.config.identity, &ctx.session, &local_fp, &remote_fp, SessionRole::Host);
+    let proof = SessionMessage::IdentityProof { public_key_b64: ctx.config.identity.public_key_b64(), signature_b64 };
+    if !send_ctrl(peer, &proof).await {
+        return Err("could not send the identity proof".to_string());
+    }
+
+    let deadline = tokio::time::sleep(PROOF_TIMEOUT);
+    tokio::pin!(deadline);
+    loop {
+        let next = tokio::select! {
+            _ = &mut deadline => return Err("the viewer did not prove its identity in time".to_string()),
+            next = incoming.recv() => next,
+        };
+        let Some((ch, bytes)) = next else {
+            return Err("connection closed before the identity proof".to_string());
+        };
+        if ch != Channel::Control {
+            continue;
+        }
+        let msg = frame::decode_payload::<SessionMessage>(&bytes)
+            .map_err(|e| format!("undecodable control message before the identity proof: {e}"))?;
+        return match msg {
+            SessionMessage::IdentityProof { public_key_b64, signature_b64 } => {
+                verify_viewer_proof(&public_key_b64, &signature_b64, ctx, &local_fp, &remote_fp)
+            }
+            other => {
+                debug!(?other, "control message before identity proof");
+                Err("protocol violation: control message before the identity proof".to_string())
+            }
+        };
+    }
+}
+
+/// Check the viewer's proof against *our* view of the fingerprints (the
+/// viewer signed them swapped, under the `Viewer` role) and against the
+/// device that requested the session: the key must derive to `ctx.peer.id`,
+/// which the rendezvous bound to the caller's key, so whoever holds the far
+/// end of the DTLS session is exactly who asked to connect.
+fn verify_viewer_proof(
+    public_key_b64: &str,
+    signature_b64: &str,
+    ctx: &SessionCtx,
+    local_fp: &str,
+    remote_fp: &str,
+) -> Result<String, String> {
+    let derived = derive_id_from_public_key_b64(public_key_b64).map_err(|e| format!("bad viewer public key: {e}"))?;
+    if derived != ctx.peer.id {
+        return Err("the viewer's key does not belong to the device that requested the session".to_string());
+    }
+    verify_peer_session_proof(public_key_b64, &ctx.session, local_fp, remote_fp, SessionRole::Host, signature_b64)
+        .map_err(|_| "invalid identity proof for this session".to_string())?;
+    Ok(public_key_b64.to_string())
 }
 
 /// True if the granted permissions allow this remote action.
@@ -731,8 +865,17 @@ fn restart_machine() -> Result<()> {
     Ok(())
 }
 
-/// Announce permissions, start media + stats, and notify the embedder.
-async fn start_all(peer: &Arc<PeerConnection>, media: &MediaControl, ctx: &SessionCtx) -> bool {
+/// Introduce this host (Hello, Monitors), announce permissions, start media
+/// and stats, and notify the embedder. Only ever called for an authenticated
+/// viewer.
+async fn start_all(
+    peer: &Arc<PeerConnection>,
+    media: &MediaControl,
+    monitors: &[MonitorInfo],
+    ctx: &SessionCtx,
+) -> bool {
+    send_ctrl(peer, &SessionMessage::Hello { protocol: PROTOCOL_VERSION, info: ctx.config.device.clone() }).await;
+    send_ctrl(peer, &SessionMessage::Monitors { monitors: monitors.to_vec() }).await;
     send_ctrl(peer, &SessionMessage::PermissionsUpdate { granted: ctx.granted }).await;
     media::start_media(peer.clone(), media.clone());
     start_stats(peer.clone(), media.clone());

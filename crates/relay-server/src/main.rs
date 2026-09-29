@@ -3,12 +3,19 @@
 //! Configuration comes from `CLEANDESK_RELAY_*` environment variables (see the
 //! library docs). Runs until Ctrl-C, then closes the TURN server so live
 //! allocations are released.
+//!
+//! In community mode the relay also keeps a small Ed25519 identity on disk
+//! and publishes a signed record of its public address on the DHT, which is
+//! what clients require before using a relay they found there.
 
 use anyhow::{Context, Result};
+use cleandesk_crypto::identity::Identity;
 use cleandesk_relay_server::{
     RelayConfig, ENV_BIND, ENV_COMMUNITY, ENV_MAX_PORT, ENV_MIN_PORT, ENV_PORT, ENV_PUBLIC_IP,
     ENV_REALM, ENV_USERS,
 };
+use std::net::{IpAddr, SocketAddr};
+use std::path::Path;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -38,28 +45,50 @@ async fn main() -> Result<()> {
         users = ?config.users.iter().map(|u| u.username.as_str()).collect::<Vec<_>>(),
         port_range = ?config.port_range,
         community = config.community,
+        allow_private_peers = config.allow_private_peers,
+        quotas = ?config.quotas,
         "CleanDesk Relay configuration"
     );
 
     let community = config.community;
     let port = config.port;
+    let public_ip = config.public_ip;
+    let identity_path = config.identity_path.clone();
     let handle = cleandesk_relay_server::run(config)
         .await
         .context("starting relay")?;
 
     // Community relays announce themselves on the BitTorrent DHT so clients
-    // that have never heard of this machine can still find it.
+    // that have never heard of this machine can still find it. The record is
+    // signed with a persistent key so the relay keeps one identity across
+    // restarts (clients can pin or block it).
     let _announcer = if community {
+        let identity = load_or_create_identity(&identity_path)
+            .with_context(|| format!("relay identity at {}", identity_path.display()))?;
+        tracing::info!(fingerprint = %identity.fingerprint(), "relay identity");
         match cleandesk_discovery::dht::DhtNode::start_server(port.wrapping_add(1)) {
             Ok(node) => Some(tokio::spawn(async move {
                 node.ready().await;
-                if let Some(addr) = node.public_address().await {
-                    tracing::info!(public = %addr.ip(), "public address learned from the DHT");
-                }
                 loop {
-                    match node.announce_relay(port).await {
-                        Ok(()) => tracing::info!(port, "relay announced on the DHT"),
-                        Err(e) => tracing::warn!(error = %e, "relay announce failed"),
+                    // Prefer the configured public IP; fall back to what the
+                    // DHT peers see us as.
+                    let ip: Option<IpAddr> = if public_ip.is_loopback() || public_ip.is_unspecified() {
+                        node.public_address().await.map(|a| IpAddr::V4(*a.ip()))
+                    } else {
+                        Some(public_ip)
+                    };
+                    match ip {
+                        Some(ip) => {
+                            let addr = SocketAddr::new(ip, port);
+                            match node.announce_relay(&identity, addr).await {
+                                Ok(()) => tracing::info!(%addr, "relay announced on the DHT"),
+                                Err(e) => tracing::warn!(%addr, error = %e, "relay announce failed"),
+                            }
+                        }
+                        None => tracing::warn!(
+                            "public address unknown ({ENV_PUBLIC_IP} unset and not learned from the DHT yet); \
+                             not announcing"
+                        ),
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(15 * 60)).await;
                 }
@@ -79,4 +108,33 @@ async fn main() -> Result<()> {
     tracing::info!("shutdown requested, closing TURN server");
     handle.shutdown().await.context("closing relay")?;
     Ok(())
+}
+
+/// Load the relay identity from `path`, or generate one and store it there.
+/// The file holds a private key: keep it readable by the relay user only.
+fn load_or_create_identity(path: &Path) -> Result<Identity> {
+    if path.exists() {
+        let pem = std::fs::read_to_string(path).context("reading identity")?;
+        return Identity::from_pem(&pem).context("parsing identity PEM");
+    }
+    let identity = Identity::generate();
+    let pem = identity.to_pem().context("encoding identity")?;
+    write_private(path, pem.as_bytes()).context("writing identity")?;
+    tracing::info!(path = %path.display(), "generated a new relay identity");
+    Ok(identity)
+}
+
+#[cfg(unix)]
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?;
+    f.write_all(bytes)
+}
+
+#[cfg(not(unix))]
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+    f.write_all(bytes)
 }

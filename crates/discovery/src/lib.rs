@@ -37,7 +37,7 @@ pub mod upnp;
 pub mod wol;
 
 pub use lan::browse_all;
-pub use record::Record;
+pub use record::{Record, RelayRecord};
 pub use resolver::{Resolved, Resolver};
 
 use thiserror::Error;
@@ -58,6 +58,15 @@ pub enum DiscoveryError {
     BadRecord(String),
     #[error("peer failed authentication: {0}")]
     AuthFailed(String),
+    /// Several valid records signed by *different* keys claim the same ID
+    /// (a 9-digit ID is only ~30 bits, so a collision can be manufactured).
+    /// Nothing was chosen: the caller must refuse or ask the user to verify a
+    /// fingerprint and pin the right key.
+    #[error("several keys claim this id ({} candidates); verify the fingerprint and pin the right key", keys.len())]
+    AmbiguousIdentity {
+        /// Base64 public keys seen, newest record first.
+        keys: Vec<String>,
+    },
     #[error("protocol error: {0}")]
     Protocol(String),
     #[error("timed out: {0}")]
@@ -70,10 +79,15 @@ pub type Result<T> = std::result::Result<T, DiscoveryError>;
 
 /// Version byte of the on-the-wire [`Record`] and of every derived key /
 /// infohash below. Bump together when the format changes.
-pub const RENDEZVOUS_VERSION: u8 = 1;
+///
+/// History: v1 signed the same challenge message as the server registration
+/// (a host's direct handshake signature could be replayed to register its ID
+/// on a CleanDesk Server); v2 binds the direct proof to both keys and the
+/// role, bounds a record's clock skew, and requires signed relay records.
+pub const RENDEZVOUS_VERSION: u8 = 2;
 
 /// Name prefix for the mDNS service type, DHT salts and infohashes.
-pub const NAMESPACE: &str = "cleandesk-v1";
+pub const NAMESPACE: &str = "cleandesk-v2";
 
 /// Deadline helpers shared by the backends.
 pub(crate) mod time {
@@ -87,6 +101,9 @@ pub(crate) mod time {
 /// Long-term TURN credentials community relays accept from anybody. They add
 /// no secrecy (the relayed traffic is DTLS end to end anyway); they exist
 /// because TURN requires *some* credential and lets operators rate-limit.
+/// The trade-off (an open relay anyone can use as a UDP proxy) is what the
+/// relay's peer-address filter and per-allocation quotas bound; see
+/// `docs/SECURITY.md`.
 pub const COMMUNITY_TURN_USER: &str = "cleandesk";
 pub const COMMUNITY_TURN_PASS: &str = "cleandesk-community";
 

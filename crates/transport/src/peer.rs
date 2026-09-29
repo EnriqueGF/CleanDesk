@@ -42,6 +42,7 @@ use bytes::{Bytes, BytesMut};
 use cleandesk_proto::message::SignalPayload;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use tracing::{trace, warn};
@@ -581,6 +582,52 @@ impl PeerConnection {
         }
     }
 
+    /// The DTLS certificate fingerprints of this connection as
+    /// `(local, remote)`, each in the canonical form `"sha-256 aa:bb:..."`
+    /// (lowercase). Only meaningful once [`Self::wait_connected`] resolved.
+    ///
+    /// The **remote** value is computed from the certificate the DTLS
+    /// handshake actually authenticated against (not from the SDP the
+    /// rendezvous relayed), so it is exactly what a session channel-binding
+    /// proof must cover. The local value comes from our own local
+    /// description, which never left this process unmodified.
+    pub async fn dtls_fingerprints(&self) -> Result<(String, String)> {
+        let local_sdp = self
+            .pc
+            .local_description()
+            .await
+            .ok_or(TransportError::FingerprintUnavailable("no local description"))?;
+        let local = fingerprint_from_sdp(&local_sdp.sdp)
+            .ok_or(TransportError::FingerprintUnavailable("no a=fingerprint in local SDP"))?;
+
+        let remote = match self.pc.sctp().await {
+            Some(sctp) => match sctp.transport().get_remote_certificates().await {
+                Ok(certs) => certs.first().map(|der| fingerprint_of_der(der)),
+                Err(e) => {
+                    trace!(error = %e, "remote certificate not readable");
+                    None
+                }
+            },
+            None => None,
+        };
+        let remote = match remote {
+            Some(fp) => fp,
+            // Before the SCTP transport is exposed the DTLS layer has still
+            // verified the remote certificate against this SDP fingerprint,
+            // so it is the same value — just less direct.
+            None => {
+                let remote_sdp = self
+                    .pc
+                    .remote_description()
+                    .await
+                    .ok_or(TransportError::FingerprintUnavailable("no remote description"))?;
+                fingerprint_from_sdp(&remote_sdp.sdp)
+                    .ok_or(TransportError::FingerprintUnavailable("no a=fingerprint in remote SDP"))?
+            }
+        };
+        Ok((local, remote))
+    }
+
     /// Close the peer connection and stop its background driver.
     pub async fn close(&self) -> Result<()> {
         self.pc.close().await.context("closing peer connection")?;
@@ -588,10 +635,55 @@ impl PeerConnection {
     }
 }
 
+/// Canonical `"sha-256 aa:bb:..."` fingerprint of a DER certificate, the same
+/// value `a=fingerprint` carries for it.
+pub fn fingerprint_of_der(der: &[u8]) -> String {
+    let hash = Sha256::digest(der);
+    let hex: Vec<String> = hash.iter().map(|b| format!("{b:02x}")).collect();
+    format!("sha-256 {}", hex.join(":"))
+}
+
+/// Extract the first `a=fingerprint:` attribute of an SDP in canonical form
+/// (`"<algorithm> <hex:hex:...>"`, lowercase). `None` when there is none.
+pub fn fingerprint_from_sdp(sdp: &str) -> Option<String> {
+    sdp.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("a=fingerprint:")?;
+        let mut parts = rest.split_whitespace();
+        let algorithm = parts.next()?;
+        let value = parts.next()?;
+        Some(format!("{} {}", algorithm.to_ascii_lowercase(), value.to_ascii_lowercase()))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn sdp_fingerprint_is_extracted_and_canonicalised() {
+        let sdp = "v=0
+o=- 1 1 IN IP4 0.0.0.0
+s=-
+t=0 0
+a=fingerprint:SHA-256 AB:CD:EF:01
+m=application 9 UDP/DTLS/SCTP webrtc-datachannel
+";
+        assert_eq!(fingerprint_from_sdp(sdp).as_deref(), Some("sha-256 ab:cd:ef:01"));
+        assert_eq!(fingerprint_from_sdp("v=0
+s=-
+"), None);
+        assert_eq!(fingerprint_from_sdp("a=fingerprint:sha-256"), None);
+    }
+
+    #[test]
+    fn der_fingerprint_matches_sha256_form() {
+        let fp = fingerprint_of_der(b"not really a certificate");
+        assert!(fp.starts_with("sha-256 "));
+        let hex: Vec<&str> = fp["sha-256 ".len()..].split(':').collect();
+        assert_eq!(hex.len(), 32);
+        assert!(hex.iter().all(|h| h.len() == 2 && h.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())));
+    }
 
     #[test]
     fn channel_labels_roundtrip_and_are_distinct() {

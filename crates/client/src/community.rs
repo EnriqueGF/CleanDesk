@@ -67,6 +67,10 @@ pub async fn connect_community(mut config: ClientConfig, pinned_key: Option<Stri
 
     let host_key = resolved.record.pk.clone();
     let host_mac = resolved.record.mac.clone();
+    // The DTLS-bound proof must come from the key the record announced. A
+    // caller that already set an expectation (pinned key) keeps it: it is at
+    // least as strict.
+    config.expected_host_key.get_or_insert_with(|| host_key.clone());
 
     // 2. Direct endpoints.
     for ep in &resolved.endpoints {

@@ -212,6 +212,7 @@ fn footer(app: &CleanDeskApp, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 let community = app.network_mode().is_community();
                 let (text, color) = match (app.host_status(), community) {
+                    (HostStatus::Online, _) if app.hosted_by_service => (tr("Ready to connect (privileged, hosted by the service)"), theme::ONLINE),
                     (HostStatus::Online, true) => (tr("Ready to connect (community network)"), theme::ONLINE),
                     (HostStatus::Online, false) => (tr("Ready to connect (private server)"), theme::ONLINE),
                     (HostStatus::Connecting, true) => (tr("Announcing on the community network…"), theme::WARN),
@@ -1407,6 +1408,29 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
         }
         app.platform_checked_at = None;
     }
+
+    // Control privilegiado (ventanas de administrador y UAC).
+    let mut privileged = app.state.settings.read().privileged_control;
+    if ui
+        .checkbox(&mut privileged, tr("Privileged control: drive administrator windows and UAC prompts"))
+        .on_hover_text(tr("With the service installed, the service (LocalSystem) hosts and can show the UAC secure desktop; only unattended (password) connections are accepted then. Without the service, CleanDesk asks for elevation when it starts."))
+        .changed()
+    {
+        app.state.settings.write().privileged_control = privileged;
+        app.save_settings();
+        app.notice = Some(tr("Restart CleanDesk to apply privileged control.").into());
+    }
+    let priv_state = if app.hosted_by_service {
+        tr("Active: the service hosts as LocalSystem")
+    } else if app.elevated {
+        tr("Active: running elevated (administrator windows; UAC prompts need the service)")
+    } else if privileged {
+        tr("Not active in this run (elevation declined or pending restart)")
+    } else {
+        tr("Off: administrator windows cannot be controlled")
+    };
+    ui.label(egui::RichText::new(priv_state).size(11.0).color(theme::TEXT_MUTED));
+    ui.add_space(6.0);
 
     let installed = app.service_status != ServiceStatus::NotInstalled;
     let mut want_service = installed;

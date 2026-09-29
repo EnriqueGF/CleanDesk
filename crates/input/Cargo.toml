@@ -8,6 +8,7 @@ description = "Input capture + injection (Windows SendInput)."
 
 [dependencies]
 cleandesk-proto.workspace = true
+cleandesk-platform.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

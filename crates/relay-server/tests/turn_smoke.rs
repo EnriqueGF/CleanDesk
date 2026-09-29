@@ -5,8 +5,8 @@
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use cleandesk_relay_server::{
-    RelayConfig, RelayError, RelayHandle, DEFAULT_REALM, ENV_BIND, ENV_PORT, ENV_PUBLIC_IP,
-    ENV_USERS,
+    RelayConfig, RelayError, RelayHandle, DEFAULT_REALM, ENV_ALLOW_PRIVATE_PEERS, ENV_BIND,
+    ENV_PORT, ENV_PUBLIC_IP, ENV_USERS,
 };
 use tokio::net::UdpSocket;
 use turn::client::{Client, ClientConfig};
@@ -15,13 +15,18 @@ use webrtc_util::Conn;
 const USERS: &str = "alice:correct-horse";
 
 async fn start_relay() -> RelayHandle {
-    let cfg = RelayConfig::from_vars([
+    start_relay_with(&[]).await
+}
+
+async fn start_relay_with(extra: &[(&str, &str)]) -> RelayHandle {
+    let mut vars = vec![
         (ENV_BIND, "127.0.0.1"),
         (ENV_PORT, "0"),
         (ENV_PUBLIC_IP, "127.0.0.1"),
         (ENV_USERS, USERS),
-    ])
-    .expect("config");
+    ];
+    vars.extend_from_slice(extra);
+    let cfg = RelayConfig::from_vars(vars).expect("config");
     cleandesk_relay_server::run(cfg)
         .await
         .expect("relay starts")
@@ -72,6 +77,55 @@ async fn allocates_relayed_address_with_valid_credentials() {
 
     client.close().await.expect("client close");
     relay.shutdown().await.expect("relay shutdown");
+}
+
+/// Relay a datagram to a peer on loopback. With the default policy the peer
+/// is a private address and nothing arrives; with the opt-in it does.
+async fn relay_to_loopback_peer(allow_private: bool) -> bool {
+    let extra: &[(&str, &str)] = if allow_private {
+        &[(ENV_ALLOW_PRIVATE_PEERS, "1")]
+    } else {
+        &[]
+    };
+    let relay = start_relay_with(extra).await;
+    let server = relay.local_addr().to_string();
+    let peer = UdpSocket::bind("127.0.0.1:0").await.expect("peer socket");
+    let peer_addr = peer.local_addr().expect("peer addr");
+
+    let client = client(&server, "alice", "correct-horse").await;
+    let relayed = tokio::time::timeout(Duration::from_secs(10), client.allocate())
+        .await
+        .expect("allocate did not time out")
+        .expect("allocation succeeds");
+    // `send_to` on the relayed conn issues CreatePermission first.
+    let mut delivered = false;
+    let mut buf = [0u8; 64];
+    for _ in 0..5 {
+        let _ = relayed.send_to(b"through the relay", peer_addr).await;
+        if let Ok(Ok((n, _))) =
+            tokio::time::timeout(Duration::from_millis(400), peer.recv_from(&mut buf)).await
+        {
+            assert_eq!(&buf[..n], b"through the relay");
+            delivered = true;
+            break;
+        }
+    }
+    client.close().await.expect("client close");
+    relay.shutdown().await.expect("relay shutdown");
+    delivered
+}
+
+#[tokio::test]
+async fn private_peers_are_refused_by_default() {
+    assert!(
+        !relay_to_loopback_peer(false).await,
+        "a loopback peer must receive nothing unless the operator opted in"
+    );
+}
+
+#[tokio::test]
+async fn private_peers_relay_when_opted_in() {
+    assert!(relay_to_loopback_peer(true).await);
 }
 
 #[tokio::test]

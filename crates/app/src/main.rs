@@ -25,6 +25,8 @@
 //!   directory automatically, since they have no console).
 //! * `CLEANDESK_STUN_URLS`, `CLEANDESK_TURN_URLS`, `CLEANDESK_TURN_USER`,
 //!   `CLEANDESK_TURN_PASS` — ICE servers (see `cleandesk-transport`).
+//! * `CLEANDESK_UNATTENDED_FULL=1` — headless host: let unattended callers
+//!   request every permission (default: only the interactive set).
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
@@ -83,6 +85,9 @@ fn parse_args(args: impl IntoIterator<Item = String>, env: impl Fn(&str) -> Opti
             "--host" => opts.mode = Mode::Host,
             "--service" => opts.mode = Mode::Service,
             "--install-service" => opts.mode = Mode::InstallService,
+            // Set by the GUI when it relaunches itself elevated (privileged
+            // control); only prevents a relaunch loop.
+            "--elevated" => {}
             "--uninstall-service" => opts.mode = Mode::UninstallService,
             "--connect" => {
                 let raw = args.next().context("--connect requires a CleanDesk ID")?;
@@ -264,7 +269,7 @@ fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_override: Op
         }
     };
     rt.block_on(async move {
-        let approver: Arc<dyn Approver> = Arc::new(HeadlessApprover);
+        let approver: Arc<dyn Approver> = Arc::new(HeadlessApprover::from_env());
         let mut warned_gui = false;
         let mut warned_config = false;
         loop {
@@ -357,17 +362,47 @@ fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_override: Op
 }
 
 /// Approver for headless mode: accept ONLY unattended-authenticated requests
-/// (the host then verifies the password via challenge/response). Everything else
-/// is refused, because there is no human present to approve interactive access.
-struct HeadlessApprover;
+/// (the host then verifies the password via challenge/response, after the
+/// caller's key was bound to the DTLS session). Everything else is refused,
+/// because there is no human present to approve interactive access.
+///
+/// The decision here is *provisional*: nothing is granted until the
+/// challenge/response succeeds, and a caller can never receive more than it
+/// asked for. What it may ask for is bounded by `allowed`: the interactive
+/// set (screen, keyboard, mouse, clipboard) by default, everything (file
+/// transfer, remote restart, local input lock...) only when the owner opts in
+/// with `CLEANDESK_UNATTENDED_FULL=1`.
+struct HeadlessApprover {
+    allowed: Permissions,
+}
+
+/// Environment variable: `1` lets unattended callers request every permission
+/// instead of only the interactive set.
+const ENV_UNATTENDED_FULL: &str = "CLEANDESK_UNATTENDED_FULL";
+
+impl HeadlessApprover {
+    fn from_env() -> Self {
+        Self::from_vars(|k| std::env::var(k).ok())
+    }
+
+    fn from_vars(get: impl Fn(&str) -> Option<String>) -> Self {
+        let full = get(ENV_UNATTENDED_FULL).is_some_and(|v| matches!(v.trim(), "1" | "true" | "yes"));
+        let allowed = if full { Permissions::full() } else { Permissions::interactive() };
+        Self { allowed }
+    }
+}
 
 #[async_trait]
 impl Approver for HeadlessApprover {
     async fn on_request(&self, from: &DeviceInfo, requested: Permissions, auth: AuthKind) -> Decision {
         match auth {
             AuthKind::UnattendedPassword => {
+                let granted = requested & self.allowed;
+                if granted != requested {
+                    tracing::info!(from = %from.id, ?requested, ?granted, "narrowing unattended request (set {ENV_UNATTENDED_FULL}=1 to allow all)");
+                }
                 tracing::info!(from = %from.id, "accepting unattended request (pending auth)");
-                Decision::Accept(requested)
+                Decision::Accept(granted)
             }
             _ => {
                 tracing::warn!(from = %from.id, "refusing non-unattended request in headless mode");
@@ -430,6 +465,31 @@ mod tests {
         assert_eq!(o.mode, Mode::Connect(CleanDeskId::new(548_291_743).unwrap()));
         assert!(parse_args(args(&["--connect", "12"]), no_env).is_err());
         assert!(parse_args(args(&["--connect"]), no_env).is_err());
+    }
+
+    #[tokio::test]
+    async fn headless_approver_narrows_to_interactive_unless_opted_in() {
+        let dev = DeviceInfo {
+            id: CleanDeskId::new(548_291_743).unwrap(),
+            alias: None,
+            hostname: "x".into(),
+            os: "test".into(),
+            app_version: "0".into(),
+        };
+        let default = HeadlessApprover::from_vars(no_env);
+        match default.on_request(&dev, Permissions::full(), AuthKind::UnattendedPassword).await {
+            Decision::Accept(g) => assert_eq!(g, Permissions::interactive()),
+            Decision::Reject(_) => panic!("unattended must be accepted (pending auth)"),
+        }
+        assert!(matches!(
+            default.on_request(&dev, Permissions::full(), AuthKind::Interactive).await,
+            Decision::Reject(RejectReason::UserDeclined)
+        ));
+        let full = HeadlessApprover::from_vars(|k| (k == ENV_UNATTENDED_FULL).then(|| "1".to_string()));
+        match full.on_request(&dev, Permissions::full(), AuthKind::UnattendedPassword).await {
+            Decision::Accept(g) => assert_eq!(g, Permissions::full()),
+            Decision::Reject(_) => panic!("unattended must be accepted (pending auth)"),
+        }
     }
 
     #[test]

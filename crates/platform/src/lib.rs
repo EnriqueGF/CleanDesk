@@ -11,12 +11,17 @@
 //! * [`update`] — self-update from GitHub Releases: check, download with
 //!   SHA-256 verification against the published `SHA256SUMS`, and hand the
 //!   MSI to `msiexec`.
+//! * [`elevation`] / [`desktop`] — privileged control: run elevated when the
+//!   service is not available, and follow the input desktop (UAC) from the
+//!   capture and input threads.
 //! * [`presence`] — a lock file that tells the service's host that the GUI is
 //!   running, so exactly one of them holds the device's registration.
 //!
 //! Only Windows has a real implementation; other platforms get stubs that
 //! return [`PlatformError::Unsupported`] so the GUI can grey the options out.
 
+pub mod desktop;
+pub mod elevation;
 pub mod presence;
 pub mod single_instance;
 pub mod service;
