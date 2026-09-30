@@ -27,7 +27,7 @@
 //! Nothing follows any terminal state — attempting a transition that is not
 //! in this graph returns [`CoreError::IllegalTransition`].
 
-use cleandesk_proto::{
+use rotodesk_proto::{
     session::{DeviceInfo, SessionId, SessionStats},
     Permissions, QualityProfile,
 };
@@ -295,11 +295,11 @@ impl PermissionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cleandesk_proto::CleanDeskId;
+    use rotodesk_proto::RotoDeskId;
 
     fn peer() -> DeviceInfo {
         DeviceInfo {
-            id: CleanDeskId::new(548_291_743).unwrap(),
+            id: RotoDeskId::new(548_291_743).unwrap(),
             alias: None,
             hostname: "REMOTE-PC".into(),
             os: "Windows 11 Pro".into(),

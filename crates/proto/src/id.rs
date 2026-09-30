@@ -1,4 +1,4 @@
-//! The CleanDesk ID: a stable, human-shareable numeric device identifier.
+//! The RotoDesk ID: a stable, human-shareable numeric device identifier.
 //!
 //! Rendered grouped in threes for humans (`548 291 743`) but stored as a plain
 //! integer. IDs are 9 digits by default, giving ~900 million addressable
@@ -7,17 +7,17 @@
 use crate::error::ProtoError;
 use serde::{Deserialize, Serialize};
 
-/// Number of digits in a freshly generated CleanDesk ID.
+/// Number of digits in a freshly generated RotoDesk ID.
 pub const ID_DIGITS: u32 = 9;
 
 const MIN_ID: u64 = 100_000_000; // smallest 9-digit number
 const MAX_ID: u64 = 9_999_999_999; // largest 10-digit number
 
-/// A unique CleanDesk device identifier.
+/// A unique RotoDesk device identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct CleanDeskId(u64);
+pub struct RotoDeskId(u64);
 
-impl CleanDeskId {
+impl RotoDeskId {
     /// Build an ID from a raw integer, validating the digit range.
     pub fn new(value: u64) -> Result<Self, ProtoError> {
         if (MIN_ID..=MAX_ID).contains(&value) {
@@ -32,7 +32,7 @@ impl CleanDeskId {
     /// Generate a fresh 9-digit ID from a caller-supplied random source.
     ///
     /// The randomness is injected so this crate stays dependency-light and the
-    /// caller controls the CSPRNG (see `cleandesk-crypto`).
+    /// caller controls the CSPRNG (see `rotodesk-crypto`).
     pub fn generate(rng: impl FnOnce() -> u64) -> Self {
         let span = MAX_ID_9 - MIN_ID + 1;
         Self(MIN_ID + (rng() % span))
@@ -58,7 +58,7 @@ impl CleanDeskId {
 
 const MAX_ID_9: u64 = 999_999_999;
 
-impl core::fmt::Display for CleanDeskId {
+impl core::fmt::Display for RotoDeskId {
     /// Groups digits in threes from the left: `548 291 743`.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let s = self.0.to_string();
@@ -73,7 +73,7 @@ impl core::fmt::Display for CleanDeskId {
     }
 }
 
-impl core::str::FromStr for CleanDeskId {
+impl core::str::FromStr for RotoDeskId {
     type Err = ProtoError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::parse(s)
@@ -86,25 +86,25 @@ mod tests {
 
     #[test]
     fn formats_grouped() {
-        let id = CleanDeskId::new(548_291_743).unwrap();
+        let id = RotoDeskId::new(548_291_743).unwrap();
         assert_eq!(id.to_string(), "548 291 743");
     }
 
     #[test]
     fn parses_grouped_and_dashed() {
-        assert_eq!(CleanDeskId::parse("548 291 743").unwrap().value(), 548_291_743);
-        assert_eq!(CleanDeskId::parse("548-291-743").unwrap().value(), 548_291_743);
+        assert_eq!(RotoDeskId::parse("548 291 743").unwrap().value(), 548_291_743);
+        assert_eq!(RotoDeskId::parse("548-291-743").unwrap().value(), 548_291_743);
     }
 
     #[test]
     fn rejects_out_of_range() {
-        assert!(CleanDeskId::new(42).is_err());
-        assert!(CleanDeskId::new(999).is_err());
+        assert!(RotoDeskId::new(42).is_err());
+        assert!(RotoDeskId::new(999).is_err());
     }
 
     #[test]
     fn generate_is_in_range() {
-        let id = CleanDeskId::generate(|| 123_456_789_000);
+        let id = RotoDeskId::generate(|| 123_456_789_000);
         assert!((MIN_ID..=MAX_ID_9).contains(&id.value()));
     }
 }

@@ -1,6 +1,6 @@
 //! GUI presence lock.
 //!
-//! When the CleanDesk Service is installed, *two* programs could act as the
+//! When the RotoDesk Service is installed, *two* programs could act as the
 //! host for the same identity: the service's headless helper and the GUI the
 //! user opened. Only one may hold the server registration at a time (the
 //! server replaces the older one), and the GUI is the better host while it is
@@ -46,14 +46,14 @@ pub fn gui_is_running(data_dir: &Path) -> bool {
     let Ok(pid) = text.trim().parse::<u32>() else {
         return false;
     };
-    pid != std::process::id() && process_alive(pid) && process_is_cleandesk(pid)
+    pid != std::process::id() && process_alive(pid) && process_is_rotodesk(pid)
 }
 
-/// Does `pid` run a CleanDesk executable? The lock file is just a number
+/// Does `pid` run a RotoDesk executable? The lock file is just a number
 /// any local process can write; a PID that belongs to something else (say,
 /// `4`, the System process) must not keep the headless host standing by.
 #[cfg(windows)]
-pub fn process_is_cleandesk(pid: u32) -> bool {
+pub fn process_is_rotodesk(pid: u32) -> bool {
     use windows::core::PWSTR;
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
@@ -83,7 +83,7 @@ pub fn process_is_cleandesk(pid: u32) -> bool {
 }
 
 #[cfg(not(windows))]
-pub fn process_is_cleandesk(_pid: u32) -> bool {
+pub fn process_is_rotodesk(_pid: u32) -> bool {
     true
 }
 
@@ -114,7 +114,7 @@ mod tests {
     use super::*;
 
     fn temp() -> PathBuf {
-        let p = std::env::temp_dir().join(format!("cleandesk-presence-{}-{}", std::process::id(), rand_suffix()));
+        let p = std::env::temp_dir().join(format!("rotodesk-presence-{}-{}", std::process::id(), rand_suffix()));
         fs::create_dir_all(&p).unwrap();
         p
     }
@@ -149,14 +149,14 @@ mod tests {
     #[test]
     fn current_process_is_alive() {
         assert!(process_alive(std::process::id()));
-        assert!(process_is_cleandesk(std::process::id()), "our own image name matches itself");
+        assert!(process_is_rotodesk(std::process::id()), "our own image name matches itself");
     }
 
     #[cfg(windows)]
     #[test]
     fn a_lock_naming_a_foreign_process_is_ignored() {
         let dir = temp();
-        // PID 4 is the System process: alive, but not CleanDesk.
+        // PID 4 is the System process: alive, but not RotoDesk.
         fs::write(dir.join(LOCK_FILE), "4").unwrap();
         assert!(!gui_is_running(&dir));
         let _ = fs::remove_dir_all(dir);

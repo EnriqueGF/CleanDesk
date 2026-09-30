@@ -1,5 +1,5 @@
 [package]
-name = "cleandesk-gui"
+name = "rotodesk-gui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,13 +7,13 @@ license.workspace = true
 description = "egui/eframe desktop UI: main window + session viewer."
 
 [dependencies]
-cleandesk-proto.workspace = true
-cleandesk-core.workspace = true
-cleandesk-client.workspace = true
-cleandesk-host.workspace = true
-cleandesk-codec.workspace = true
-cleandesk-platform.workspace = true
-cleandesk-crypto.workspace = true
+rotodesk-proto.workspace = true
+rotodesk-core.workspace = true
+rotodesk-client.workspace = true
+rotodesk-host.workspace = true
+rotodesk-codec.workspace = true
+rotodesk-platform.workspace = true
+rotodesk-crypto.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true
@@ -23,8 +23,8 @@ eframe = "0.32.3"
 egui = "0.32.3"
 sys-locale = "0.3.2"
 image.workspace = true
-cleandesk-discovery.workspace = true
-cleandesk-transport.workspace = true
+rotodesk-discovery.workspace = true
+rotodesk-transport.workspace = true
 # System tray icon (Windows message loop is provided by eframe/winit).
 tray-icon = { version = "0.25.1", default-features = false }
 # To reach the native window from the tray thread (show/raise while hidden).

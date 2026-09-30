@@ -4,15 +4,15 @@
 //! configured downloads directory, and the viewer sees `FileDone` only once
 //! the host verified the byte count.
 
-use cleandesk_client::{connect_community, ClientConfig, ClientEvent};
-use cleandesk_crypto::identity::Identity;
-use cleandesk_host::{serve_community, AutoAccept, CommunityOptions, HostConfig};
-use cleandesk_proto::{id::CleanDeskId, permissions::Permissions, quality::QualityProfile, session::DeviceInfo};
+use rotodesk_client::{connect_community, ClientConfig, ClientEvent};
+use rotodesk_crypto::identity::Identity;
+use rotodesk_host::{serve_community, AutoAccept, CommunityOptions, HostConfig};
+use rotodesk_proto::{id::RotoDeskId, permissions::Permissions, quality::QualityProfile, session::DeviceInfo};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-fn dev_info(id: CleanDeskId, hostname: &str) -> DeviceInfo {
+fn dev_info(id: RotoDeskId, hostname: &str) -> DeviceInfo {
     DeviceInfo { id, alias: None, hostname: hostname.to_string(), os: "test".into(), app_version: "0".into() }
 }
 
@@ -21,7 +21,7 @@ fn scratch_dir(tag: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!("cleandesk-{tag}-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("rotodesk-{tag}-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

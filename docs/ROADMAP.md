@@ -1,4 +1,4 @@
-# CleanDesk — Roadmap
+# RotoDesk — Roadmap
 
 Based on the definition sheet (§30 MVP, §31 later). Status as of the project's
 start date.
@@ -6,7 +6,7 @@ start date.
 ## Milestone 0 — Foundations ✅ (done)
 
 - [x] Cargo workspace with 13 crates and release profiles.
-- [x] `proto`: CleanDesk ID, permissions, quality profiles,
+- [x] `proto`: RotoDesk ID, permissions, quality profiles,
       signaling/session/media messages, length-delimited framing. **Tests green.**
 - [x] `crypto`: Ed25519 identity, Argon2id, tokens, challenge-response. **Tests green.**
 - [x] `signal-server`: registration, ID resolution, signaling relay. Compiles.

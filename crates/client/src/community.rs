@@ -8,14 +8,14 @@
 
 use crate::{connect_over, ClientConfig, ClientSession};
 use anyhow::{bail, Context, Result};
-use cleandesk_discovery::{
+use rotodesk_discovery::{
     dht::DhtNode,
     direct::{self, DirectLink},
     nostr_link::{self, NostrLink},
     Resolver, COMMUNITY_TURN_PASS, COMMUNITY_TURN_USER,
 };
-use cleandesk_proto::message::SignalMessage;
-use cleandesk_transport::{QueueOut, SignalOut, TurnServer};
+use rotodesk_proto::message::SignalMessage;
+use rotodesk_transport::{QueueOut, SignalOut, TurnServer};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -24,7 +24,7 @@ use tracing::{debug, info, warn};
 /// Overall budget for finding the host.
 pub const RESOLVE_TIMEOUT: Duration = Duration::from_secs(25);
 
-/// Open a session to `config.target` without a CleanDesk Server.
+/// Open a session to `config.target` without a RotoDesk Server.
 ///
 /// `pinned_key` is the host's key remembered from a previous session; a
 /// different key for the same ID is refused.
@@ -77,9 +77,9 @@ pub async fn connect_community(mut config: ClientConfig, pinned_key: Option<Stri
     // range, and only LAN addresses when the hint came from mDNS.
     for ep in &resolved.endpoints {
         let acceptable = if resolved.via == "LAN" {
-            cleandesk_discovery::addr::is_lan(ep.ip())
+            rotodesk_discovery::addr::is_lan(ep.ip())
         } else {
-            cleandesk_discovery::addr::is_dialable(ep.ip())
+            rotodesk_discovery::addr::is_dialable(ep.ip())
         };
         if !acceptable {
             debug!(%ep, via = resolved.via, "skipping endpoint outside the acceptable address class");

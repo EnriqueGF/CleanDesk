@@ -1,25 +1,31 @@
-# CleanDesk
+# RotoDesk
 
-**CleanDesk** is a fast, lightweight and secure remote desktop platform written
+<p align="center"><img src="crates/gui/assets/logo.png" alt="RotoDesk" width="140"></p>
+
+**RotoDesk** is a fast, lightweight and secure remote desktop platform written
 in **Rust**. It lets you connect to another machine using a unique identifier
-(**CleanDesk ID**) to view its screen, control keyboard and mouse, transfer
+(**RotoDesk ID**) to view its screen, control keyboard and mouse, transfer
 files and provide support — using **P2P connections** whenever possible and a
 **relay** when it is not.
 
-> **Origin (original work):** CleanDesk is an **independent, in-house**
+> **Origin (original work):** RotoDesk is an **independent, in-house**
 > implementation, built from its [definition sheet](docs/SPEC.md) on top of
 > standard, public-domain protocols and techniques (WebRTC/ICE/STUN/TURN, DXGI
 > Desktop Duplication, SendInput). Identity, protocol, IDs and ports are
-> CleanDesk's own.
+> RotoDesk's own.
+
+The monitor mascot adapts **Roto2**, by **Forocoches**, under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+[Source and adaptation credits](crates/gui/assets/BRAND.txt).
 
 ---
 
 
 <p align="center">
-  <img src="docs/screenshots/main-window.png" alt="CleanDesk main window" width="820">
+  <img src="docs/screenshots/main-window.png" alt="RotoDesk main window" width="820">
 </p>
 
-## Why CleanDesk
+## Why RotoDesk
 
 - **Peer-to-peer, no servers to run.** Type an ID and connect. Machines find
   each other on the LAN (mDNS) or through the BitTorrent DHT, exchange the
@@ -41,11 +47,11 @@ files and provide support — using **P2P connections** whenever possible and a
 - **Works behind NAT.** UPnP port mapping when the router allows it, STUN hole
   punching, and community TURN relays anyone can contribute with one
   environment variable.
-- **Private mode for companies.** Point every client at your own CleanDesk
+- **Private mode for companies.** Point every client at your own RotoDesk
   Server and Relay and nothing leaves your network.
 - **Multi-language.** English by default, follows the system language (Spanish
   included), switchable in Settings.
-- **Lives in the tray.** Closing the window minimizes CleanDesk to the system
+- **Lives in the tray.** Closing the window minimizes RotoDesk to the system
   tray and the host keeps serving; quit from the tray menu (configurable).
   Launching it again just brings the existing window back (single instance per
   data directory).
@@ -58,7 +64,7 @@ files and provide support — using **P2P connections** whenever possible and a
   permissions the host granted.
 - **Privileged control.** With the service installed, viewers can drive
   administrator windows and UAC prompts (the service hosts as LocalSystem and
-  follows the secure desktop); without it, CleanDesk can run elevated.
+  follows the secure desktop); without it, RotoDesk can run elevated.
 - **Keeps itself up to date.** Checks GitHub Releases, downloads the MSI,
   verifies its SHA-256 against the published checksums and upgrades in place.
 - **Wake-on-LAN.** Hosts announce their MAC address with their signed record;
@@ -74,7 +80,7 @@ Functional. **Community mode by default**: nobody needs to run any servers.
 Each machine announces itself, signed, on the local network (mDNS) and in the
 BitTorrent DHT; signaling travels through public Nostr relays, end-to-end
 encrypted; and UPnP + STUN + community relays get through NAT. The **private
-server mode** (CleanDesk Server + Relay) remains available for businesses.
+server mode** (RotoDesk Server + Relay) remains available for businesses.
 See [docs/RUN.md](docs/RUN.md) to try it, [docs/ROADMAP.md](docs/ROADMAP.md)
 for the per-milestone detail and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
 
@@ -103,7 +109,7 @@ for the per-milestone detail and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) fo
 
 ```
                     ┌──────────────────────┐
-                    │   CleanDesk Server    │  ID registration + resolution
+                    │   RotoDesk Server    │  ID registration + resolution
                     │  (WSS signaling)      │  + WebRTC signaling relay
                     └──────────┬───────────┘
               signaling        │        signaling
@@ -114,7 +120,7 @@ for the per-milestone detail and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) fo
  │  (viewer)    │      whenever possible        │  (host)      │
  └──────┬───────┘                              └──────┬───────┘
         │           ┌────────────────────┐            │
-        └──────────►│  CleanDesk Relay   │◄───────────┘
+        └──────────►│  RotoDesk Relay   │◄───────────┘
           fallback  │  (TURN, end-to-end │  fallback
                     │   encrypted)       │
                     └────────────────────┘
@@ -130,8 +136,8 @@ Requirements: stable Rust (1.85+) and Visual Studio Build Tools (MSVC).
 ```powershell
 cargo build --workspace            # build everything
 cargo test  --workspace            # tests
-cargo run -p cleandesk-signal-server   # start the signaling server
-cargo run -p cleandesk-app             # start the app (GUI)
+cargo run -p rotodesk-signal-server   # start the signaling server
+cargo run -p rotodesk-app             # start the app (GUI)
 ```
 
 ## Security
@@ -142,4 +148,5 @@ threat model in [docs/SECURITY.md](docs/SECURITY.md).
 
 ## License
 
-MIT OR Apache-2.0.
+Application code: MIT OR Apache-2.0. The Roto2 mascot adaptation uses
+CC BY-SA 4.0; the embedded Barlow Condensed font uses SIL OFL 1.1.

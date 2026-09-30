@@ -1,8 +1,8 @@
-//! CleanDesk Server — signaling / rendezvous backend (library).
+//! RotoDesk Server — signaling / rendezvous backend (library).
 //!
 //! Responsibilities (spec §19):
 //! * Accept WebSocket connections from clients.
-//! * Register devices and resolve CleanDesk IDs.
+//! * Register devices and resolve RotoDesk IDs.
 //! * Route connection requests (Accept/Reject) between caller and callee.
 //! * Relay opaque WebRTC signaling (SDP + ICE) end-to-end between peers.
 //!
@@ -41,8 +41,8 @@ pub mod state;
 
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use cleandesk_proto::{
-    id::CleanDeskId,
+use rotodesk_proto::{
+    id::RotoDeskId,
     message::{register_proof_message, AuthKind, ErrorCode, SignalMessage},
     session::DeviceInfo,
     Version, PROTOCOL_VERSION,
@@ -132,7 +132,7 @@ enum Phase {
     /// `Register` accepted; waiting for the signed challenge.
     Challenged { device: DeviceInfo, public_key: String, nonce: Vec<u8> },
     /// Fully registered under this ID.
-    Registered(CleanDeskId),
+    Registered(RotoDeskId),
 }
 
 struct Conn {
@@ -293,7 +293,7 @@ impl Conn {
         }
     }
 
-    fn registered_id(&self) -> Option<CleanDeskId> {
+    fn registered_id(&self) -> Option<RotoDeskId> {
         match self.phase {
             Phase::Registered(id) => Some(id),
             _ => None,
@@ -305,7 +305,7 @@ impl Conn {
 fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn) -> Flow {
     match msg {
         SignalMessage::Register { mut device, protocol, public_key } => {
-            cleandesk_proto::text::sanitize_device_info(&mut device);
+            rotodesk_proto::text::sanitize_device_info(&mut device);
             if !protocol.compatible_with(PROTOCOL_VERSION) {
                 conn.reply(version_mismatch(protocol));
                 return Flow::Close;
@@ -324,8 +324,8 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
                 return Flow::Close;
             }
             // The claimed ID must be the one derived from the key. This is
-            // what makes CleanDesk IDs unforgeable without the private key.
-            let derived = match cleandesk_crypto::identity::derive_id_from_public_key_b64(&public_key) {
+            // what makes RotoDesk IDs unforgeable without the private key.
+            let derived = match rotodesk_crypto::identity::derive_id_from_public_key_b64(&public_key) {
                 Ok(id) => id,
                 Err(e) => {
                     conn.reply(err(ErrorCode::BadRequest, &format!("invalid public key: {e}")));
@@ -337,7 +337,7 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
                 conn.reply(err(ErrorCode::Unauthorized, "id does not match public key"));
                 return conn.strike();
             }
-            let nonce = cleandesk_crypto::identity::random_bytes(32);
+            let nonce = rotodesk_crypto::identity::random_bytes(32);
             conn.reply(SignalMessage::RegisterChallenge { nonce: B64.encode(&nonce) });
             conn.phase = Phase::Challenged { device, public_key, nonce };
             Flow::Continue
@@ -351,7 +351,7 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
                 return conn.strike();
             };
             let msg = register_proof_message(&nonce);
-            if cleandesk_crypto::identity::verify_b64_sig(&public_key, &msg, &signature).is_err() {
+            if rotodesk_crypto::identity::verify_b64_sig(&public_key, &msg, &signature).is_err() {
                 warn!(id = %device.id, "registration proof failed");
                 conn.reply(err(ErrorCode::Unauthorized, "bad registration proof"));
                 return Flow::Close;
@@ -396,7 +396,7 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
             // itself under a different ID than the one it registered, nor
             // with names that break the dialog or the logs.
             from.id = me;
-            cleandesk_proto::text::sanitize_device_info(&mut from);
+            rotodesk_proto::text::sanitize_device_info(&mut from);
             let session = Uuid::new_v4();
             state.open_session(session, me, target);
             let auth = if auth_proof.is_some() {
@@ -516,5 +516,5 @@ fn version_mismatch(remote: Version) -> SignalMessage {
 
 /// Log the configuration once at startup (used by the binary).
 pub fn log_banner(addr: SocketAddr) {
-    info!(%addr, version = %PROTOCOL_VERSION, max_message = MAX_WS_MESSAGE_BYTES, "CleanDesk Server listening");
+    info!(%addr, version = %PROTOCOL_VERSION, max_message = MAX_WS_MESSAGE_BYTES, "RotoDesk Server listening");
 }

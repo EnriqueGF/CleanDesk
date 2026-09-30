@@ -1,6 +1,6 @@
-//! CleanDesk Relay binary — a thin wrapper around [`cleandesk_relay_server::run`].
+//! RotoDesk Relay binary — a thin wrapper around [`rotodesk_relay_server::run`].
 //!
-//! Configuration comes from `CLEANDESK_RELAY_*` environment variables (see the
+//! Configuration comes from `ROTODESK_RELAY_*` environment variables (see the
 //! library docs). Runs until Ctrl-C, then closes the TURN server so live
 //! allocations are released.
 //!
@@ -9,8 +9,8 @@
 //! what clients require before using a relay they found there.
 
 use anyhow::{Context, Result};
-use cleandesk_crypto::identity::Identity;
-use cleandesk_relay_server::{
+use rotodesk_crypto::identity::Identity;
+use rotodesk_relay_server::{
     RelayConfig, ENV_BIND, ENV_COMMUNITY, ENV_MAX_PORT, ENV_MIN_PORT, ENV_PORT, ENV_PUBLIC_IP,
     ENV_REALM, ENV_USERS,
 };
@@ -31,13 +31,13 @@ async fn main() -> Result<()> {
              (default 0.0.0.0), {ENV_PUBLIC_IP} (public IP advertised to peers), {ENV_REALM} \
              (default {}), {ENV_USERS}=user:pass[,user:pass...] (required), \
              {ENV_MIN_PORT}/{ENV_MAX_PORT} (optional relay port range), {ENV_COMMUNITY}=1 \n             (community mode: public credentials + DHT announcement)",
-            cleandesk_proto::DEFAULT_RELAY_PORT,
-            cleandesk_relay_server::DEFAULT_REALM,
+            rotodesk_proto::DEFAULT_RELAY_PORT,
+            rotodesk_relay_server::DEFAULT_REALM,
         )
     })?;
     // Usernames only: passwords are never logged.
     tracing::info!(
-        version = %cleandesk_proto::PROTOCOL_VERSION,
+        version = %rotodesk_proto::PROTOCOL_VERSION,
         bind = %config.bind,
         port = config.port,
         public_ip = %config.public_ip,
@@ -47,14 +47,14 @@ async fn main() -> Result<()> {
         community = config.community,
         allow_private_peers = config.allow_private_peers,
         quotas = ?config.quotas,
-        "CleanDesk Relay configuration"
+        "RotoDesk Relay configuration"
     );
 
     let community = config.community;
     let port = config.port;
     let public_ip = config.public_ip;
     let identity_path = config.identity_path.clone();
-    let handle = cleandesk_relay_server::run(config)
+    let handle = rotodesk_relay_server::run(config)
         .await
         .context("starting relay")?;
 
@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
         let identity = load_or_create_identity(&identity_path)
             .with_context(|| format!("relay identity at {}", identity_path.display()))?;
         tracing::info!(fingerprint = %identity.fingerprint(), "relay identity");
-        match cleandesk_discovery::dht::DhtNode::start_server(port.wrapping_add(1)) {
+        match rotodesk_discovery::dht::DhtNode::start_server(port.wrapping_add(1)) {
             Ok(node) => Some(tokio::spawn(async move {
                 node.ready().await;
                 loop {
@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
                         node.public_address()
                             .await
                             .map(|a| IpAddr::V4(*a.ip()))
-                            .filter(|ip| cleandesk_relay_server::guard::is_peer_allowed(*ip, false))
+                            .filter(|ip| rotodesk_relay_server::guard::is_peer_allowed(*ip, false))
                     } else {
                         Some(public_ip)
                     };
@@ -122,7 +122,14 @@ fn load_or_create_identity(path: &Path) -> Result<Identity> {
         let pem = std::fs::read_to_string(path).context("reading identity")?;
         return Identity::from_pem(&pem).context("parsing identity PEM");
     }
-    let identity = Identity::generate();
+    // Preserve the community relay's pinned identity across the product rename.
+    let legacy = path.with_file_name(format!("{}-relay-identity.pem", rotodesk_proto::compat::LEGACY_BINARY));
+    let identity = if path == Path::new(rotodesk_relay_server::DEFAULT_IDENTITY_PATH) && legacy.exists() {
+        Identity::from_pem(&std::fs::read_to_string(&legacy).context("reading previous relay identity")?)
+            .context("parsing previous relay identity")?
+    } else {
+        Identity::generate()
+    };
     let pem = identity.to_pem().context("encoding identity")?;
     write_private(path, pem.as_bytes()).context("writing identity")?;
     tracing::info!(path = %path.display(), "generated a new relay identity");

@@ -1,5 +1,5 @@
 [package]
-name = "cleandesk-host"
+name = "rotodesk-host"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,20 +7,20 @@ license.workspace = true
 description = "Host role runtime: capture -> encode -> send; receive & inject input."
 
 [dependencies]
-cleandesk-proto.workspace = true
+rotodesk-proto.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 futures.workspace = true
-cleandesk-core.workspace = true
-cleandesk-capture.workspace = true
-cleandesk-codec.workspace = true
-cleandesk-input.workspace = true
-cleandesk-transport.workspace = true
-cleandesk-crypto.workspace = true
-cleandesk-discovery.workspace = true
+rotodesk-core.workspace = true
+rotodesk-capture.workspace = true
+rotodesk-codec.workspace = true
+rotodesk-input.workspace = true
+rotodesk-transport.workspace = true
+rotodesk-crypto.workspace = true
+rotodesk-discovery.workspace = true
 uuid.workspace = true
 bytes.workspace = true
 directories.workspace = true

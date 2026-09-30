@@ -1,8 +1,8 @@
 //! Trusted-device registry (spec §10): "permitir siempre, recordar permisos,
 //! no pedir confirmación, permitir desatendido".
 
-use cleandesk_crypto::token::{verify_any, SessionToken};
-use cleandesk_proto::CleanDeskId;
+use rotodesk_crypto::token::{verify_any, SessionToken};
+use rotodesk_proto::RotoDeskId;
 use serde::{Deserialize, Serialize};
 
 /// The trust policy for one previously-approved device, plus any bearer
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// privileges than it was saved with, never more.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrustedDevice {
-    pub id: CleanDeskId,
+    pub id: RotoDeskId,
     /// Always allow connections from this device without a per-request prompt.
     #[serde(default)]
     pub always_allow: bool,
@@ -35,7 +35,7 @@ pub struct TrustedDevice {
 impl TrustedDevice {
     /// A newly trusted device with every policy flag off — the caller opts
     /// each one in explicitly.
-    pub fn new(id: CleanDeskId) -> Self {
+    pub fn new(id: RotoDeskId) -> Self {
         Self {
             id,
             always_allow: false,
@@ -71,15 +71,15 @@ pub struct TrustRegistry {
 }
 
 impl TrustRegistry {
-    pub fn is_trusted(&self, id: CleanDeskId) -> bool {
+    pub fn is_trusted(&self, id: RotoDeskId) -> bool {
         self.get(id).is_some()
     }
 
-    pub fn get(&self, id: CleanDeskId) -> Option<&TrustedDevice> {
+    pub fn get(&self, id: RotoDeskId) -> Option<&TrustedDevice> {
         self.devices.iter().find(|d| d.id == id)
     }
 
-    pub fn get_mut(&mut self, id: CleanDeskId) -> Option<&mut TrustedDevice> {
+    pub fn get_mut(&mut self, id: RotoDeskId) -> Option<&mut TrustedDevice> {
         self.devices.iter_mut().find(|d| d.id == id)
     }
 
@@ -91,7 +91,7 @@ impl TrustRegistry {
         }
     }
 
-    pub fn remove(&mut self, id: CleanDeskId) -> Option<TrustedDevice> {
+    pub fn remove(&mut self, id: RotoDeskId) -> Option<TrustedDevice> {
         let idx = self.devices.iter().position(|d| d.id == id)?;
         Some(self.devices.remove(idx))
     }
@@ -99,19 +99,19 @@ impl TrustRegistry {
     // Policy lookups (spec §10). Each defaults to `false` for an untrusted or
     // unknown device, so callers never need a separate `is_trusted` guard.
 
-    pub fn always_allow(&self, id: CleanDeskId) -> bool {
+    pub fn always_allow(&self, id: RotoDeskId) -> bool {
         self.get(id).is_some_and(|d| d.always_allow)
     }
 
-    pub fn remember_permissions(&self, id: CleanDeskId) -> bool {
+    pub fn remember_permissions(&self, id: RotoDeskId) -> bool {
         self.get(id).is_some_and(|d| d.remember_permissions)
     }
 
-    pub fn no_confirm(&self, id: CleanDeskId) -> bool {
+    pub fn no_confirm(&self, id: RotoDeskId) -> bool {
         self.get(id).is_some_and(|d| d.no_confirm)
     }
 
-    pub fn allow_unattended(&self, id: CleanDeskId) -> bool {
+    pub fn allow_unattended(&self, id: RotoDeskId) -> bool {
         self.get(id).is_some_and(|d| d.allow_unattended)
     }
 }
@@ -120,8 +120,8 @@ impl TrustRegistry {
 mod tests {
     use super::*;
 
-    fn id() -> CleanDeskId {
-        CleanDeskId::new(548_291_743).unwrap()
+    fn id() -> RotoDeskId {
+        RotoDeskId::new(548_291_743).unwrap()
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Single-instance guard.
 //!
-//! One CleanDesk per data directory: a named Win32 mutex derived from the
+//! One RotoDesk per data directory: a named Win32 mutex derived from the
 //! directory path is held for the process lifetime. A second launch finds
 //! the mutex taken, pokes a named *event* so the running instance brings its
 //! window back (it may be hidden in the tray), and exits.
@@ -19,7 +19,7 @@ pub fn instance_key(data_dir: &Path, role: &str) -> String {
     let mut h = DefaultHasher::new();
     data_dir.to_string_lossy().to_lowercase().hash(&mut h);
     role.hash(&mut h);
-    format!("CleanDesk-{role}-{:016x}", h.finish())
+    format!("RotoDesk-{role}-{:016x}", h.finish())
 }
 
 /// Outcome of [`acquire`].
@@ -172,7 +172,7 @@ mod tests {
         let c = instance_key(Path::new("C:\\Data\\Dir"), "host");
         assert_eq!(a, b);
         assert_ne!(a, c);
-        assert!(a.starts_with("CleanDesk-gui-"));
+        assert!(a.starts_with("RotoDesk-gui-"));
     }
 
     #[test]

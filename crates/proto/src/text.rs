@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn device_info_fields_are_bounded() {
         let mut info = crate::session::DeviceInfo {
-            id: crate::CleanDeskId::new(123_456_789).unwrap(),
+            id: crate::RotoDeskId::new(123_456_789).unwrap(),
             alias: Some("\u{200B}".into()),
             hostname: "h".repeat(500),
             os: "Win\r\ndows".into(),

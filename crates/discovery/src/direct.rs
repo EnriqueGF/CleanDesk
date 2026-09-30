@@ -1,7 +1,7 @@
 //! Direct TCP signaling link between a viewer and a reachable host.
 //!
 //! Frames are `u32 LE length + JSON SignalMessage` (the same JSON the
-//! CleanDesk Server speaks), so host/viewer code reuses every message type.
+//! RotoDesk Server speaks), so host/viewer code reuses every message type.
 //!
 //! # Handshake (mutual proof of identity)
 //!
@@ -18,7 +18,7 @@
 //! prefix (never the server registration one) and covers the nonce, **both**
 //! public keys and the signer's role. So a signature made here is useless
 //! anywhere else: an attacker who connects to a host's direct port cannot
-//! relay a CleanDesk Server's registration nonce to it and use the host's
+//! relay a RotoDesk Server's registration nonce to it and use the host's
 //! answer to register the host's ID on that server, nor replay one side's
 //! proof to the other.
 //!
@@ -32,8 +32,8 @@
 
 use crate::{DiscoveryError, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use cleandesk_crypto::identity::{derive_id_from_public_key_b64, random_bytes, verify_b64_sig, Identity};
-use cleandesk_proto::{frame::FrameCodec, message::SignalMessage, session::DeviceInfo, CleanDeskId, PROTOCOL_VERSION};
+use rotodesk_crypto::identity::{derive_id_from_public_key_b64, random_bytes, verify_b64_sig, Identity};
+use rotodesk_proto::{frame::FrameCodec, message::SignalMessage, session::DeviceInfo, RotoDeskId, PROTOCOL_VERSION};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -63,8 +63,8 @@ pub const DIAL_TIMEOUT: Duration = Duration::from_secs(4);
 const MAX_NONCE: usize = 64;
 
 /// Domain-separation prefix of the direct handshake proof. Deliberately
-/// distinct from the server registration prefix (`cleandesk-register-v1:`).
-pub const DIRECT_PROOF_PREFIX: &[u8] = b"cleandesk-direct-v1:";
+/// distinct from the server registration prefix (`rotodesk-register-v1:`).
+pub const DIRECT_PROOF_PREFIX: &[u8] = rotodesk_proto::compat::DIRECT_PROOF_PREFIX;
 
 /// Which side of the direct link is signing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +113,7 @@ pub struct DirectLink {
     codec: FrameCodec,
     /// The remote's Ed25519 public key (base64), proven during the handshake.
     pub peer_public_key: String,
-    pub peer_id: CleanDeskId,
+    pub peer_id: RotoDeskId,
     /// The remote's device info (from `Register`), host side only.
     pub peer_device: Option<DeviceInfo>,
 }
@@ -322,7 +322,7 @@ pub async fn dial(
     identity: &Identity,
     device: DeviceInfo,
     host_public_key: &str,
-    host_id: CleanDeskId,
+    host_id: RotoDeskId,
 ) -> Result<DirectLink> {
     if derive_id_from_public_key_b64(host_public_key)? != host_id {
         return Err(DiscoveryError::AuthFailed("host key does not derive to the dialed id".into()));
@@ -374,14 +374,14 @@ pub async fn dial(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cleandesk_proto::message::register_proof_message;
+    use rotodesk_proto::message::register_proof_message;
 
-    fn dev(id: CleanDeskId) -> DeviceInfo {
+    fn dev(id: RotoDeskId) -> DeviceInfo {
         DeviceInfo { id, alias: None, hostname: "v".into(), os: "t".into(), app_version: "0".into() }
     }
 
     /// The attack this closes: a stranger opens a direct link to the host,
-    /// hands it a CleanDesk Server's registration nonce as "its" challenge,
+    /// hands it a RotoDesk Server's registration nonce as "its" challenge,
     /// and forwards the host's signature to the server. The host's direct
     /// proof must never verify as a registration proof, and vice versa.
     #[test]
@@ -404,7 +404,7 @@ mod tests {
             "a registration signature must not authenticate a direct link"
         );
         // Different prefixes: no choice of nonce can make the messages collide.
-        assert!(!direct_proof_message(DirectRole::Host, &nonce, &h, &v).starts_with(b"cleandesk-register"));
+        assert!(!direct_proof_message(DirectRole::Host, &nonce, &h, &v).starts_with(rotodesk_proto::compat::REGISTER_PROOF_PREFIX));
         assert!(direct_proof_message(DirectRole::Host, &nonce, &h, &v).starts_with(DIRECT_PROOF_PREFIX));
     }
 
@@ -525,11 +525,11 @@ mod tests {
 
     // Tiny cross-task handoff for the test above (avoids capturing the
     // viewer identity in the host task).
-    static VIEWER_ID: std::sync::OnceLock<CleanDeskId> = std::sync::OnceLock::new();
-    fn set_viewer_id(id: CleanDeskId) {
+    static VIEWER_ID: std::sync::OnceLock<RotoDeskId> = std::sync::OnceLock::new();
+    fn set_viewer_id(id: RotoDeskId) {
         let _ = VIEWER_ID.set(id);
     }
-    fn viewer_id_holder() -> CleanDeskId {
+    fn viewer_id_holder() -> RotoDeskId {
         *VIEWER_ID.get().expect("set before accept")
     }
 

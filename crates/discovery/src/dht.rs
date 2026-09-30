@@ -34,8 +34,8 @@
 
 use crate::record::{id_index_key, record_salt, relay_index_key, relay_infohash, relay_record_salt, Record, RelayRecord};
 use crate::{time::unix_now, DiscoveryError, Result};
-use cleandesk_crypto::identity::Identity;
-use cleandesk_proto::CleanDeskId;
+use rotodesk_crypto::identity::Identity;
+use rotodesk_proto::RotoDeskId;
 use futures_util::StreamExt;
 use mainline::{async_dht::AsyncDht, errors::PutMutableError, Dht, Id, MutableItem};
 use std::net::{SocketAddr, SocketAddrV4};
@@ -177,7 +177,7 @@ impl DhtNode {
     /// Look a host up by its public key (most trustworthy path). The record
     /// must be signed by exactly that key: the slot is keyed by it, but the
     /// JSON inside carries its own `pk`, which is what everything else checks.
-    pub async fn lookup_by_key(&self, public_key: &[u8; 32], id: CleanDeskId) -> Option<Record> {
+    pub async fn lookup_by_key(&self, public_key: &[u8; 32], id: RotoDeskId) -> Option<Record> {
         let item = tokio::time::timeout(
             LOOKUP_TIMEOUT,
             self.dht.get_mutable_most_recent(public_key, Some(&record_salt())),
@@ -201,7 +201,7 @@ impl DhtNode {
     /// is given; otherwise [`DiscoveryError::AmbiguousIdentity`] is returned
     /// and the caller decides (refuse, or ask the user to verify a
     /// fingerprint).
-    pub async fn lookup_by_id(&self, id: CleanDeskId, pinned_key: Option<&str>) -> Result<Option<Record>> {
+    pub async fn lookup_by_id(&self, id: RotoDeskId, pinned_key: Option<&str>) -> Result<Option<Record>> {
         let key = id_index_key(id).verifying_key().to_bytes();
         // The index slot can hold garbage from squatters: scan every response
         // instead of trusting "most recent".
@@ -224,7 +224,7 @@ impl DhtNode {
         select_by_id(candidates, pinned_key)
     }
 
-    fn accept(&self, item: MutableItem, id: CleanDeskId) -> Option<Record> {
+    fn accept(&self, item: MutableItem, id: RotoDeskId) -> Option<Record> {
         let record = match Record::from_json(item.value()) {
             Ok(r) => r,
             Err(e) => {

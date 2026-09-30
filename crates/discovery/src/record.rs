@@ -1,7 +1,7 @@
 //! The host's rendezvous record and the deterministic keys/hashes that name
 //! it in each system.
 //!
-//! A [`Record`] says: "device with Ed25519 key *K* (CleanDesk ID *I*) can be
+//! A [`Record`] says: "device with Ed25519 key *K* (RotoDesk ID *I*) can be
 //! reached for signaling at these TCP endpoints and/or this Nostr key, as of
 //! time *T*". It is small (the DHT caps values at 1000 bytes), JSON encoded,
 //! and carries its own Ed25519 signature so it can travel over unauthenticated
@@ -9,8 +9,8 @@
 
 use crate::{DiscoveryError, Result, NAMESPACE, RENDEZVOUS_VERSION};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use cleandesk_crypto::identity::{derive_id_from_public_key, verify_b64_sig, Identity};
-use cleandesk_proto::CleanDeskId;
+use rotodesk_crypto::identity::{derive_id_from_public_key, verify_b64_sig, Identity};
+use rotodesk_proto::RotoDeskId;
 use ed25519_dalek::SigningKey;
 use nostr::key::{Keys as NostrKeys, SecretKey as NostrSecretKey};
 use serde::{Deserialize, Serialize};
@@ -128,15 +128,15 @@ impl Record {
         check_freshness(self.ts, now)
     }
 
-    /// The CleanDesk ID this record's key derives to.
-    pub fn id(&self) -> Result<CleanDeskId> {
-        let pk = cleandesk_crypto::identity::decode_public_key(&self.pk)?;
+    /// The RotoDesk ID this record's key derives to.
+    pub fn id(&self) -> Result<RotoDeskId> {
+        let pk = rotodesk_crypto::identity::decode_public_key(&self.pk)?;
         Ok(derive_id_from_public_key(&pk))
     }
 
     /// True if the record's key derives to `id` (the binding a viewer checks
     /// before trusting anything the record says).
-    pub fn matches_id(&self, id: CleanDeskId) -> bool {
+    pub fn matches_id(&self, id: RotoDeskId) -> bool {
         self.id().map(|mine| mine == id).unwrap_or(false)
     }
 
@@ -156,7 +156,7 @@ impl Record {
     }
 
     pub fn public_key_bytes(&self) -> Result<[u8; 32]> {
-        Ok(cleandesk_crypto::identity::decode_public_key(&self.pk)?)
+        Ok(rotodesk_crypto::identity::decode_public_key(&self.pk)?)
     }
 }
 
@@ -267,11 +267,11 @@ pub fn relay_record_salt() -> Vec<u8> {
     format!("{NAMESPACE}:relay-record").into_bytes()
 }
 
-/// The DHT "index" keypair for a CleanDesk ID: derived from the ID alone, so
+/// The DHT "index" keypair for a RotoDesk ID: derived from the ID alone, so
 /// a viewer that knows only the number can look the record up. Anyone can
 /// derive it (and therefore overwrite the slot), which is why the record is
 /// self-signed and checked against the ID before use.
-pub fn id_index_key(id: CleanDeskId) -> SigningKey {
+pub fn id_index_key(id: RotoDeskId) -> SigningKey {
     let mut h = Sha256::new();
     h.update(NAMESPACE.as_bytes());
     h.update(b":id-index:");
@@ -444,8 +444,8 @@ mod tests {
 
     #[test]
     fn derived_keys_are_deterministic_and_distinct() {
-        let a = CleanDeskId::new(548_291_743).unwrap();
-        let b = CleanDeskId::new(548_291_744).unwrap();
+        let a = RotoDeskId::new(548_291_743).unwrap();
+        let b = RotoDeskId::new(548_291_744).unwrap();
         assert_eq!(id_index_key(a).to_bytes(), id_index_key(a).to_bytes());
         assert_ne!(id_index_key(a).to_bytes(), id_index_key(b).to_bytes());
         assert_eq!(relay_infohash(), relay_infohash());

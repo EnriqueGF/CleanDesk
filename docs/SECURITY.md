@@ -1,6 +1,6 @@
-# CleanDesk — Security and threat model
+# RotoDesk — Security and threat model
 
-CleanDesk is a **consent-based remote access** tool. Every design decision
+RotoDesk is a **consent-based remote access** tool. Every design decision
 assumes that remote control of a machine is a sensitive capability and must
 always be authorized, visible and revocable.
 
@@ -18,14 +18,14 @@ always be authorized, visible and revocable.
 5. **Least privilege.** The viewer receives only the permissions the host
    grants (`Permissions` is a negotiated bitset; the host is the authority).
 
-> CleanDesk is **not** covert surveillance software. The design deliberately
+> RotoDesk is **not** covert surveillance software. The design deliberately
 > prevents silent access without the knowledge of the machine's user.
 
-## Cryptographic controls (`cleandesk-crypto`)
+## Cryptographic controls (`rotodesk-crypto`)
 
 | Threat | Control |
 |---|---|
-| Device impersonation | **Ed25519** identity per device. The CleanDesk ID is **derived** from the public key and, at registration, the server demands a **signature over a nonce** (`RegisterChallenge`/`RegisterProof`): nobody can register an ID without the private key. Fingerprint verifiable out of band. |
+| Device impersonation | **Ed25519** identity per device. The RotoDesk ID is **derived** from the public key and, at registration, the server demands a **signature over a nonce** (`RegisterChallenge`/`RegisterProof`): nobody can register an ID without the private key. Fingerprint verifiable out of band. |
 | Theft of the unattended password | Stored only as **Argon2id** (PHC). Never in plain text (spec §18). |
 | Password over the network | **HMAC challenge-response**: the password never crosses the wire; the host verifies. |
 | Credential reuse | Random **tokens** with expiry; constant-time comparison. |
@@ -42,13 +42,13 @@ always be authorized, visible and revocable.
 
 WebRTC's DTLS handshake only checks the peer certificate against the
 fingerprint carried in the SDP — and the SDP travels through the rendezvous
-(CleanDesk Server, a LAN link, the DHT, Nostr). A rendezvous that rewrote both
+(RotoDesk Server, a LAN link, the DHT, Nostr). A rendezvous that rewrote both
 fingerprints could terminate two DTLS sessions and read everything. Since
 protocol 2.2 the **first message on the control channel, in both
 directions, is `SessionMessage::IdentityProof`**:
 
 ```text
-msg  = "cleandesk-session-v1:" ‖ role ‖ session_id ‖ len(local_fp) ‖ local_fp ‖ len(remote_fp) ‖ remote_fp
+msg  = "rotodesk-session-v1:" ‖ role ‖ session_id ‖ len(local_fp) ‖ local_fp ‖ len(remote_fp) ‖ remote_fp
 proof = { public_key, Ed25519-sign(device_key, msg) }
 ```
 
@@ -57,7 +57,7 @@ certificate and of the certificate it actually authenticated against
 (`transport::PeerConnection::dtls_fingerprints`, read from the DTLS layer,
 not from the relayed SDP). The receiver rebuilds the message from *its* view
 of the fingerprints (swapped) and the opposite role, verifies the signature,
-and checks that the key derives to the CleanDesk ID it dialed / that
+and checks that the key derives to the RotoDesk ID it dialed / that
 requested the session. A relay in the middle would have to forge a signature
 over fingerprints it does not control. Both sides wait at most 10 s for the
 peer's proof; any other message before it, a bad signature or a wrong key
@@ -89,7 +89,7 @@ not even a compromised server can derive the password. Tracking: this document.
 
 - The identity private key is stored as PKCS#8 PEM, protected by OS ACLs and,
   on Windows, wrapped with **DPAPI in machine scope** (`core::dpapi`, marker
-  `CLEANDESK-DPAPI-1`), so a copied profile or backup does not yield it;
+  `ROTODESK-DPAPI-1`), so a copied profile or backup does not yield it;
   `appdata.json` (unattended key material, pinned keys, remembered
   passwords) is wrapped the same way. Files written before this are read as
   they are and rewritten protected on the next save. Excluded from git.
@@ -108,13 +108,13 @@ not even a compromised server can derive the password. Tracking: this document.
 ## Community mode and infrastructure hardening (rendezvous v2)
 
 Findings from the September 2026 audit of the serverless path
-(`cleandesk-discovery`), the community host loop (`host::community`), the
+(`rotodesk-discovery`), the community host loop (`host::community`), the
 signaling server and the relay, with what was done about each.
 
 ### Direct-link proof is no longer a registration proof (H1)
 
 The direct TCP handshake (`discovery::direct`) used to have the host sign the
-same `cleandesk-register-v1:` + nonce message that the CleanDesk Server
+same `rotodesk-register-v1:` + nonce message that the RotoDesk Server
 demands at registration. Anyone who could reach a host's direct port could
 therefore start a registration on the server, hand the server's nonce to the
 host as "its" challenge, and forward the host's signature: the server would
@@ -122,13 +122,13 @@ register the attacker's socket under the host's ID and the real host would be
 kicked with `IdConflict`.
 
 Now each side signs [`direct_proof_message`](../crates/discovery/src/direct.rs):
-prefix `cleandesk-direct-v1:`, the rendezvous version, the signer's **role**
+prefix `rotodesk-direct-v1:`, the rendezvous version, the signer's **role**
 (`host`/`viewer`), **both** public keys and the peer's nonce. A direct-link
 signature cannot verify as a registration proof (different prefix), cannot be
 replayed as the other role's proof, and is bound to the exact viewer key it
 was issued for, so it cannot be relayed to a third party either. The host only
 signs after the viewer's own proof verified. `RENDEZVOUS_VERSION` is 2 and the
-DHT/mDNS namespace is `cleandesk-v2`; v1 peers are not interoperable
+DHT/mDNS namespace is `rotodesk-v2`; v1 peers are not interoperable
 (tests: `direct_proof_and_registration_proof_are_not_interchangeable`,
 `direct_proof_is_bound_to_role_and_both_keys`, `legacy_handshake_is_refused`).
 The server's registration message format is unchanged.
@@ -186,26 +186,26 @@ junk events cannot reopen the window for replaying a recent one.
 
 ### Relay: peer-address filter, quotas, signed directory records (L3)
 
-The community TURN credential (`cleandesk` / `cleandesk-community`) is public
+The community TURN credential (`rotodesk` / `rotodesk-community`) is public
 **by design**: an open community relay has nobody to hand out secrets, the
 relayed traffic is DTLS end to end, and the credential exists only because
 TURN requires one. The trade-off is that the relay is a UDP proxy for anyone.
-Mitigations in `cleandesk-relay-server`:
+Mitigations in `rotodesk-relay-server`:
 
 * **Peer filter.** Relaying towards loopback, link-local, private
   (RFC 1918 / ULA), shared address space (RFC 6598) and multicast peers is
   refused by default (datagrams from such sources are dropped too), so the
   relay cannot be used to reach its operator's host or network. A relay that
-  serves one private LAN opts in with `CLEANDESK_RELAY_ALLOW_PRIVATE_PEERS=1`.
+  serves one private LAN opts in with `ROTODESK_RELAY_ALLOW_PRIVATE_PEERS=1`.
   The `turn` crate has no permission hook, so the filter wraps every relay
   socket (`relay_server::guard`), which covers `Send`, `ChannelData` and
   inbound traffic alike.
-* **Quotas.** Per allocation: lifetime (`CLEANDESK_RELAY_ALLOCATION_MAX_SECS`,
+* **Quotas.** Per allocation: lifetime (`ROTODESK_RELAY_ALLOCATION_MAX_SECS`,
   default 24 h) and bytes in both directions
-  (`CLEANDESK_RELAY_ALLOCATION_MAX_BYTES`, default 16 GiB in community mode,
+  (`ROTODESK_RELAY_ALLOCATION_MAX_BYTES`, default 16 GiB in community mode,
   unlimited otherwise). Exceeding either tears the allocation down.
 * **Signed directory.** A community relay keeps an Ed25519 identity
-  (`CLEANDESK_RELAY_IDENTITY`) and publishes a signed `RelayRecord`
+  (`ROTODESK_RELAY_IDENTITY`) and publishes a signed `RelayRecord`
   (its key, `host:port`, timestamp; `RELAY_RECORD_VERSION` 1) under a DHT slot
   derived from the address, next to the `announce_peer` it always made.
   Clients only hand ICE the addresses whose record verifies and names that
@@ -290,16 +290,16 @@ the auditors' assessment before the fix.
 * Signaling client: inbound WebSocket messages capped at 256 KiB, the
   registration nonce at 64 bytes, the confirmed ID must be our own, and
   plaintext `ws://` is refused towards non-local servers unless
-  `CLEANDESK_ALLOW_INSECURE_SIGNALING=1`.
+  `ROTODESK_ALLOW_INSECURE_SIGNALING=1`.
 * The GUI approver now narrows unattended requests to the interactive
-  permission set like the headless host (`CLEANDESK_UNATTENDED_FULL=1` for
+  permission set like the headless host (`ROTODESK_UNATTENDED_FULL=1` for
   everything).
-* Updater: only an asset named exactly `CleanDesk-<version>-x64.msi` served
+* Updater: only an asset named exactly `RotoDesk-<version>-x64.msi` served
   from GitHub's asset hosts is accepted, and it is stored under a fixed local
   name, so nothing from the release JSON reaches a path or a command line.
 * `identity.pem` and `appdata.json` are DPAPI-wrapped on Windows (see Local
   storage).
-* The GUI presence lock is only honoured when the PID belongs to a CleanDesk
+* The GUI presence lock is only honoured when the PID belongs to a RotoDesk
   executable.
 
 ### Low

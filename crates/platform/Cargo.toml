@@ -1,5 +1,5 @@
 [package]
-name = "cleandesk-platform"
+name = "rotodesk-platform"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,6 +7,7 @@ license.workspace = true
 description = "OS integration: run-at-login, Windows service install/status, launching the host in the console session, GUI presence lock."
 
 [dependencies]
+rotodesk-proto.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

@@ -7,11 +7,11 @@
 //! Malformed cases that need the crate-private payload format live as unit
 //! tests inside the decoder module instead.
 
-use cleandesk_codec::{
+use rotodesk_codec::{
     CodecError, DecodedImage, RawFrame, TileDecoder, TileEncoder, VideoDecoder, VideoEncoder, MAX_DIMENSION,
     MAX_PIXELS, TILE_SIZE,
 };
-use cleandesk_proto::{message::VideoFrame, quality::QualityParams};
+use rotodesk_proto::{message::VideoFrame, quality::QualityParams};
 
 fn params() -> QualityParams {
     QualityParams { target_fps: 30, quality: 75, subsample: true }

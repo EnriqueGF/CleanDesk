@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Package the generated CleanDesk logo as transparent PNGs and a multi-size Windows ICO.
+  Package the generated RotoDesk logo as transparent PNGs and a multi-size Windows ICO.
 #>
 [CmdletBinding()]
 param(
@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 if (-not $AssetsDir) { $AssetsDir = Join-Path $root "crates\gui\assets" }
-if (-not $IcoPath) { $IcoPath = Join-Path $PSScriptRoot "cleandesk.ico" }
+if (-not $IcoPath) { $IcoPath = Join-Path $PSScriptRoot "rotodesk.ico" }
 if (-not $PreviewPath) { $PreviewPath = Join-Path $PSScriptRoot "icon-preview.png" }
 $DetailThreshold = 0
 $source = [System.Drawing.Image]::FromFile((Join-Path $AssetsDir "logo.png"))

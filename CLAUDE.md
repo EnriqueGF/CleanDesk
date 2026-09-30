@@ -1,17 +1,17 @@
-# CleanDesk — Guide for agents/AI
+# RotoDesk — Guide for agents/AI
 
 Remote desktop in Rust. Before touching code, read `docs/ARCHITECTURE.md` and
 `docs/SPEC.md`.
 
 ## Project rules
 
-- **Original work.** CleanDesk is an **independent, original** product.
+- **Original work.** RotoDesk is an **independent, original** product.
   Implement everything from the spec (`docs/SPEC.md`) and from standard,
   public-domain sources (WebRTC/ICE/STUN/TURN, DXGI, SendInput). Use only our
   own code or open-source crates with a compatible license. Do not use
   third-party protocols, names, ports or identifiers, and do not mention other
   products in code, comments or documentation.
-- **`cleandesk-proto` is the contract.** Do not change wire types without
+- **`rotodesk-proto` is the contract.** Do not change wire types without
   updating `PROTOCOL_VERSION` and the tests. Messages that travel over
   `postcard` must be **externally tagged** enums (postcard does not support
   `#[serde(tag=…)]`) and **variants are only appended at the end** (postcard
@@ -20,7 +20,7 @@ Remote desktop in Rust. Before touching code, read `docs/ARCHITECTURE.md` and
   Nostr and UPnP. Everything that arrives from those sources is a *hint*: the
   `Record` signature is verified, and so is that the key derives to the ID,
   before using it. Tests that touch the Internet are marked `#[ignore]`
-  (`cargo test -p cleandesk-discovery -- --ignored`).
+  (`cargo test -p rotodesk-discovery -- --ignored`).
 - **Building.** `.cargo/config.toml` is local (not versioned); point
   `target-dir` at an NTFS disk with free space. Do not run two `cargo` at once.
 - **Non-negotiable security.** The server only registers an ID that is derived
@@ -42,7 +42,7 @@ cargo check -p <crate>        # fast
 cargo test  -p <crate>        # crate tests
 cargo clippy --workspace      # lints
 cargo build --workspace       # full build
-cargo run -p cleandesk-signal-server   # signaling server
+cargo run -p rotodesk-signal-server   # signaling server
 ```
 
 ## Style

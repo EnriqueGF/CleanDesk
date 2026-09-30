@@ -1,6 +1,6 @@
-//! cleandesk-capture
+//! rotodesk-capture
 //!
-//! Screen capture for CleanDesk. The public contract is the [`ScreenCapturer`]
+//! Screen capture for RotoDesk. The public contract is the [`ScreenCapturer`]
 //! trait and the [`CapturedFrame`] it yields. On Windows the trait is
 //! implemented by [`DxgiCapturer`] on top of **DXGI Desktop Duplication**.
 //!
@@ -49,10 +49,10 @@ impl std::fmt::Debug for CapturedFrame {
 /// A source of desktop frames, capturing one selected monitor at a time.
 pub trait ScreenCapturer: Send {
     /// The monitors currently attached to the host desktop.
-    fn monitors(&self) -> Vec<cleandesk_proto::message::MonitorInfo>;
+    fn monitors(&self) -> Vec<rotodesk_proto::message::MonitorInfo>;
 
     /// Choose which monitor subsequent [`ScreenCapturer::next_frame`] calls
-    /// capture. `index` is a [`MonitorInfo::index`](cleandesk_proto::message::MonitorInfo::index).
+    /// capture. `index` is a [`MonitorInfo::index`](rotodesk_proto::message::MonitorInfo::index).
     fn select_monitor(&mut self, index: u16) -> anyhow::Result<()>;
 
     /// Block up to `timeout` for the next frame.
@@ -71,7 +71,7 @@ pub fn new_capturer() -> anyhow::Result<Box<dyn ScreenCapturer>> {
 /// Non-Windows fallback: capture is not implemented off Windows.
 #[cfg(not(windows))]
 pub fn new_capturer() -> anyhow::Result<Box<dyn ScreenCapturer>> {
-    anyhow::bail!("cleandesk-capture: screen capture is only implemented on Windows")
+    anyhow::bail!("rotodesk-capture: screen capture is only implemented on Windows")
 }
 
 #[cfg(test)]
@@ -99,7 +99,7 @@ mod tests {
     }
 
     /// Runtime-only: needs a real interactive desktop, so it is ignored by
-    /// default. Run with `cargo test -p cleandesk-capture -- --ignored`.
+    /// default. Run with `cargo test -p rotodesk-capture -- --ignored`.
     #[test]
     #[ignore]
     fn smoke_capture_one_frame() {

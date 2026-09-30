@@ -17,7 +17,7 @@ pub enum ProtoError {
     #[error("incomplete frame: need {needed} more bytes")]
     Incomplete { needed: usize },
 
-    #[error("invalid CleanDesk ID: {0}")]
+    #[error("invalid RotoDesk ID: {0}")]
     InvalidId(String),
 
     #[error("incompatible protocol version: local {local}, remote {remote}")]

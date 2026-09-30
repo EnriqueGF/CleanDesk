@@ -1,7 +1,7 @@
-//! CleanDesk viewer (client) role.
+//! RotoDesk viewer (client) role.
 //!
-//! A client registers with the CleanDesk Server, sends a connection request to a
-//! target CleanDesk ID, and — once accepted — establishes a P2P session as the
+//! A client registers with the RotoDesk Server, sends a connection request to a
+//! target RotoDesk ID, and — once accepted — establishes a P2P session as the
 //! WebRTC *answerer*, then:
 //! * receives the video stream, reassembles and decodes it into [`DecodedImage`]s,
 //! * forwards local input events to the host,
@@ -9,7 +9,7 @@
 //!   embedding UI, and answers the host's unattended-auth challenge if any.
 //!
 //! Before any of that, right after DTLS comes up, both peers exchange an
-//! `IdentityProof` (see `cleandesk_crypto::session`): the host's Ed25519 key
+//! `IdentityProof` (see `rotodesk_crypto::session`): the host's Ed25519 key
 //! is bound to this very DTLS session, so no rendezvous — server, LAN link,
 //! DHT or Nostr — can sit in the middle. The verified key is returned in
 //! [`ClientSession::peer_public_key`] for the UI to pin (trust on first use)
@@ -31,14 +31,14 @@
 
 use anyhow::{bail, Context, Result};
 use bytes::Bytes;
-use cleandesk_codec::{DecodedImage, TileDecoder, VideoDecoder};
-use cleandesk_crypto::{
+use rotodesk_codec::{DecodedImage, TileDecoder, VideoDecoder};
+use rotodesk_crypto::{
     identity::{derive_id_from_public_key_b64, Identity},
     session::{sign_session_proof, verify_peer_session_proof, SessionRole},
 };
-use cleandesk_proto::{
+use rotodesk_proto::{
     frame,
-    id::CleanDeskId,
+    id::RotoDeskId,
     media::{FrameChunk, Reassembler},
     message::{
         AuthProof, ClipboardData, InputEvent, MonitorInfo, RemoteAction, SessionMessage,
@@ -49,7 +49,7 @@ use cleandesk_proto::{
     session::{DeviceInfo, SessionId, SessionStats},
     PROTOCOL_VERSION,
 };
-use cleandesk_transport::{Channel, IceConfig, PeerConnection, SignalOut, SignalingClient};
+use rotodesk_transport::{Channel, IceConfig, PeerConnection, SignalOut, SignalingClient};
 
 mod clipboard;
 pub mod community;
@@ -111,7 +111,7 @@ pub struct ClientConfig {
     /// The device identity: announced at registration and used to sign the
     /// server's challenge.
     pub identity: Identity,
-    pub target: CleanDeskId,
+    pub target: RotoDeskId,
     pub requested: Permissions,
     pub quality: QualityProfile,
     /// When set, the session uses unattended access and this password answers the
@@ -124,7 +124,7 @@ pub struct ClientConfig {
     /// STUN/TURN servers for ICE.
     pub ice: IceConfig,
     /// Where files the host sends are stored. `None` means
-    /// [`default_downloads_dir`] (`<Downloads>/CleanDesk`).
+    /// [`default_downloads_dir`] (`<Downloads>/RotoDesk`).
     pub downloads_dir: Option<PathBuf>,
     /// The host's Ed25519 public key (base64) this session must end up
     /// talking to. Community mode fills it from the resolved record; in
@@ -137,7 +137,7 @@ pub struct ClientConfig {
 
 impl ClientConfig {
     /// A config with sane defaults for everything but the required fields.
-    pub fn new(signal_url: String, device: DeviceInfo, identity: Identity, target: CleanDeskId) -> Self {
+    pub fn new(signal_url: String, device: DeviceInfo, identity: Identity, target: RotoDeskId) -> Self {
         Self {
             signal_url,
             device,
@@ -203,7 +203,7 @@ pub struct ClientSession {
     input_tx: mpsc::Sender<InputEvent>,
     control_tx: mpsc::UnboundedSender<SessionMessage>,
     files_tx: mpsc::UnboundedSender<FileCommand>,
-    /// Viewer-initiated transfer ids are odd (see `cleandesk_proto::files`).
+    /// Viewer-initiated transfer ids are odd (see `rotodesk_proto::files`).
     next_transfer_id: AtomicU64,
     /// Permissions as last announced by the host (`Permissions::bits`).
     granted_live: Arc<AtomicU32>,
@@ -352,7 +352,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 pub async fn connect(config: ClientConfig) -> Result<ClientSession> {
     let mut signal = SignalingClient::connect(&config.signal_url)
         .await
-        .context("connecting to CleanDesk Server")?;
+        .context("connecting to RotoDesk Server")?;
     let identity = config.identity.clone();
     let signer = move |msg: &[u8]| identity.sign_b64(msg);
     let id = signal
@@ -625,7 +625,7 @@ async fn bind_identity(
 fn verify_host_proof(
     public_key_b64: &str,
     signature_b64: &str,
-    target: CleanDeskId,
+    target: RotoDeskId,
     session: SessionId,
     local_fp: &str,
     remote_fp: &str,
@@ -791,7 +791,7 @@ async fn dispatch_incoming(
     cev_tx: mpsc::Sender<ClientEvent>,
     control_tx: mpsc::UnboundedSender<SessionMessage>,
     credential: Option<UnattendedCredential>,
-    host_id: CleanDeskId,
+    host_id: RotoDeskId,
     shared: Dispatch,
 ) {
     let mut decoder = TileDecoder::new();
@@ -933,10 +933,10 @@ impl UnattendedCredential {
     }
 
     /// The HMAC key for `host_id`, deriving it from the password if needed.
-    pub fn key_for(&self, host_id: CleanDeskId) -> Option<Zeroizing<[u8; 32]>> {
+    pub fn key_for(&self, host_id: RotoDeskId) -> Option<Zeroizing<[u8; 32]>> {
         match self {
             Self::Key(k) => Some(k.clone()),
-            Self::Password(pw) => cleandesk_crypto::password::unattended_key(pw, host_id.value()).ok().map(Zeroizing::new),
+            Self::Password(pw) => rotodesk_crypto::password::unattended_key(pw, host_id.value()).ok().map(Zeroizing::new),
         }
     }
 }
@@ -945,20 +945,20 @@ async fn respond_to_challenge(
     peer: &PeerConnection,
     challenge_b64: &str,
     credential: Option<&UnattendedCredential>,
-    host_id: CleanDeskId,
+    host_id: RotoDeskId,
 ) {
     let Some(credential) = credential else {
         warn!("host requested unattended auth but no password is configured");
         return;
     };
-    let Some(challenge) = cleandesk_crypto::proof::Challenge::from_b64(challenge_b64) else {
+    let Some(challenge) = rotodesk_crypto::proof::Challenge::from_b64(challenge_b64) else {
         warn!("received malformed auth challenge");
         return;
     };
     let Some(key) = credential.key_for(host_id) else {
         return;
     };
-    let response = cleandesk_crypto::proof::respond(&key, &challenge);
+    let response = rotodesk_crypto::proof::respond(&key, &challenge);
     if let Ok(bytes) = frame::encode_payload(&SessionMessage::AuthResponse { response_b64: response })
     {
         let _ = peer.send(Channel::Control, Bytes::from(bytes)).await;
@@ -1031,7 +1031,7 @@ mod session_lifecycle_tests {
         let (control_tx, _control) = mpsc::unbounded_channel();
         let (files_tx, _files) = mpsc::unbounded_channel();
         let task = tokio::spawn(dispatch_incoming(peer.clone(), incoming, frames_tx, events_tx, control_tx, None,
-            CleanDeskId::parse("123456789").unwrap(), Dispatch {
+            RotoDeskId::parse("123456789").unwrap(), Dispatch {
                 files_tx, granted: Arc::new(AtomicU32::new(0)),
                 clipboard: Arc::new(Mutex::new(None)), host_protocol_minor: Arc::new(AtomicU32::new(0)),
             }));

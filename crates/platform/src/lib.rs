@@ -1,10 +1,10 @@
-//! cleandesk-platform
+//! rotodesk-platform
 //!
-//! Everything CleanDesk needs from the operating system beyond capture and
+//! Everything RotoDesk needs from the operating system beyond capture and
 //! input (spec §24 "Servicio en segundo plano"):
 //!
-//! * [`startup`] — launch CleanDesk when the user logs in (`HKCU\...\Run`).
-//! * [`service`] — install / query / remove the **CleanDesk Service**, and run
+//! * [`startup`] — launch RotoDesk when the user logs in (`HKCU\...\Run`).
+//! * [`service`] — install / query / remove the **RotoDesk Service**, and run
 //!   as that service: a tiny supervisor that keeps a headless host alive in
 //!   the interactive console session (so unattended access works before
 //!   login and after logout).

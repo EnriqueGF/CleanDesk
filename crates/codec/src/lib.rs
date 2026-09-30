@@ -1,7 +1,7 @@
-//! cleandesk-codec
+//! rotodesk-codec
 //!
-//! Tile-based video codec for CleanDesk's host→viewer media plane: produces
-//! and consumes [`cleandesk_proto::message::VideoFrame`] so it can later be
+//! Tile-based video codec for RotoDesk's host→viewer media plane: produces
+//! and consumes [`rotodesk_proto::message::VideoFrame`] so it can later be
 //! swapped for a hardware codec (H.264/HEVC via NVENC) without touching
 //! `host`/`client` — see `docs/ARCHITECTURE.md`.
 //!
@@ -13,7 +13,7 @@
 //! first frame, a forced keyframe, or a resolution change encodes every tile
 //! (a *keyframe*, self-contained). The included tiles are packed into a small
 //! internal payload (see the private `payload` module) and zstd-compressed
-//! into [`cleandesk_proto::message::VideoFrame::data`].
+//! into [`rotodesk_proto::message::VideoFrame::data`].
 //!
 //! [`TileDecoder`] mirrors this: it keeps a persistent RGBA8 canvas and blits
 //! each incoming frame's tiles onto it, always returning the *full* canvas so
@@ -24,7 +24,7 @@
 //!
 //! # Chroma subsampling
 //!
-//! [`cleandesk_proto::quality::QualityParams::subsample`] is accepted by
+//! [`rotodesk_proto::quality::QualityParams::subsample`] is accepted by
 //! [`TileEncoder::set_quality`] but currently has no effect: the `image`
 //! crate's JPEG encoder (the one available under this crate's dependency, see
 //! `Cargo.toml`) does not expose a public way to pick 4:2:0 vs. 4:4:4 chroma
@@ -45,12 +45,12 @@ pub use encoder::TileEncoder;
 pub use error::CodecError;
 pub use tile::{MAX_DIMENSION, MAX_PIXELS, TILE_SIZE};
 
-use cleandesk_proto::{message::VideoFrame, quality::QualityParams};
+use rotodesk_proto::{message::VideoFrame, quality::QualityParams};
 
 /// Crate version string, handy for diagnostics.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// A raw captured frame in BGRA8, as produced by `cleandesk-capture`.
+/// A raw captured frame in BGRA8, as produced by `rotodesk-capture`.
 ///
 /// Borrows its pixel buffer so the capture crate can hand over a mapped /
 /// double-buffered region without an extra copy. `stride` is the number of

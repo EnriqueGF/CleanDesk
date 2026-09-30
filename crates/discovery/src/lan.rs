@@ -1,7 +1,7 @@
 //! LAN discovery over mDNS/DNS-SD.
 //!
-//! Hosts announce `<id>._cleandesk._tcp.local.` with a TXT record carrying
-//! the CleanDesk ID, the public key and the direct-signaling port. Viewers
+//! Hosts announce `<id>._rotodesk._tcp.local.` with a TXT record carrying
+//! the RotoDesk ID, the public key and the direct-signaling port. Viewers
 //! browse for a specific ID. No Internet, no configuration.
 //!
 //! The TXT record is **unsigned**: anything on the LAN can announce any
@@ -10,18 +10,18 @@
 //! key seen here must not be pinned until that handshake succeeded.
 
 use crate::{DiscoveryError, Result};
-use cleandesk_proto::CleanDeskId;
+use rotodesk_proto::RotoDeskId;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tracing::{debug, warn};
 
-pub const SERVICE_TYPE: &str = "_cleandesk._tcp.local.";
+pub const SERVICE_TYPE: &str = "_rotodesk._tcp.local.";
 
 /// A host found on the LAN.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanPeer {
-    pub id: CleanDeskId,
+    pub id: RotoDeskId,
     /// Ed25519 public key, base64.
     pub public_key: String,
     pub endpoints: Vec<SocketAddr>,
@@ -33,15 +33,15 @@ pub struct LanPeer {
 /// Keeps the mDNS announcement alive; dropping it unregisters.
 pub struct LanAnnouncer {
     daemon: ServiceDaemon,
-    fullname: String,
+    fullnames: Vec<String>,
 }
 
 impl LanAnnouncer {
     /// Announce this host. `port` is the direct-signaling TCP port.
-    pub fn start(id: CleanDeskId, public_key_b64: &str, port: u16, alias: Option<&str>) -> Result<Self> {
+    pub fn start(id: RotoDeskId, public_key_b64: &str, port: u16, alias: Option<&str>) -> Result<Self> {
         let daemon = ServiceDaemon::new().map_err(|e| DiscoveryError::Other(format!("mdns daemon: {e}")))?;
         let instance = id.value().to_string();
-        let host_name = format!("cleandesk-{instance}.local.");
+        let host_name = format!("rotodesk-{instance}.local.");
         let mut props = vec![
             ("id".to_string(), instance.clone()),
             ("pk".to_string(), public_key_b64.to_string()),
@@ -57,25 +57,27 @@ impl LanAnnouncer {
         }
         // An empty IP list lets mdns-sd fill in every interface address, and
         // keep following interface changes.
-        let mut info = ServiceInfo::new(SERVICE_TYPE, &instance, &host_name, "", port, &props[..])
-            .map_err(|e| DiscoveryError::Other(format!("mdns service info: {e}")))?;
-        info = info.enable_addr_auto();
-        let fullname = info.get_fullname().to_string();
-        daemon.register(info).map_err(|e| DiscoveryError::Other(format!("mdns register: {e}")))?;
-        debug!(%fullname, port, "mDNS announcement started");
-        Ok(Self { daemon, fullname })
+        let mut fullnames = Vec::new();
+        for service in [SERVICE_TYPE, rotodesk_proto::compat::LEGACY_MDNS] {
+            let info = ServiceInfo::new(service, &instance, &host_name, "", port, &props[..])
+                .map_err(|e| DiscoveryError::Other(format!("mdns service info: {e}")))?.enable_addr_auto();
+            fullnames.push(info.get_fullname().to_string());
+            daemon.register(info).map_err(|e| DiscoveryError::Other(format!("mdns register: {e}")))?;
+        }
+        debug!(port, "mDNS announcements started");
+        Ok(Self { daemon, fullnames })
     }
 }
 
 impl Drop for LanAnnouncer {
     fn drop(&mut self) {
-        let _ = self.daemon.unregister(&self.fullname);
+        for fullname in &self.fullnames { let _ = self.daemon.unregister(fullname); }
         let _ = self.daemon.shutdown();
     }
 }
 
 /// Browse the LAN for `id` for up to `timeout`. Returns the first match.
-pub async fn find(id: CleanDeskId, timeout: Duration) -> Option<LanPeer> {
+pub async fn find(id: RotoDeskId, timeout: Duration) -> Option<LanPeer> {
     let mut found = None;
     browse(timeout, |peer| {
         if peer.id == id {
@@ -88,7 +90,7 @@ pub async fn find(id: CleanDeskId, timeout: Duration) -> Option<LanPeer> {
     found
 }
 
-/// Every CleanDesk host announced on the LAN within `timeout`, one entry per
+/// Every RotoDesk host announced on the LAN within `timeout`, one entry per
 /// ID (a host re-announcing after an interface change only adds endpoints),
 /// sorted by alias then ID for the UI.
 pub async fn browse_all(timeout: Duration) -> Vec<LanPeer> {
@@ -124,7 +126,7 @@ pub async fn browse_all(timeout: Duration) -> Vec<LanPeer> {
     peers
 }
 
-/// Shared browse loop: feeds every resolved CleanDesk service to `on_peer`
+/// Shared browse loop: feeds every resolved RotoDesk service to `on_peer`
 /// until it returns `false` or `timeout` elapses. Errors are logged, not
 /// returned: a LAN with no multicast simply yields nothing.
 async fn browse(timeout: Duration, mut on_peer: impl FnMut(LanPeer) -> bool) {
@@ -143,11 +145,16 @@ async fn browse(timeout: Duration, mut on_peer: impl FnMut(LanPeer) -> bool) {
             return;
         }
     };
+    let legacy_rx = match daemon.browse(rotodesk_proto::compat::LEGACY_MDNS) {
+        Ok(rx) => rx,
+        Err(e) => { warn!(error = %e, "legacy mDNS browse failed"); let _ = daemon.shutdown(); return; }
+    };
     let deadline = tokio::time::Instant::now() + timeout;
     while tokio::time::Instant::now() < deadline {
         // mdns-sd's receiver is a flume channel with its own async API.
         let ev = tokio::select! {
             ev = rx.recv_async() => ev,
+            ev = legacy_rx.recv_async() => ev,
             _ = tokio::time::sleep_until(deadline) => break,
         };
         let Ok(ev) = ev else { break };
@@ -159,6 +166,7 @@ async fn browse(timeout: Duration, mut on_peer: impl FnMut(LanPeer) -> bool) {
         }
     }
     let _ = daemon.stop_browse(SERVICE_TYPE);
+    let _ = daemon.stop_browse(rotodesk_proto::compat::LEGACY_MDNS);
     let _ = daemon.shutdown();
 }
 
@@ -169,7 +177,7 @@ fn peer_from_resolved(info: &mdns_sd::ResolvedService) -> Option<LanPeer> {
     if info.get_property_val_str("v") != Some(crate::RENDEZVOUS_VERSION.to_string().as_str()) {
         return None;
     }
-    let id = CleanDeskId::parse(info.get_property_val_str("id")?).ok()?;
+    let id = RotoDeskId::parse(info.get_property_val_str("id")?).ok()?;
     let public_key = info.get_property_val_str("pk")?.to_string();
     let port = info.get_port();
     // An mDNS reply is unsigned: only addresses that belong on a LAN are
@@ -191,7 +199,7 @@ fn peer_from_resolved(info: &mdns_sd::ResolvedService) -> Option<LanPeer> {
         endpoints,
         alias: info
             .get_property_val_str("alias")
-            .map(|a| cleandesk_proto::text::sanitize(a, 32))
+            .map(|a| rotodesk_proto::text::sanitize(a, 32))
             .filter(|a| !a.is_empty()),
         mac: info
             .get_property_val_str("mac")
@@ -208,7 +216,7 @@ mod tests {
     /// gracefully when multicast is unavailable (locked-down CI).
     #[tokio::test]
     async fn announce_then_find_self() {
-        let id = CleanDeskId::new(123_456_789).unwrap();
+        let id = RotoDeskId::new(123_456_789).unwrap();
         let Ok(_ann) = LanAnnouncer::start(id, "cGs=", 7423, Some("test")) else {
             eprintln!("mDNS unavailable; skipping");
             return;
@@ -227,8 +235,8 @@ mod tests {
     /// aliases, in alias order. Same multicast tolerance as above.
     #[tokio::test]
     async fn announce_two_then_browse_all() {
-        let a = CleanDeskId::new(223_456_789).unwrap();
-        let b = CleanDeskId::new(323_456_789).unwrap();
+        let a = RotoDeskId::new(223_456_789).unwrap();
+        let b = RotoDeskId::new(323_456_789).unwrap();
         let (Ok(_ann_a), Ok(_ann_b)) = (
             LanAnnouncer::start(a, "cGtB", 7431, Some("Zeta")),
             LanAnnouncer::start(b, "cGtC", 7432, Some("alpha")),

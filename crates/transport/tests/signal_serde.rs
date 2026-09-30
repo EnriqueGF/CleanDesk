@@ -6,8 +6,8 @@
 //! two JSON documents are equal. Any field the decoder dropped or altered shows
 //! up as a mismatch.
 
-use cleandesk_proto::{
-    id::CleanDeskId,
+use rotodesk_proto::{
+    id::RotoDeskId,
     message::{
         AuthKind, AuthProof, ErrorCode, RejectReason, SignalMessage, SignalPayload,
     },
@@ -20,16 +20,16 @@ use uuid::Uuid;
 
 fn device() -> DeviceInfo {
     DeviceInfo {
-        id: CleanDeskId::new(548_291_743).expect("valid id"),
-        alias: Some("pc-oficina.clean".to_string()),
+        id: RotoDeskId::new(548_291_743).expect("valid id"),
+        alias: Some("pc-oficina.roto".to_string()),
         hostname: "OFICINA-PC".to_string(),
         os: "Windows 11 Pro".to_string(),
         app_version: "0.1.0".to_string(),
     }
 }
 
-fn id() -> CleanDeskId {
-    CleanDeskId::new(100_200_300).expect("valid id")
+fn id() -> RotoDeskId {
+    RotoDeskId::new(100_200_300).expect("valid id")
 }
 
 fn session() -> Uuid {

@@ -110,7 +110,7 @@ fn spanish(en: &str) -> Option<&'static str> {
         "Connecting…" => "Conectando…",
         "New session" => "Nueva sesión",
         "Community mode: announced (LAN · DHT · Nostr)" => "Modo comunitario: anunciado (LAN · DHT · Nostr)",
-        "CleanDesk network ready (private server)" => "Red CleanDesk lista (servidor privado)",
+        "RotoDesk network ready (private server)" => "Red RotoDesk lista (servidor privado)",
         "Announcing on the community network…" => "Anunciando en la red comunitaria…",
         "Connecting to the server…" => "Conectando con el servidor…",
         "Offline; retrying" => "Sin conexión; reintentando",
@@ -150,8 +150,8 @@ fn spanish(en: &str) -> Option<&'static str> {
         }
         "Waiting for {target}…" => "Esperando a {target}…",
         "End-to-end encryption (DTLS) enabled by default" => "Cifrado extremo a extremo (DTLS) activado por defecto",
-        "Invalid CleanDesk ID. Check the number." => "CleanDesk ID no válido. Revisa el número.",
-        "Invalid CleanDesk ID." => "CleanDesk ID no válido.",
+        "Invalid RotoDesk ID. Check the number." => "RotoDesk ID no válido. Revisa el número.",
+        "Invalid RotoDesk ID." => "RotoDesk ID no válido.",
         "You cannot connect to your own ID." => "No puedes conectarte a tu propio ID.",
         "Could not derive the key: {err}" => "No se pudo derivar la clave: {err}",
         "Could not connect: {err}" => "No se pudo conectar: {err}",
@@ -167,9 +167,9 @@ fn spanish(en: &str) -> Option<&'static str> {
             "contraseña de acceso desatendido incorrecta o no configurada."
         }
         "the remote device did not respond in time." => "el equipo remoto no respondió a tiempo.",
-        "could not reach the CleanDesk server." => "no se pudo contactar con el servidor CleanDesk.",
-        "the remote device is not announced (is it on, with CleanDesk running?)." => {
-            "el equipo remoto no está anunciado (¿está encendido y con CleanDesk abierto?)."
+        "could not reach the RotoDesk server." => "no se pudo contactar con el servidor RotoDesk.",
+        "the remote device is not announced (is it on, with RotoDesk running?)." => {
+            "el equipo remoto no está anunciado (¿está encendido y con RotoDesk abierto?)."
         }
         "the remote device's identity has changed; verify its fingerprint before trusting the new key." => {
             "la identidad del equipo remoto ha cambiado; comprueba su huella antes de confiar en la nueva clave."
@@ -200,8 +200,8 @@ fn spanish(en: &str) -> Option<&'static str> {
         "Save" => "Guardar",
 
         // --- Ventana "Seguridad" ---
-        "This device's identity is an Ed25519 key pair. Your CleanDesk ID is derived from the public key and the server requires a signature to register it: nobody can impersonate your ID without the private key." => {
-            "La identidad de este equipo es un par de claves Ed25519. Tu CleanDesk ID se deriva de la clave pública y el servidor exige una firma para registrarlo: nadie puede suplantar tu ID sin la clave privada."
+        "This device's identity is an Ed25519 key pair. Your RotoDesk ID is derived from the public key and the server requires a signature to register it: nobody can impersonate your ID without the private key." => {
+            "La identidad de este equipo es un par de claves Ed25519. Tu RotoDesk ID se deriva de la clave pública y el servidor exige una firma para registrarlo: nadie puede suplantar tu ID sin la clave privada."
         }
         "Identity fingerprint" => "Huella de identidad",
         "Compare it through another channel (phone, message) with the person connecting." => {
@@ -221,8 +221,8 @@ fn spanish(en: &str) -> Option<&'static str> {
         "Several devices claim this ID. Compare the fingerprint with the owner and connect only if it matches." => "Varios equipos reclaman este ID. Compara la huella con el propietario y conecta solo si coincide.",
         "Ready to connect (privileged, hosted by the service)" => "Listo para conectar (privilegiado, lo sirve el servicio)",
         "Privileged control: drive administrator windows and UAC prompts" => "Control privilegiado: manejar ventanas de administrador y avisos de UAC",
-        "With the service installed, the service (LocalSystem) hosts and can show the UAC secure desktop; only unattended (password) connections are accepted then. Without the service, CleanDesk asks for elevation when it starts." => "Con el servicio instalado, el servicio (LocalSystem) hace de host y puede mostrar el escritorio seguro de UAC; entonces solo se aceptan conexiones desatendidas (con contraseña). Sin el servicio, CleanDesk pide elevación al arrancar.",
-        "Restart CleanDesk to apply privileged control." => "Reinicia CleanDesk para aplicar el control privilegiado.",
+        "With the service installed, the service (LocalSystem) hosts and can show the UAC secure desktop; only unattended (password) connections are accepted then. Without the service, RotoDesk asks for elevation when it starts." => "Con el servicio instalado, el servicio (LocalSystem) hace de host y puede mostrar el escritorio seguro de UAC; entonces solo se aceptan conexiones desatendidas (con contraseña). Sin el servicio, RotoDesk pide elevación al arrancar.",
+        "Restart RotoDesk to apply privileged control." => "Reinicia RotoDesk para aplicar el control privilegiado.",
         "Active: the service hosts as LocalSystem" => "Activo: el servicio hace de host como LocalSystem",
         "Active: running elevated (administrator windows; UAC prompts need the service)" => "Activo: en ejecución elevada (ventanas de administrador; los avisos de UAC requieren el servicio)",
         "Not active in this run (elevation declined or pending restart)" => "No activo en esta ejecución (elevación rechazada o pendiente de reinicio)",
@@ -233,12 +233,12 @@ fn spanish(en: &str) -> Option<&'static str> {
         "Check now" => "Buscar ahora",
         "Checking for updates…" => "Buscando actualizaciones…",
         "You are up to date." => "Estás al día.",
-        "CleanDesk {v} is available." => "CleanDesk {v} está disponible.",
+        "RotoDesk {v} is available." => "RotoDesk {v} está disponible.",
         "Update now" => "Actualizar ahora",
         "Later" => "Más tarde",
         "Release notes" => "Notas de la versión",
         "Downloading {v}… {done} / {total}" => "Descargando {v}… {done} / {total}",
-        "Update downloaded and verified. CleanDesk will close, install {v} and reopen." => "Actualización descargada y verificada. CleanDesk se cerrará, instalará {v} y se volverá a abrir.",
+        "Update downloaded and verified. RotoDesk will close, install {v} and reopen." => "Actualización descargada y verificada. RotoDesk se cerrará, instalará {v} y se volverá a abrir.",
         "Install and restart" => "Instalar y reiniciar",
         "Installing…" => "Instalando…",
         "Update failed: {err}" => "Error al actualizar: {err}",
@@ -251,7 +251,7 @@ fn spanish(en: &str) -> Option<&'static str> {
         "Anyone connecting with this password gets in without your approval. Only an Argon2id hash and a derived key are stored, never the password." => "Quien se conecte con esta contraseña entra sin tu aprobación. Solo se guarda un hash Argon2id y una clave derivada, nunca la contraseña.",
         "Chat" => "Chat",
         "Chat ({n})" => "Chat ({n})",
-        "CleanDesk ID:" => "ID de CleanDesk:",
+        "RotoDesk ID:" => "ID de RotoDesk:",
         "Frames" => "Fotogramas",
         "Ping" => "Ping",
         "Relay" => "Relay",
@@ -285,6 +285,7 @@ fn spanish(en: &str) -> Option<&'static str> {
         "Failed: {reason}" => "Error: {reason}",
         // --- Diseño nuevo: navegación, banner, tarjetas, páginas ---
         "General" => "General",
+        "Logo credits" => "Créditos del logo (CC BY-SA 4.0)",
         "Network" => "Red",
         "System" => "Sistema",
         "Refresh" => "Actualizar",
@@ -301,12 +302,12 @@ fn spanish(en: &str) -> Option<&'static str> {
         "Your desktop,
 anywhere" => "Tu escritorio,
 en cualquier lugar",
-        "Connect securely, quickly and simply with CleanDesk." => "Conéctate de forma segura, rápida y sencilla con CleanDesk.",
-        "Your CleanDesk address" => "Tu dirección de CleanDesk",
+        "Connect securely, quickly and simply with RotoDesk." => "Conéctate de forma segura, rápida y sencilla con RotoDesk.",
+        "Your RotoDesk address" => "Tu dirección de RotoDesk",
         "Invite" => "Invitar",
         "Connect to remote desktop" => "Conectar a escritorio remoto",
-        "Enter a CleanDesk address or device alias" => "Introducir dirección de CleanDesk o alias de dispositivo",
-        "What's new in CleanDesk?" => "¿Qué hay de nuevo en CleanDesk?",
+        "Enter a RotoDesk address or device alias" => "Introducir dirección de RotoDesk o alias de dispositivo",
+        "What's new in RotoDesk?" => "¿Qué hay de nuevo en RotoDesk?",
         "Discover the latest features and improvements." => "Descubre las últimas funciones y mejoras.",
         "See what's new" => "Ver novedades",
         "Set a password so you can reach this device without anyone accepting." => "Define una contraseña para acceder a este equipo sin que nadie acepte.",
@@ -347,24 +348,24 @@ en cualquier lugar",
         "They will need your approval unless unattended access is enabled with a password (Settings)." => "Necesitará tu aprobación salvo que el acceso desatendido esté activado con contraseña (Ajustes).",
         "Pending requests" => "Solicitudes pendientes",
         "No pending requests. Incoming requests appear as a dialog you can accept or reject." => "Sin solicitudes pendientes. Las solicitudes entrantes aparecen en un diálogo que puedes aceptar o rechazar.",
-        "Connect to my desktop with CleanDesk.
-My CleanDesk ID: {id}
+        "Connect to my desktop with RotoDesk.
+My RotoDesk ID: {id}
 Fingerprint: {fp}
-Download: https://github.com/EnriqueGF/CleanDesk/releases" => "Conéctate a mi escritorio con CleanDesk.
-Mi CleanDesk ID: {id}
+Download: https://github.com/EnriqueGF/RotoDesk/releases" => "Conéctate a mi escritorio con RotoDesk.
+Mi RotoDesk ID: {id}
 Huella: {fp}
-Descarga: https://github.com/EnriqueGF/CleanDesk/releases",
+Descarga: https://github.com/EnriqueGF/RotoDesk/releases",
         "Nearby devices" => "Equipos cercanos",
         "Scanning the local network…" => "Rastreando la red local…",
         "Scan again" => "Rastrear de nuevo",
-        "No CleanDesk devices found on this network." => "No se encontraron equipos CleanDesk en esta red.",
+        "No RotoDesk devices found on this network." => "No se encontraron equipos RotoDesk en esta red.",
         "Device alias" => "Alias del equipo",
         "Shown to people you connect to and used to find you on the local network." => "Se muestra a quienes te conectas y sirve para encontrarte en la red local.",
-        "Show CleanDesk" => "Mostrar CleanDesk",
+        "Show RotoDesk" => "Mostrar RotoDesk",
         "Quit" => "Salir",
         "Tray" => "Bandeja",
         "Closing the window minimizes to the tray (the host keeps running)" => "Cerrar la ventana la minimiza a la bandeja (el host sigue activo)",
-        "CleanDesk keeps running in the tray." => "CleanDesk sigue ejecutándose en la bandeja.",
+        "RotoDesk keeps running in the tray." => "RotoDesk sigue ejecutándose en la bandeja.",
         "System default" => "Predeterminado del sistema",
         "Default quality" => "Calidad por defecto",
         "Automatic" => "Automática",
@@ -383,15 +384,15 @@ Descarga: https://github.com/EnriqueGF/CleanDesk/releases",
         "Could not enable it: {err}" => "No se pudo activar: {err}",
         "Unattended access disabled." => "Acceso desatendido desactivado.",
         "Start with Windows (at sign-in)" => "Iniciar con Windows (al iniciar sesión)",
-        "CleanDesk will open when you sign in." => "CleanDesk se abrirá al iniciar sesión.",
-        "CleanDesk will no longer open when you sign in." => "CleanDesk ya no se abrirá al iniciar sesión.",
+        "RotoDesk will open when you sign in." => "RotoDesk se abrirá al iniciar sesión.",
+        "RotoDesk will no longer open when you sign in." => "RotoDesk ya no se abrirá al iniciar sesión.",
         "Could not change startup: {err}" => "No se pudo cambiar el arranque: {err}",
         "Could not locate the executable." => "No se pudo localizar el ejecutable.",
         "Install as a service (unattended access before sign-in)" => {
             "Instalar como servicio (acceso desatendido antes de iniciar sesión)"
         }
-        "Requires administrator rights. The service keeps the unattended host running even when nobody is signed in; when you open CleanDesk, the GUI takes over." => {
-            "Pide permisos de administrador. El servicio mantiene el host desatendido activo aunque nadie haya iniciado sesión; cuando abres CleanDesk, la GUI toma el relevo."
+        "Requires administrator rights. The service keeps the unattended host running even when nobody is signed in; when you open RotoDesk, the GUI takes over." => {
+            "Pide permisos de administrador. El servicio mantiene el host desatendido activo aunque nadie haya iniciado sesión; cuando abres RotoDesk, la GUI toma el relevo."
         }
         "Service installed and running" => "Servicio instalado y en ejecución",
         "Service installed (stopped)" => "Servicio instalado (parado)",
@@ -400,8 +401,8 @@ Descarga: https://github.com/EnriqueGF/CleanDesk/releases",
         "The service only handles unattended access: set a password above to make it useful." => {
             "El servicio solo atiende acceso desatendido: activa una contraseña arriba para que sea útil."
         }
-        "CleanDesk service installed and started." => "Servicio CleanDesk instalado y arrancado.",
-        "CleanDesk service removed." => "Servicio CleanDesk eliminado.",
+        "RotoDesk service installed and started." => "Servicio RotoDesk instalado y arrancado.",
+        "RotoDesk service removed." => "Servicio RotoDesk eliminado.",
         "Operation cancelled: administrator rights are required." => {
             "Operación cancelada: se necesitan permisos de administrador."
         }
@@ -410,7 +411,7 @@ Descarga: https://github.com/EnriqueGF/CleanDesk/releases",
         "Community (no server): LAN, BitTorrent DHT and Nostr relays" => {
             "Comunitario (sin servidor): LAN, DHT de BitTorrent y relés Nostr"
         }
-        "Private CleanDesk server" => "Servidor privado CleanDesk",
+        "Private RotoDesk server" => "Servidor privado RotoDesk",
         "ws://server:7420" => "ws://servidor:7420",
         "Your device announces itself, signed, on the DHT and your local network; nobody has to run servers. The first connection pins the remote device's key (fingerprint under Security)." => {
             "Tu equipo se anuncia firmado en la DHT y en tu red local; nadie tiene que mantener servidores. La primera conexión fija la clave del equipo remoto (huella en Seguridad)."
@@ -438,7 +439,7 @@ Descarga: https://github.com/EnriqueGF/CleanDesk/releases",
         "File transfer" => "Transferir archivos",
         "Remote audio" => "Audio remoto",
         "Restart machine" => "Reiniciar equipo",
-        "Restart CleanDesk" => "Reiniciar CleanDesk",
+        "Restart RotoDesk" => "Reiniciar RotoDesk",
         "Admin actions" => "Acciones administrativas",
         "Lock local keyboard/mouse" => "Bloquear teclado/ratón local",
 
@@ -479,7 +480,7 @@ mod tests {
     /// entera sin depender de una estructura de datos iterable en producción.
     const KEYS: &[&str] = &[
         "Settings", "Security", "Device identity and fingerprint", "Incoming session active", "Connecting…",
-        "New session", "Community mode: announced (LAN · DHT · Nostr)", "CleanDesk network ready (private server)",
+        "New session", "Community mode: announced (LAN · DHT · Nostr)", "RotoDesk network ready (private server)",
         "Announcing on the community network…", "Connecting to the server…", "Offline; retrying", "no server",
         "Network mode (Settings → Network)", "Trust the new identity",
         "Only if you verified the device fingerprint through another channel", "Previous key forgotten; connect again.",
@@ -489,20 +490,20 @@ mod tests {
         "Remote connection", "Enter remote ID…", "Connect ›", "Connect", "Unattended access (with password)",
         "Password:", "Remember", "Saves the device to favorites with its derived key (never the plaintext password)",
         "Waiting for {target}…", "End-to-end encryption (DTLS) enabled by default",
-        "Invalid CleanDesk ID. Check the number.", "Invalid CleanDesk ID.", "You cannot connect to your own ID.",
+        "Invalid RotoDesk ID. Check the number.", "Invalid RotoDesk ID.", "You cannot connect to your own ID.",
         "Could not derive the key: {err}", "Could not connect: {err}",
         "The connection was interrupted before it was established.", "the remote device is offline.",
         "the remote device already has an active session.", "the remote device declined the connection.",
         "wrong or unconfigured unattended-access password.", "the remote device did not respond in time.",
-        "could not reach the CleanDesk server.",
-        "the remote device is not announced (is it on, with CleanDesk running?).",
+        "could not reach the RotoDesk server.",
+        "the remote device is not announced (is it on, with RotoDesk running?).",
         "the remote device's identity has changed; verify its fingerprint before trusting the new key.",
         "Recent", "Favorites", "Add device", "last connection {when}", "no connections",
         "No connections yet. Connect to an ID to see it here.", "You have not saved any device yet.",
         "Add to / remove from favorites", "Password remembered (click to forget it)", "Password forgotten.",
         "just now", "{n} min ago", "{n} h ago", "{n} d ago", "Save a permanent host to favorites", "Name:",
         "Office laptop", "Save",
-        "This device's identity is an Ed25519 key pair. Your CleanDesk ID is derived from the public key and the server requires a signature to register it: nobody can impersonate your ID without the private key.",
+        "This device's identity is an Ed25519 key pair. Your RotoDesk ID is derived from the public key and the server requires a signature to register it: nobody can impersonate your ID without the private key.",
         "Identity fingerprint", "Compare it through another channel (phone, message) with the person connecting.",
         "Encryption", "Video, input and control travel over end-to-end DTLS; the server only relays signaling.",
         "The unattended-access password is stored only as an Argon2id hash and never crosses the network (HMAC challenge-response).",
@@ -511,22 +512,22 @@ mod tests {
         "Anyone connecting with this password gets in without your approval. Restart the app after changing it so the host picks it up.",
         "The unattended-access password must be at least 10 characters long.", "Unattended access enabled.",
         "Could not enable it: {err}", "Unattended access disabled.", "System", "Start with Windows (at sign-in)",
-        "CleanDesk will open when you sign in.", "CleanDesk will no longer open when you sign in.",
+        "RotoDesk will open when you sign in.", "RotoDesk will no longer open when you sign in.",
         "Could not change startup: {err}", "Could not locate the executable.",
         "Install as a service (unattended access before sign-in)",
-        "Requires administrator rights. The service keeps the unattended host running even when nobody is signed in; when you open CleanDesk, the GUI takes over.",
+        "Requires administrator rights. The service keeps the unattended host running even when nobody is signed in; when you open RotoDesk, the GUI takes over.",
         "Service installed and running", "Service installed (stopped)", "Service changing state…",
         "Service not installed", "The service only handles unattended access: set a password above to make it useful.",
-        "CleanDesk service installed and started.", "CleanDesk service removed.",
+        "RotoDesk service installed and started.", "RotoDesk service removed.",
         "Operation cancelled: administrator rights are required.", "Could not change the service: {err}", "Network",
         "Forced by --signal-url: {url}", "Community (no server): LAN, BitTorrent DHT and Nostr relays",
-        "Private CleanDesk server", "ws://server:7420",
+        "Private RotoDesk server", "ws://server:7420",
         "Your device announces itself, signed, on the DHT and your local network; nobody has to run servers. The first connection pins the remote device's key (fingerprint under Security).",
         "All signaling goes through your server; useful for companies and closed networks.",
         "The server URL must start with ws:// or wss://", "Network mode updated; the host is restarting.",
         "Connection request", "System: {os}", "Authentication: {auth}", "Granted permissions", "Accept", "Decline",
         "Interactive", "Trusted device", "View screen", "Control keyboard", "Control mouse", "Clipboard",
-        "File transfer", "Remote audio", "Restart machine", "Restart CleanDesk", "Admin actions",
+        "File transfer", "Remote audio", "Restart machine", "Restart RotoDesk", "Admin actions",
         "Lock local keyboard/mouse", "remote device", "Screen:", "Quality:", "Fit", "Full screen",
         "Refresh image (request a keyframe)", "Disconnect", "· View only (no control granted)", "Session ended.",
         " (primary)", "Remote:", "Me:", "Authentication rejected by the remote device.", "Disconnected: {reason}",

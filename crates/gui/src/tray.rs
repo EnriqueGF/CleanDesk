@@ -2,14 +2,14 @@
 //!
 //! * Clic izquierdo / doble clic en el icono: muestra y trae al frente la
 //!   ventana.
-//! * Menú contextual: "Show CleanDesk" y "Quit".
+//! * Menú contextual: "Show RotoDesk" y "Quit".
 //! * Con `Settings::minimize_to_tray` (por defecto activado), cerrar la
 //!   ventana la oculta en vez de salir: el host sigue atendiendo conexiones.
 //!   "Quit" del menú sí cierra la aplicación.
 //!
 //! `tray-icon` necesita un bucle de mensajes en el hilo que crea el icono; el
 //! bucle de winit de eframe ya lo es, así que se construye dentro de
-//! `CleanDeskApp::new`. Los eventos llegan por callbacks en otro hilo y se
+//! `RotoDeskApp::new`. Los eventos llegan por callbacks en otro hilo y se
 //! reenvían por un canal, despertando a egui con `request_repaint`.
 
 use std::sync::mpsc;
@@ -46,7 +46,7 @@ impl Tray {
     /// `update`, así que mostrar/salir se hace desde el hilo de eventos.
     pub fn new(ctx: egui::Context, hwnd: Option<isize>) -> Result<Self, String> {
         let menu = Menu::new();
-        let show = MenuItem::new(tr("Show CleanDesk"), true, None);
+        let show = MenuItem::new(tr("Show RotoDesk"), true, None);
         let quit = MenuItem::new(tr("Quit"), true, None);
         menu.append(&show).map_err(|e| e.to_string())?;
         menu.append(&quit).map_err(|e| e.to_string())?;
@@ -100,7 +100,7 @@ impl Tray {
 
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_tooltip("CleanDesk")
+            .with_tooltip("RotoDesk")
             .with_icon(icon)
             .with_menu_on_left_click(false)
             .build()
@@ -206,7 +206,7 @@ pub fn show_native_window(hwnd: Option<isize>) {
     let hwnd = match hwnd {
         Some(h) => HWND(h as *mut core::ffi::c_void),
         None => {
-            let title: Vec<u16> = "CleanDesk\0".encode_utf16().collect();
+            let title: Vec<u16> = "RotoDesk\0".encode_utf16().collect();
             // SAFETY: valid NUL-terminated wide string; a miss returns an error.
             match unsafe { FindWindowW(None, windows::core::PCWSTR(title.as_ptr())) } {
                 Ok(h) if !h.is_invalid() => h,

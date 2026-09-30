@@ -1,6 +1,6 @@
 //! Connection history (spec §12).
 
-use cleandesk_proto::{session::SessionId, CleanDeskId};
+use rotodesk_proto::{session::SessionId, RotoDeskId};
 use serde::{Deserialize, Serialize};
 
 use crate::unix_now;
@@ -19,7 +19,7 @@ pub const MAX_RECORDS: usize = 500;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub id: SessionId,
-    pub device: CleanDeskId,
+    pub device: RotoDeskId,
     pub user: String,
     /// Unix seconds.
     pub started_at: u64,
@@ -42,7 +42,7 @@ impl SessionRecord {
     /// `duration_secs` are filled in later by [`Self::finish`].
     pub fn start(
         id: SessionId,
-        device: CleanDeskId,
+        device: RotoDeskId,
         user: impl Into<String>,
         connection_kind: impl Into<String>,
     ) -> Self {
@@ -134,7 +134,7 @@ impl History {
     }
 
     /// All records for a given device, newest first.
-    pub fn for_device(&self, device: CleanDeskId) -> Vec<&SessionRecord> {
+    pub fn for_device(&self, device: RotoDeskId) -> Vec<&SessionRecord> {
         let mut matching: Vec<&SessionRecord> =
             self.records.iter().filter(|r| r.device == device).collect();
         matching.sort_by_key(|r| std::cmp::Reverse(r.started_at));
@@ -147,8 +147,8 @@ mod tests {
     use super::*;
     use uuid::Uuid;
 
-    fn dev() -> CleanDeskId {
-        CleanDeskId::new(548_291_743).unwrap()
+    fn dev() -> RotoDeskId {
+        RotoDeskId::new(548_291_743).unwrap()
     }
 
     fn record_at(started_at: u64) -> SessionRecord {
@@ -176,7 +176,7 @@ mod tests {
     #[test]
     fn for_device_filters_by_device() {
         let mut h = History::default();
-        let other = CleanDeskId::new(111_111_111).unwrap();
+        let other = RotoDeskId::new(111_111_111).unwrap();
         h.push(SessionRecord::start(Uuid::new_v4(), dev(), "alice", "p2p"));
         h.push(SessionRecord::start(Uuid::new_v4(), other, "bob", "relay"));
 

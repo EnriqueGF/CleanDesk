@@ -1,16 +1,18 @@
 <#
 .SYNOPSIS
-  Capture CleanDesk's own framebuffer using a debug build, without capturing other windows.
+  Capture RotoDesk's own framebuffer using a debug build, without capturing other windows.
 #>
 param(
-    [string]$Exe = "D:\cleandesk-target\debug\cleandesk.exe",
+    [string]$Exe = "D:\rotodesk-target\debug\rotodesk.exe",
     [string]$Out = "docs\screenshots\main-window.png",
-    [string]$DataDir = "$env:TEMP\cleandesk-shot",
+    [string]$DataDir = "$env:TEMP\rotodesk-shot",
     [int]$WaitSeconds = 15,
     [int]$Width = 960,
     [int]$Height = 740,
     [switch]$Maximized,
     [switch]$Settings,
+    [switch]$Showcase,
+    [switch]$Request,
     [int]$Section = 0,
     [string]$Connect = ""
 )
@@ -19,11 +21,13 @@ $folder = [IO.Path]::GetFullPath((Split-Path $Out))
 New-Item -ItemType Directory -Force $folder | Out-Null
 $destination = Join-Path $folder (Split-Path $Out -Leaf)
 $vars = @{
-    CLEANDESK_SCREENSHOT = $destination
-    CLEANDESK_PREVIEW_SIZE = "$Width,$Height"
-    CLEANDESK_PREVIEW_MAXIMIZED = $(if ($Maximized) { "1" } else { $null })
-    CLEANDESK_OPEN_SETTINGS = $(if ($Settings) { "1" } else { $null })
-    CLEANDESK_SETTINGS_SECTION = "$Section"
+    ROTODESK_SCREENSHOT = $destination
+    ROTODESK_PREVIEW_SIZE = "$Width,$Height"
+    ROTODESK_PREVIEW_MAXIMIZED = $(if ($Maximized) { "1" } else { $null })
+    ROTODESK_OPEN_SETTINGS = $(if ($Settings) { "1" } else { $null })
+    ROTODESK_SETTINGS_SECTION = "$Section"
+    ROTODESK_SHOWCASE = $(if ($Showcase) { "1" } else { $null })
+    ROTODESK_PREVIEW_REQUEST = $(if ($Request) { "1" } else { $null })
 }
 $previous = @{}
 $p = $null

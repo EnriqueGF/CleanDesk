@@ -1,4 +1,4 @@
-//! Viewer-side resolution: turn a CleanDesk ID into something dialable.
+//! Viewer-side resolution: turn a RotoDesk ID into something dialable.
 //!
 //! Order (fastest and most trustworthy first):
 //! 1. LAN (mDNS) — instant, no Internet.
@@ -24,7 +24,7 @@ use crate::dht::DhtNode;
 use crate::lan;
 use crate::record::Record;
 use crate::{time::unix_now, DiscoveryError, Result};
-use cleandesk_proto::CleanDeskId;
+use rotodesk_proto::RotoDeskId;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -59,7 +59,7 @@ impl Resolver {
     /// found is not the pinned one) and [`DiscoveryError::AmbiguousIdentity`]
     /// (several keys claim the ID and none is pinned); everything else is
     /// "not found".
-    pub async fn resolve(&self, id: CleanDeskId, pinned_key: Option<&str>) -> Result<Resolved> {
+    pub async fn resolve(&self, id: RotoDeskId, pinned_key: Option<&str>) -> Result<Resolved> {
         // 1. LAN. Without a DHT this is the only path, so wait longer.
         let lan_budget = if self.dht.is_some() { LAN_TIMEOUT } else { LAN_TIMEOUT * 3 };
         if let Some(peer) = lan::find(id, lan_budget).await {
@@ -95,7 +95,7 @@ impl Resolver {
 
         // 2. By key.
         if let Some(pk) = pinned_key {
-            if let Ok(bytes) = cleandesk_crypto::identity::decode_public_key(pk) {
+            if let Ok(bytes) = rotodesk_crypto::identity::decode_public_key(pk) {
                 if let Some(record) = dht.lookup_by_key(&bytes, id).await {
                     info!(%id, "resolved on the DHT by pinned key");
                     return Ok(Resolved { endpoints: record.ep.clone(), record, via: "DHT" });
@@ -111,7 +111,7 @@ impl Resolver {
         }
 
         Err(DiscoveryError::Other(
-            "the device is not announced (is it on, with CleanDesk running?)".into(),
+            "the device is not announced (is it on, with RotoDesk running?)".into(),
         ))
     }
 }

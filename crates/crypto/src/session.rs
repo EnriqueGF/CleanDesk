@@ -2,7 +2,7 @@
 //!
 //! WebRTC's DTLS handshake authenticates the peer certificate only against
 //! the fingerprint carried in the SDP — and the SDP travels through whichever
-//! rendezvous the peers used (CleanDesk Server, a LAN link, the DHT, Nostr).
+//! rendezvous the peers used (RotoDesk Server, a LAN link, the DHT, Nostr).
 //! A rendezvous that rewrites both fingerprints can therefore terminate two
 //! DTLS sessions and sit in the middle. To close that gap, each peer signs,
 //! with its long-lived Ed25519 key, the session id together with **both**
@@ -11,15 +11,15 @@
 //! the signature: a relay in the middle would have to forge a signature over
 //! fingerprints it does not control.
 //!
-//! The message is domain-separated (`cleandesk-session-v1:`) and includes the
+//! The message is domain-separated (`rotodesk-session-v1:`) and includes the
 //! signer's role so a host proof can never be replayed as a viewer proof.
 
 use crate::{identity::Identity, CryptoError};
-use cleandesk_proto::session::SessionId;
+use rotodesk_proto::session::SessionId;
 
 /// Fixed prefix that keeps session proofs apart from every other signature a
 /// device produces (registration, rendezvous records...).
-pub const SESSION_PROOF_PREFIX: &[u8] = b"cleandesk-session-v1:";
+pub const SESSION_PROOF_PREFIX: &[u8] = rotodesk_proto::compat::SESSION_PROOF_PREFIX;
 
 /// Which side of the session is signing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,7 +184,7 @@ mod tests {
     fn a_registration_signature_is_not_a_session_proof() {
         let id = Identity::generate();
         let s = SessionId::new_v4();
-        let reg = id.sign_b64(&cleandesk_proto::message::register_proof_message(s.as_bytes()));
+        let reg = id.sign_b64(&rotodesk_proto::message::register_proof_message(s.as_bytes()));
         assert!(verify_session_proof(&id.public_key_b64(), &s, HOST_FP, VIEWER_FP, SessionRole::Host, &reg).is_err());
     }
 }

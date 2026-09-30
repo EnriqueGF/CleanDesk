@@ -1,6 +1,6 @@
 //! La aplicación eframe: estado global, puente con tokio y bucle de `update`.
 //!
-//! `CleanDeskApp` es el `eframe::App`. Reúne:
+//! `RotoDeskApp` es el `eframe::App`. Reúne:
 //! * el `AppState` persistente compartido (identidad, ajustes, agenda, historial),
 //! * un runtime de tokio propio para todo el trabajo asíncrono (conexión saliente
 //!   y host entrante),
@@ -13,11 +13,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use cleandesk_client::{ClientConfig, ClientSession};
-use cleandesk_core::{history::SessionRecord, AppState};
-use cleandesk_host::{HostConfig, HostControl, HostEvent};
-use cleandesk_proto::{
-    id::CleanDeskId, permissions::Permissions, session::DeviceInfo, session::SessionId,
+use rotodesk_client::{ClientConfig, ClientSession};
+use rotodesk_core::{history::SessionRecord, AppState};
+use rotodesk_host::{HostConfig, HostControl, HostEvent};
+use rotodesk_proto::{
+    id::RotoDeskId, permissions::Permissions, session::DeviceInfo, session::SessionId,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, oneshot};
@@ -46,7 +46,7 @@ enum ConnectPhase {
     Idle,
     /// Esperando el resultado de `client::connect` (aceptar/rechazar/conectar).
     Connecting {
-        target: CleanDeskId,
+        target: RotoDeskId,
         rx: oneshot::Receiver<anyhow::Result<ClientSession>>,
         task: tokio::task::AbortHandle,
     },
@@ -76,19 +76,19 @@ pub enum Page {
 /// Un equipo visto en la red local (descubrimiento mDNS).
 #[derive(Debug, Clone)]
 pub struct NearbyDevice {
-    pub id: CleanDeskId,
+    pub id: RotoDeskId,
     pub alias: Option<String>,
     pub mac: Option<String>,
 }
 
 /// La aplicación completa.
-pub struct CleanDeskApp {
+pub struct RotoDeskApp {
     /// Estado persistente compartido con las tareas asíncronas.
     pub state: Arc<AppState>,
     /// Este dispositivo, tal y como se anuncia en señalización.
     pub device: DeviceInfo,
-    /// Nuestro propio CleanDesk ID (derivado de la identidad).
-    pub id: CleanDeskId,
+    /// Nuestro propio RotoDesk ID (derivado de la identidad).
+    pub id: RotoDeskId,
     /// Servidor de señalización forzado desde la línea de órdenes (`--signal-url`);
     /// si es `None` manda el modo de red de los ajustes.
     pub signal_override: Option<String>,
@@ -99,7 +99,7 @@ pub struct CleanDeskApp {
 
     /// Fase de la conexión saliente.
     connect: ConnectPhase,
-    /// Texto del campo "Introducir CleanDesk ID".
+    /// Texto del campo "Introducir RotoDesk ID".
     pub connect_input: String,
     /// Contraseña para conectar a un host desatendido (vacía = interactivo).
     pub connect_password: String,
@@ -108,12 +108,12 @@ pub struct CleanDeskApp {
     /// Guardar la clave derivada en favoritos al conectar con éxito.
     pub remember_password: bool,
     /// Clave pendiente de guardar cuando la conexión en curso tenga éxito.
-    pending_remember: Option<(CleanDeskId, [u8; 32])>,
+    pending_remember: Option<(RotoDeskId, [u8; 32])>,
     /// Aviso a mostrar en la ventana principal (error de conexión, desconexión…).
     pub notice: Option<String>,
     /// Equipo cuya identidad cambió respecto a la clave fijada; el usuario
     /// decide si confiar en la nueva (tras comprobar la huella).
-    pub identity_alarm: Option<CleanDeskId>,
+    pub identity_alarm: Option<RotoDeskId>,
     /// Icono de bandeja (None si el sistema no lo permite).
     tray: Option<crate::tray::Tray>,
     /// Otra instancia pidió que mostremos la ventana (mutex de instancia única).
@@ -125,7 +125,7 @@ pub struct CleanDeskApp {
     /// Página activa de la navegación superior.
     pub page: Page,
     /// Último equipo al que se conectó con éxito (para la miniatura).
-    pub last_target: Option<CleanDeskId>,
+    pub last_target: Option<RotoDeskId>,
     /// Miniaturas de la última sesión por equipo (cargadas perezosamente;
     /// `None` = no hay fichero).
     pub thumbs: std::collections::HashMap<u64, Option<egui::TextureHandle>>,
@@ -176,15 +176,15 @@ pub struct CleanDeskApp {
     pub unattended_msg: Option<(String, bool)>,
     /// Estado del servicio de Windows y del arranque con la sesión (se refrescan
     /// periódicamente mientras la ventana de ajustes está abierta).
-    pub service_status: cleandesk_platform::service::ServiceStatus,
+    pub service_status: rotodesk_platform::service::ServiceStatus,
     pub run_at_login: bool,
     pub platform_checked_at: Option<std::time::Instant>,
     /// Sonda en curso del estado del servicio / arranque (hilo aparte: `sc` y
     /// `reg` tardan cientos de ms y congelarían la interfaz).
     pub platform_probe:
-        Option<std::sync::mpsc::Receiver<(cleandesk_platform::service::ServiceStatus, bool)>>,
+        Option<std::sync::mpsc::Receiver<(rotodesk_platform::service::ServiceStatus, bool)>>,
     /// Marca "hay una GUI abierta" para que el host del servicio se aparte.
-    _presence: Option<cleandesk_platform::presence::PresenceLock>,
+    _presence: Option<rotodesk_platform::presence::PresenceLock>,
     /// El servicio (LocalSystem) hace de host mientras la ventana está abierta
     /// (control privilegiado): la GUI no registra el ID ni acepta sesiones.
     pub hosted_by_service: bool,
@@ -192,7 +192,7 @@ pub struct CleanDeskApp {
     pub elevated: bool,
 }
 
-impl CleanDeskApp {
+impl RotoDeskApp {
     /// Construye la app, arranca el host de fondo y, si procede, la conexión
     /// automática inicial.
     pub fn new(
@@ -201,7 +201,7 @@ impl CleanDeskApp {
         device: DeviceInfo,
         rt: Arc<Runtime>,
         signal_override: Option<String>,
-        initial_target: Option<CleanDeskId>,
+        initial_target: Option<RotoDeskId>,
     ) -> Self {
         theme::apply(&cc.egui_ctx);
         // Idioma de la interfaz: el guardado en ajustes o, si no hay, el del sistema.
@@ -225,14 +225,14 @@ impl CleanDeskApp {
         // Control privilegiado con el servicio en marcha: el host del servicio
         // (LocalSystem) sigue sirviendo y la GUI no toma el relevo. Sin el lock
         // de presencia el servicio no se aparta.
-        let elevated = cleandesk_platform::elevation::is_elevated();
+        let elevated = rotodesk_platform::elevation::is_elevated();
         let hosted_by_service = state.settings.read().privileged_control
-            && cleandesk_platform::service::status() == cleandesk_platform::service::ServiceStatus::Running;
+            && rotodesk_platform::service::status() == rotodesk_platform::service::ServiceStatus::Running;
         let presence = if hosted_by_service {
-            info!("privileged control: the CleanDesk service keeps hosting; GUI will not register");
+            info!("privileged control: the RotoDesk service keeps hosting; GUI will not register");
             None
         } else {
-            match cleandesk_platform::presence::PresenceLock::acquire(&state.data_dir()) {
+            match rotodesk_platform::presence::PresenceLock::acquire(&state.data_dir()) {
                 Ok(lock) => Some(lock),
                 Err(e) => {
                     warn!(error = %e, "no se pudo crear el lock de presencia de la GUI");
@@ -299,11 +299,11 @@ impl CleanDeskApp {
             show_nearby: false,
             last_scan: None,
             presence_monitor,
-            // `CLEANDESK_OPEN_SETTINGS=1` abre Ajustes al arrancar (capturas, soporte).
-            settings_section: std::env::var("CLEANDESK_SETTINGS_SECTION").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
+            // `ROTODESK_OPEN_SETTINGS=1` abre Ajustes al arrancar (capturas, soporte).
+            settings_section: rotodesk_proto::compat::env("ROTODESK_SETTINGS_SECTION").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
             #[cfg(debug_assertions)]
             capture_requested: false,
-            show_settings: std::env::var("CLEANDESK_OPEN_SETTINGS").is_ok_and(|v| v == "1"),
+            show_settings: rotodesk_proto::compat::env("ROTODESK_OPEN_SETTINGS").is_ok_and(|v| v == "1"),
             show_security: false,
             show_add_device: false,
             add_device_id: String::new(),
@@ -318,12 +318,15 @@ impl CleanDeskApp {
             alias_edit,
             unattended_pw: String::new(),
             unattended_msg: None,
-            service_status: cleandesk_platform::service::ServiceStatus::NotInstalled,
+            service_status: rotodesk_platform::service::ServiceStatus::NotInstalled,
             run_at_login: false,
             platform_checked_at: None,
             platform_probe: None,
             _presence: presence,
         };
+
+        #[cfg(debug_assertions)]
+        app.configure_showcase();
 
         // Conexión automática solicitada por `--connect`.
         if let Some(target) = initial_target {
@@ -344,7 +347,7 @@ impl CleanDeskApp {
     }
 
     /// El ID objetivo de la conexión en curso, si la hay.
-    pub fn connecting_target(&self) -> Option<CleanDeskId> {
+    pub fn connecting_target(&self) -> Option<RotoDeskId> {
         match &self.connect {
             ConnectPhase::Connecting { target, .. } => Some(*target),
             _ => None,
@@ -359,7 +362,7 @@ impl CleanDeskApp {
     /// Lanza una conexión saliente hacia `target` usando permisos interactivos y
     /// la calidad por defecto de los ajustes. Si hay contraseña en el campo, la
     /// conexión se hace en modo desatendido.
-    pub fn start_connection(&mut self, target: CleanDeskId, ctx: &egui::Context) {
+    pub fn start_connection(&mut self, target: RotoDeskId, ctx: &egui::Context) {
         if self.is_connecting() || matches!(self.connect, ConnectPhase::Active(_)) {
             return; // una sesión a la vez (MVP)
         }
@@ -383,7 +386,7 @@ impl CleanDeskApp {
         if !pw.is_empty() {
             // Derivamos la clave aquí (Argon2id, ~100 ms) para poder recordarla
             // sin guardar nunca la contraseña en claro.
-            match cleandesk_crypto::password::unattended_key(pw, target.value()) {
+            match rotodesk_crypto::password::unattended_key(pw, target.value()) {
                 Ok(key) => {
                     config.unattended_key = Some(key);
                     if self.remember_password {
@@ -423,9 +426,9 @@ impl CleanDeskApp {
         let ctx = ctx.clone();
         let task = self.rt.spawn(async move {
             let result = if mode.is_community() {
-                cleandesk_client::connect_community(config, pinned).await
+                rotodesk_client::connect_community(config, pinned).await
             } else {
-                cleandesk_client::connect(config).await
+                rotodesk_client::connect(config).await
             };
             let _ = tx.send(result);
             ctx.request_repaint();
@@ -444,9 +447,9 @@ impl CleanDeskApp {
     }
 
     /// Modo de red efectivo: `--signal-url` manda; si no, los ajustes.
-    pub fn network_mode(&self) -> cleandesk_core::config::NetworkMode {
+    pub fn network_mode(&self) -> rotodesk_core::config::NetworkMode {
         match &self.signal_override {
-            Some(url) => cleandesk_core::config::NetworkMode::Server { url: url.clone() },
+            Some(url) => rotodesk_core::config::NetworkMode::Server { url: url.clone() },
             None => self.state.settings.read().network.clone(),
         }
     }
@@ -457,7 +460,7 @@ impl CleanDeskApp {
     }
 
     /// Olvida la clave fijada de `id` (el usuario verificó el cambio de identidad).
-    pub fn unpin_key(&self, id: CleanDeskId) {
+    pub fn unpin_key(&self, id: RotoDeskId) {
         if self.state.settings.write().unpin_key(id) {
             self.save_settings();
         }
@@ -471,8 +474,8 @@ impl CleanDeskApp {
     }
 
     /// Añade (o actualiza) un dispositivo en la agenda.
-    pub fn add_favorite(&self, id: CleanDeskId, name: String) {
-        use cleandesk_core::addressbook::DeviceEntry;
+    pub fn add_favorite(&self, id: RotoDeskId, name: String) {
+        use rotodesk_core::addressbook::DeviceEntry;
         let mut book = self.state.addressbook.write();
         if !book.update(id, |e| {
             if !name.trim().is_empty() {
@@ -505,8 +508,8 @@ impl CleanDeskApp {
     }
 
     /// Guarda la clave desatendida derivada para `id` (creando el favorito si no existe).
-    pub fn remember_key(&self, id: CleanDeskId, key: [u8; 32]) {
-        use cleandesk_core::addressbook::DeviceEntry;
+    pub fn remember_key(&self, id: RotoDeskId, key: [u8; 32]) {
+        use rotodesk_core::addressbook::DeviceEntry;
         let mut book = self.state.addressbook.write();
         if !book.update(id, |e| e.unattended_key = Some(key.to_vec())) {
             let mut entry = DeviceEntry::new(id, id.to_string());
@@ -518,7 +521,7 @@ impl CleanDeskApp {
     }
 
     /// Olvida la contraseña recordada de `id`.
-    pub fn forget_key(&self, id: CleanDeskId) {
+    pub fn forget_key(&self, id: RotoDeskId) {
         if self
             .state
             .addressbook
@@ -529,7 +532,7 @@ impl CleanDeskApp {
         }
     }
 
-    pub fn remove_favorite(&self, id: CleanDeskId) {
+    pub fn remove_favorite(&self, id: RotoDeskId) {
         self.state.addressbook.write().remove(id);
         self.save_settings();
     }
@@ -593,7 +596,7 @@ impl CleanDeskApp {
     }
 
     /// Actualiza la fecha de última conexión en la agenda si el equipo está guardado.
-    fn mark_connected(&self, target: CleanDeskId) {
+    fn mark_connected(&self, target: RotoDeskId) {
         let now = unix_now();
         let updated = self
             .state
@@ -666,7 +669,7 @@ impl CleanDeskApp {
     }
 }
 
-impl eframe::App for CleanDeskApp {
+impl eframe::App for RotoDeskApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 0) Bandeja: mostrar/salir, y cerrar = ocultar si así está configurado.
         self.handle_tray(ctx);
@@ -695,7 +698,7 @@ impl eframe::App for CleanDeskApp {
     }
 }
 
-impl CleanDeskApp {
+impl RotoDeskApp {
     /// Procesa los eventos del icono de bandeja y la petición de cierre de la
     /// ventana. Con `minimize_to_tray` activo, cerrar solo oculta la ventana;
     /// "Salir" en el menú de la bandeja cierra de verdad.
@@ -751,10 +754,12 @@ impl CleanDeskApp {
             )
         };
 
-        egui::Modal::new(egui::Id::new("cleandesk-approval-modal"))
+        egui::Modal::new(egui::Id::new("rotodesk-approval-modal"))
             .frame(theme::card())
             .show(ctx, |ui| {
                 ui.set_width(380.0);
+                ui.horizontal(|ui| { theme::brand(ui, 34.0); theme::wordmark(ui, 27.0); });
+                ui.add_space(8.0);
                 theme::section_label(ui, tr("Connection request"), true);
                 ui.add_space(6.0);
                 ui.label(egui::RichText::new(&name).size(18.0).strong());
@@ -802,10 +807,10 @@ impl CleanDeskApp {
         if let Some(accept) = decision {
             let mut req = self.pending.remove(0);
             if accept {
-                req.answer(cleandesk_host::Decision::Accept(self.pending_perms));
+                req.answer(rotodesk_host::Decision::Accept(self.pending_perms));
             } else {
-                req.answer(cleandesk_host::Decision::Reject(
-                    cleandesk_proto::message::RejectReason::UserDeclined,
+                req.answer(rotodesk_host::Decision::Reject(
+                    rotodesk_proto::message::RejectReason::UserDeclined,
                 ));
             }
             // Preparar el prellenado de la siguiente solicitud, si la hay.
@@ -869,7 +874,7 @@ fn friendly_error(s: &str) -> String {
     if is_identity_change(s) {
         tr("the remote device's identity has changed; verify its fingerprint before trusting the new key.").into()
     } else if s.contains("not announced") || s.contains("no está anunciado") {
-        tr("the remote device is not announced (is it on, with CleanDesk running?).").into()
+        tr("the remote device is not announced (is it on, with RotoDesk running?).").into()
     } else if s.contains("several keys claim this id") {
         tr("Several devices claim this ID. Compare the fingerprint with the owner and connect only if it matches.").into()
     } else if s.contains("TargetOffline") {
@@ -884,8 +889,8 @@ fn friendly_error(s: &str) -> String {
         tr("wrong or unconfigured unattended-access password.").into()
     } else if s.contains("timed out waiting for the host") {
         tr("the remote device did not respond in time.").into()
-    } else if s.contains("connecting to CleanDesk Server") {
-        tr("could not reach the CleanDesk server.").into()
+    } else if s.contains("connecting to RotoDesk Server") {
+        tr("could not reach the RotoDesk server.").into()
     } else {
         s.to_string()
     }
@@ -917,11 +922,11 @@ fn spawn_host(
     // El host vive tanto como el runtime (que la app suelta al cerrarse). No hay
     // señal de parada explícita: reintenta el registro indefinidamente.
     rt.spawn(async move {
-        let approver: Arc<dyn cleandesk_host::Approver> = Arc::new(GuiApprover::new(incoming_tx));
+        let approver: Arc<dyn rotodesk_host::Approver> = Arc::new(GuiApprover::new(incoming_tx));
 
         loop {
             let mode = match &signal_override {
-                Some(url) => cleandesk_core::config::NetworkMode::Server { url: url.clone() },
+                Some(url) => rotodesk_core::config::NetworkMode::Server { url: url.clone() },
                 None => state.settings.read().network.clone(),
             };
             let mut config = HostConfig::new(
@@ -950,9 +955,9 @@ fn spawn_host(
             let serve: std::pin::Pin<
                 Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>,
             > = if mode.is_community() {
-                Box::pin(cleandesk_host::serve_community(config, approver.clone()))
+                Box::pin(rotodesk_host::serve_community(config, approver.clone()))
             } else {
-                Box::pin(cleandesk_host::serve(config, approver.clone()))
+                Box::pin(rotodesk_host::serve(config, approver.clone()))
             };
             tokio::pin!(serve);
 
@@ -1015,9 +1020,9 @@ pub(crate) fn unix_now() -> u64 {
 // Miniaturas, descubrimiento LAN e invitaciones
 // ---------------------------------------------------------------------------
 
-impl CleanDeskApp {
+impl RotoDeskApp {
     /// Ruta del PNG de miniatura de `id`.
-    fn thumb_path(&self, id: CleanDeskId) -> std::path::PathBuf {
+    fn thumb_path(&self, id: RotoDeskId) -> std::path::PathBuf {
         self.state
             .data_dir()
             .join("thumbs")
@@ -1026,7 +1031,7 @@ impl CleanDeskApp {
 
     /// Guarda una miniatura (≈320 px de ancho) del último fotograma de una
     /// sesión, para la tarjeta de "Sesiones recientes".
-    pub fn save_thumbnail(&mut self, id: CleanDeskId, frame: &cleandesk_codec::DecodedImage) {
+    pub fn save_thumbnail(&mut self, id: RotoDeskId, frame: &rotodesk_codec::DecodedImage) {
         if frame.width == 0 || frame.height == 0 {
             return;
         }
@@ -1057,7 +1062,7 @@ impl CleanDeskApp {
     pub fn thumbnail(
         &mut self,
         ctx: &egui::Context,
-        id: CleanDeskId,
+        id: RotoDeskId,
     ) -> Option<egui::TextureHandle> {
         if let Some(cached) = self.thumbs.get(&id.value()) {
             return cached.clone();
@@ -1091,7 +1096,7 @@ impl CleanDeskApp {
         let ctx = ctx.clone();
         self.rt.spawn(async move {
             let peers =
-                cleandesk_discovery::lan::browse_all(std::time::Duration::from_millis(2500)).await;
+                rotodesk_discovery::lan::browse_all(std::time::Duration::from_millis(2500)).await;
             let list: Vec<NearbyDevice> = peers
                 .into_iter()
                 .filter(|p| p.id != me)
@@ -1109,14 +1114,14 @@ impl CleanDeskApp {
         });
     }
 
-    pub fn is_online(&self, id: CleanDeskId) -> bool {
+    pub fn is_online(&self, id: RotoDeskId) -> bool {
         self.presence_monitor.online.lock().is_ok_and(|online| online.contains(&id))
     }
 
     /// Refresca `service_status` / `run_at_login` sin bloquear: lanza la sonda
     /// en un hilo si toca y recoge el resultado cuando llega.
     pub fn poll_platform_status(&mut self, ctx: &egui::Context) {
-        use cleandesk_platform::{service, startup};
+        use rotodesk_platform::{service, startup};
         if let Some(rx) = &self.platform_probe {
             match rx.try_recv() {
                 Ok((status, run)) => {
@@ -1138,7 +1143,7 @@ impl CleanDeskApp {
         let (tx, rx) = std::sync::mpsc::channel();
         let ctx = ctx.clone();
         let spawned = std::thread::Builder::new()
-            .name("cleandesk-platform-probe".into())
+            .name("rotodesk-platform-probe".into())
             .spawn(move || {
                 let status = service::status();
                 let run = startup::is_run_at_login().unwrap_or(false);
@@ -1155,7 +1160,7 @@ impl CleanDeskApp {
     }
 
     /// Guarda la MAC de un contacto (solo si ya está en la agenda).
-    pub fn remember_mac(&self, id: CleanDeskId, mac: String) {
+    pub fn remember_mac(&self, id: RotoDeskId, mac: String) {
         let changed = self.state.addressbook.write().update(id, |e| {
             if e.mac.as_deref() != Some(mac.as_str()) {
                 e.mac = Some(mac.clone());
@@ -1169,18 +1174,51 @@ impl CleanDeskApp {
     /// Texto de invitación listo para pegar en un chat o correo.
     pub fn invitation_text(&self) -> String {
         crate::i18n::trf(
-            "Connect to my desktop with CleanDesk.\nMy CleanDesk ID: {id}\nFingerprint: {fp}\nDownload: https://github.com/EnriqueGF/CleanDesk/releases",
+            "Connect to my desktop with RotoDesk.\nMy RotoDesk ID: {id}\nFingerprint: {fp}\nDownload: https://github.com/EnriqueGF/RotoDesk/releases",
             &[("id", &self.id.to_string()), ("fp", &self.state.identity.fingerprint())],
         )
     }
 }
 
 #[cfg(debug_assertions)]
-impl CleanDeskApp {
+impl RotoDeskApp {
+    /// Isolated, debug-only screenshot fixtures. No real profile or peer IDs.
+    fn configure_showcase(&mut self) {
+        if std::env::var("ROTODESK_SHOWCASE").is_err() || std::env::var("ROTODESK_SCREENSHOT").is_err() { return; }
+        self.id = RotoDeskId::new(123456789).unwrap();
+        self.alias_edit = "PC del shur".into();
+        {
+            let mut settings = self.state.settings.write();
+            settings.check_updates = false;
+            settings.alias = Some(self.alias_edit.clone());
+            settings.language = Some("es".into());
+        }
+        i18n::set_lang(Lang::Es);
+        {
+            let mut history = self.state.history.write();
+            history.records.clear();
+            for (n, name) in [(987654321, "PC de sobremesa"), (234567891, "Portátil"), (345678912, "PC de soporte")] {
+                let mut record = SessionRecord::start(Default::default(), RotoDeskId::new(n).unwrap(), name, "P2P");
+                record.finish("closed");
+                record.duration_secs = Some(420);
+                history.push(record);
+            }
+        }
+        if std::env::var("ROTODESK_PREVIEW_REQUEST").is_ok_and(|v| v == "1") {
+            let requested = Permissions::interactive();
+            self.pending_perms = requested;
+            self.pending.push(PendingRequest {
+                from: DeviceInfo { id: RotoDeskId::new(987654321).unwrap(), alias: Some("Shur de soporte".into()),
+                    hostname: "PC de soporte".into(), os: "Windows 11".into(), app_version: crate::VERSION.into() },
+                requested, auth: rotodesk_proto::message::AuthKind::Interactive, respond: None,
+            });
+        }
+    }
+
     /// Capture only our framebuffer for UI review, regardless of overlapping windows.
     fn capture_preview(&mut self, ctx: &egui::Context) {
-        let Ok(path) = std::env::var("CLEANDESK_SCREENSHOT") else { return };
-        if !self.capture_requested && std::env::var("CLEANDESK_PREVIEW_MAXIMIZED").is_ok_and(|v| v == "1") {
+        let Ok(path) = rotodesk_proto::compat::env("ROTODESK_SCREENSHOT") else { return };
+        if !self.capture_requested && rotodesk_proto::compat::env("ROTODESK_PREVIEW_MAXIMIZED").is_ok_and(|v| v == "1") {
             ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
         }
         if !self.capture_requested && ctx.input(|i| i.time) > 2.0 {

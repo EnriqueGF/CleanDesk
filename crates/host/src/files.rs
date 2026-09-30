@@ -1,7 +1,7 @@
 //! Incoming file transfers on the host (spec section 13): the viewer offers,
 //! the host auto-accepts when `FILE_TRANSFER` is granted and writes the file
 //! under the downloads directory. Byte accounting and naming rules come from
-//! `cleandesk_proto::files`; this module only adds the disk and channel I/O.
+//! `rotodesk_proto::files`; this module only adds the disk and channel I/O.
 //!
 //! The host does not initiate transfers in this milestone (there is no local
 //! UI for it), so there is no sender here.
@@ -12,7 +12,7 @@
 //! [`FREE_SPACE_MARGIN`] free after the file lands. A refused offer is
 //! answered with `FileTransferMsg::Refused` so the viewer can show why.
 
-use cleandesk_proto::{
+use rotodesk_proto::{
     files::{dedupe_file_name, FileChunk, IncomingTable},
     message::{FileTransferMsg, SessionMessage},
 };
@@ -32,12 +32,12 @@ pub const MAX_CONCURRENT_INCOMING: usize = 4;
 pub const FREE_SPACE_MARGIN: u64 = 512 * 1024 * 1024;
 
 /// Where received files go when the embedder configured nothing: the OS
-/// downloads folder (or the temp dir as a last resort) plus `CleanDesk`.
+/// downloads folder (or the temp dir as a last resort) plus `RotoDesk`.
 pub fn default_downloads_dir() -> PathBuf {
     directories::UserDirs::new()
         .and_then(|u| u.download_dir().map(Path::to_path_buf))
         .unwrap_or_else(std::env::temp_dir)
-        .join("CleanDesk")
+        .join("RotoDesk")
 }
 
 /// Pick a non-colliding path for `name` inside `dir`.
@@ -140,7 +140,7 @@ impl FileReceiver {
             }
             FileTransferMsg::Refused { transfer_id, reason } => {
                 if self.table.remove(transfer_id).is_some() {
-                    let reason = cleandesk_proto::text::sanitize_text(&reason);
+                    let reason = rotodesk_proto::text::sanitize_text(&reason);
                     info!(transfer_id, %reason, "file transfer refused by the viewer");
                 }
                 self.discard(transfer_id, None).await;
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn unique_path_dedupes_against_disk() {
-        let dir = std::env::temp_dir().join(format!("cleandesk-host-files-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rotodesk-host-files-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(unique_path(&dir, "a.txt"), dir.join("a.txt"));
@@ -306,7 +306,7 @@ mod tests {
 
     #[tokio::test]
     async fn offers_beyond_the_caps_are_refused_with_a_reason() {
-        let dir = std::env::temp_dir().join(format!("cleandesk-host-caps-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rotodesk-host-caps-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut rx = FileReceiver::new(dir.clone(), 1000);
 

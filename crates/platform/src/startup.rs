@@ -5,7 +5,7 @@
 //! unsafe surface limited to the service module.
 
 /// Registry value name under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
-pub const RUN_VALUE: &str = "CleanDesk";
+pub const RUN_VALUE: &str = "RotoDesk";
 
 #[cfg(windows)]
 mod imp {
@@ -46,6 +46,8 @@ mod imp {
                 Err(e) => return Err(e),
             }
         }
+        // Keep a single autostart entry after upgrading an older installation.
+        let _ = run(&["delete", RUN_KEY, "/v", rotodesk_proto::compat::LEGACY_PRODUCT, "/f"]);
         Ok(())
     }
 

@@ -1,9 +1,9 @@
-//! CleanDesk shared protocol.
+//! RotoDesk shared protocol.
 //!
 //! This crate is the single source of truth for every wire-level contract in
-//! CleanDesk: the [`CleanDeskId`](id::CleanDeskId) device identifier, the
+//! RotoDesk: the [`RotoDeskId`](id::RotoDeskId) device identifier, the
 //! per-session [`Permissions`](permissions::Permissions), the quality profiles,
-//! the signaling messages exchanged with the CleanDesk Server, the session
+//! the signaling messages exchanged with the RotoDesk Server, the session
 //! messages exchanged peer-to-peer, and the length-delimited [`frame`] codec
 //! used on data channels.
 //!
@@ -11,6 +11,7 @@
 //! the client, host, signal server and relay all agree on the same types.
 
 pub mod error;
+pub mod compat;
 pub mod files;
 pub mod frame;
 pub mod id;
@@ -22,7 +23,7 @@ pub mod session;
 pub mod text;
 
 pub use error::ProtoError;
-pub use id::CleanDeskId;
+pub use id::RotoDeskId;
 pub use permissions::Permissions;
 pub use quality::QualityProfile;
 
@@ -50,9 +51,9 @@ pub use quality::QualityProfile;
 /// * 2.4 — ordered clipboard paste (`SessionMessage::PasteClipboard`).
 pub const PROTOCOL_VERSION: Version = Version { major: 2, minor: 4 };
 
-/// Default TCP port for the signaling (CleanDesk Server) WebSocket endpoint.
+/// Default TCP port for the signaling (RotoDesk Server) WebSocket endpoint.
 ///
-/// CleanDesk's own registered-by-convention port; not shared with any other
+/// RotoDesk's own registered-by-convention port; not shared with any other
 /// remote-desktop product.
 pub const DEFAULT_SIGNAL_PORT: u16 = 7420;
 

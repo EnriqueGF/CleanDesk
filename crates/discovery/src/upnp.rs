@@ -77,7 +77,7 @@ impl PortMapping {
     async fn map(&mut self, req: MapRequest) -> Result<()> {
         let local = SocketAddr::new(self.local_ip, req.port);
         self.gateway
-            .add_port(req.protocol.into(), req.port, local, LEASE_SECS, "CleanDesk")
+            .add_port(req.protocol.into(), req.port, local, LEASE_SECS, "RotoDesk")
             .await
             .map_err(|e| DiscoveryError::Other(format!("UPnP add_port {:?} {}: {e}", req.protocol, req.port)))?;
         if !self.mapped.iter().any(|m| m.port == req.port && m.protocol == req.protocol) {

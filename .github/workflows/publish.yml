@@ -34,9 +34,9 @@ jobs:
           $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release version: $version" }
           if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") { throw "Tag does not match Cargo.toml" }
-          "CLEANDESK_VERSION=$version" >> $env:GITHUB_ENV
+          "ROTODESK_VERSION=$version" >> $env:GITHUB_ENV
       - name: Test clipboard, viewer, host and protocol
-        run: cargo test --locked -p cleandesk-proto -p cleandesk-client -p cleandesk-host -p cleandesk-gui --lib --tests
+        run: cargo test --locked -p rotodesk-proto -p rotodesk-client -p rotodesk-host -p rotodesk-gui --lib --tests
       - name: Fetch portable WiX
         shell: pwsh
         run: |
@@ -49,7 +49,7 @@ jobs:
       - name: Build installer and binaries
         shell: pwsh
         run: |
-          .\installer\build-msi.ps1 -Version $env:CLEANDESK_VERSION
+          .\installer\build-msi.ps1 -Version $env:ROTODESK_VERSION
           $sums = Get-ChildItem target\msi -File | Where-Object { $_.Extension -in ".msi", ".zip" } | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
             "$hash *$($_.Name)"
@@ -60,14 +60,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v$env:CLEANDESK_VERSION"
-          $notes = "docs/releases/$env:CLEANDESK_VERSION.md"
+          $tag = "v$env:ROTODESK_VERSION"
+          $notes = "docs/releases/$env:ROTODESK_VERSION.md"
           if (-not (Test-Path -LiteralPath $notes)) { throw "Missing release notes: $notes" }
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag "target/msi/CleanDesk-$env:CLEANDESK_VERSION-x64.msi" "target/msi/CleanDesk-$env:CLEANDESK_VERSION-x64-binaries.zip" target/msi/SHA256SUMS --clobber
+            gh release upload $tag "target/msi/RotoDesk-$env:ROTODESK_VERSION-x64.msi" "target/msi/RotoDesk-$env:ROTODESK_VERSION-x64-binaries.zip" "target/msi/CleanDesk-$env:ROTODESK_VERSION-x64.msi#Actualización desde versiones anteriores" target/msi/SHA256SUMS --clobber
           } else {
-            gh release create $tag "target/msi/CleanDesk-$env:CLEANDESK_VERSION-x64.msi" "target/msi/CleanDesk-$env:CLEANDESK_VERSION-x64-binaries.zip" target/msi/SHA256SUMS --draft --title "CleanDesk $env:CLEANDESK_VERSION" --notes-file $notes --target $env:GITHUB_SHA
+            gh release create $tag "target/msi/RotoDesk-$env:ROTODESK_VERSION-x64.msi" "target/msi/RotoDesk-$env:ROTODESK_VERSION-x64-binaries.zip" "target/msi/CleanDesk-$env:ROTODESK_VERSION-x64.msi#Actualización desde versiones anteriores" target/msi/SHA256SUMS --draft --title "RotoDesk $env:ROTODESK_VERSION" --notes-file $notes --target $env:GITHUB_SHA
           }
           if ($LASTEXITCODE -ne 0) { throw "Release upload failed" }
           gh release edit $tag --draft=false --latest --notes-file $notes

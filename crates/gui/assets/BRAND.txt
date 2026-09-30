@@ -1,3 +1,12 @@
-CleanDesk brand generated with built-in image_gen on 2026-09-30.
-Prompt: Use case: logo-brand. Create a polished square app brand mark for CleanDesk, a native remote desktop app. A bold geometric emerald green rounded monitor outline combined with two interlocking directional links, suggesting secure remote connection. Simple distinctive silhouette readable at 16px, generous padding, centered, flat vector-like raster artwork, emerald #009B72 and deep teal #006B50 with a small mint accent. No letters, no text, no watermark, no mockup, no shadows outside the mark. Transparent background. This single brand symbol will be used as logo and app icon.
-Original: logo.png. icon-32.png, icon-256.png and installer/cleandesk.ico are resized derivatives preserving transparency.
+RotoDesk brand, adapted with built-in image_gen on 2026-09-30.
+Original mascot: Roto2, author Forocoches.
+Source: https://commons.wikimedia.org/wiki/File:Roto2.png
+Original: https://upload.wikimedia.org/wikipedia/commons/6/6a/Roto2.png
+Mascot and adaptation license: CC BY-SA 4.0
+https://creativecommons.org/licenses/by-sa/4.0/
+Changes: monitor silhouette, stand, remote-control cursor, redrawn shapes.
+logo.png is the adaptation; icon-32.png, icon-256.png and installer/rotodesk.ico are resized derivatives preserving transparency.
+Barlow Condensed Black Italic uses SIL OFL 1.1; see fonts/OFL-BarlowCondensed.txt. Application code retains its own license.
+
+Exact image-generation prompt:
+Use case: precise-object-edit / logo-brand. Edit target: attached original Roto2 mascot. Create the production logo icon for a remote desktop app named RotoDesk. Preserve the recognizable mischievous enormous grin, oversized asymmetrical white eyes with black pupils, thick bold smooth black cartoon outlines, white teeth, and the original vivid mint-turquoise green (main #22D3A7 with #08AD80 shadows). Transform the mascot into a smiling remote-computer monitor: integrate the same face into a compact softly rounded monitor silhouette with a minimal black monitor stand below, and add one highly legible white mouse cursor arrow with thick black outline overlapping the bottom-right edge, making remote computer control immediately clear. Keep it playful and faithful to the attached mascot; no human limbs, no unrelated characters. Clean high-quality flat/vector-like shapes, a touch of the original green gradient, strong silhouette for a Windows app icon at 32px. Centered square composition filling 88% of the canvas, balanced margins, one icon only. No text, no letters, no wordmark, no border around canvas, no mockup, no watermark. Genuinely transparent background; white eyes and teeth must remain opaque.

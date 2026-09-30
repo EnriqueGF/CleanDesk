@@ -1,5 +1,5 @@
 [package]
-name = "cleandesk-proto"
+name = "rotodesk-proto"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

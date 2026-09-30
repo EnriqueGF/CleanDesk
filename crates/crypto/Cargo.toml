@@ -1,5 +1,5 @@
 [package]
-name = "cleandesk-crypto"
+name = "rotodesk-crypto"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 description = "Device identity, unattended-password hashing, session tokens, auth proofs."
 
 [dependencies]
-cleandesk-proto.workspace = true
+rotodesk-proto.workspace = true
 ed25519-dalek.workspace = true
 argon2.workspace = true
 rand.workspace = true

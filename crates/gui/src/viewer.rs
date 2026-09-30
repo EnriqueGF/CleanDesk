@@ -13,9 +13,9 @@
 //! Todas las llamadas a la sesión son síncronas y no bloqueantes (encolan en
 //! canales), así que el hilo de la interfaz nunca espera a la red.
 
-use cleandesk_client::{ClientEvent, ClientSession};
-use cleandesk_codec::DecodedImage;
-use cleandesk_proto::{
+use rotodesk_client::{ClientEvent, ClientSession};
+use rotodesk_codec::DecodedImage;
+use rotodesk_proto::{
     message::{InputEvent, MonitorInfo, MouseButton, RemoteAction},
     permissions::Permissions,
     quality::QualityProfile,
@@ -826,7 +826,7 @@ fn upload_latest_frame(viewer: &mut ViewerState, ctx: &egui::Context) {
         Some(tex) => tex.set(color, egui::TextureOptions::LINEAR),
         None => {
             viewer.texture = Some(ctx.load_texture(
-                "cleandesk-remote-screen",
+                "rotodesk-remote-screen",
                 color,
                 egui::TextureOptions::LINEAR,
             ));

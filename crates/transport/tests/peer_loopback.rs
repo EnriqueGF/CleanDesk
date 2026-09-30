@@ -8,8 +8,8 @@
 //! the hard guarantees.
 
 use bytes::Bytes;
-use cleandesk_proto::message::SignalPayload;
-use cleandesk_transport::{Channel, IceConfig, PeerConnection};
+use rotodesk_proto::message::SignalPayload;
+use rotodesk_transport::{Channel, IceConfig, PeerConnection};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -83,7 +83,7 @@ async fn loopback_offer_answer_trickle_and_send() -> anyhow::Result<()> {
     .map_err(|_| anyhow::anyhow!("timed out waiting for peers to connect"))??;
 
     // 4) Send a control payload A -> B and assert B receives it.
-    let payload = Bytes::from_static(b"hola-cleandesk");
+    let payload = Bytes::from_static(b"hola-rotodesk");
     send_with_retry(&a, Channel::Control, payload.clone()).await?;
 
     let (ch, data) = tokio::time::timeout(Duration::from_secs(5), b_incoming.recv())

@@ -5,7 +5,7 @@
 //! directory and verifies it against the `SHA256SUMS` asset published with
 //! the release (a download whose hash does not match, or a release without
 //! sums, is refused); [`install`] hands the MSI to `msiexec` in a detached
-//! process that relaunches CleanDesk afterwards, so the caller just has to
+//! process that relaunches RotoDesk afterwards, so the caller just has to
 //! exit. Everything here is blocking: run it on a worker thread.
 
 use std::collections::HashMap;
@@ -18,9 +18,9 @@ use sha2::{Digest, Sha256};
 use crate::{PlatformError, Result};
 
 /// GitHub repository that publishes the releases.
-pub const REPO: &str = "EnriqueGF/CleanDesk";
+pub const REPO: &str = "EnriqueGF/RotoDesk";
 /// API endpoint for the latest (non pre-release, non draft) release.
-pub const LATEST_URL: &str = "https://api.github.com/repos/EnriqueGF/CleanDesk/releases/latest";
+pub const LATEST_URL: &str = "https://api.github.com/repos/EnriqueGF/RotoDesk/releases/latest";
 /// Name of the checksum asset published next to the MSI.
 pub const SUMS_ASSET: &str = "SHA256SUMS";
 /// Refuse absurd downloads (the MSI is ~13 MB).
@@ -54,7 +54,7 @@ impl Release {
 }
 
 /// Name the downloaded installer gets on disk, whatever the release calls it.
-pub const LOCAL_MSI_NAME: &str = "CleanDesk-update.msi";
+pub const LOCAL_MSI_NAME: &str = "RotoDesk-update.msi";
 
 /// Hosts GitHub serves release assets from.
 const ASSET_HOSTS: &[&str] = &["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"];
@@ -136,7 +136,7 @@ pub fn release_from_json(json: &serde_json::Value, current: (u16, u16, u16)) -> 
     // installer name for this version, served by GitHub, is acceptable
     // (the name also ends up on a command line).
     let (a, b, c) = version;
-    let expected_msi = format!("CleanDesk-{a}.{b}.{c}-x64.msi");
+    let expected_msi = format!("RotoDesk-{a}.{b}.{c}-x64.msi");
     let msi = assets.iter().find(|a| a.name == expected_msi).cloned();
     let sums = assets.iter().find(|a| a.name == SUMS_ASSET).cloned();
     match (msi, sums) {
@@ -161,7 +161,7 @@ fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(15))
         .timeout_read(Duration::from_secs(60))
-        .user_agent(&format!("CleanDesk/{} (+https://github.com/{REPO})", env!("CARGO_PKG_VERSION")))
+        .user_agent(&format!("RotoDesk/{} (+https://github.com/{REPO})", env!("CARGO_PKG_VERSION")))
         .build()
 }
 
@@ -339,26 +339,26 @@ mod tests {
     #[test]
     fn sums_file_parses_both_styles() {
         let text = "# comment\n\
-                    0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef *CleanDesk-0.1.5-x64.msi\n\
+                    0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef *RotoDesk-0.1.5-x64.msi\n\
                     ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef0123456789  other.zip\n\
                     garbage line\n\
                     tooshort  x.msi\n";
         let sums = parse_sums(text);
         assert_eq!(sums.len(), 2);
-        assert_eq!(sums["CleanDesk-0.1.5-x64.msi"], "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        assert_eq!(sums["RotoDesk-0.1.5-x64.msi"], "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
         assert!(sums["other.zip"].starts_with("abcdef"));
     }
 
     fn fixture(tag: &str, with_sums: bool) -> serde_json::Value {
         let mut assets = vec![serde_json::json!({
-            "name": format!("CleanDesk-{}-x64.msi", tag.trim_start_matches('v')),
-            "browser_download_url": "https://github.com/EnriqueGF/CleanDesk/releases/download/v0.2.0/CleanDesk-0.2.0-x64.msi",
+            "name": format!("RotoDesk-{}-x64.msi", tag.trim_start_matches('v')),
+            "browser_download_url": "https://github.com/EnriqueGF/RotoDesk/releases/download/v0.2.0/RotoDesk-0.2.0-x64.msi",
             "size": 12_000_000
         })];
         if with_sums {
             assets.push(serde_json::json!({
                 "name": "SHA256SUMS",
-                "browser_download_url": "https://github.com/EnriqueGF/CleanDesk/releases/download/v0.2.0/SHA256SUMS",
+                "browser_download_url": "https://github.com/EnriqueGF/RotoDesk/releases/download/v0.2.0/SHA256SUMS",
                 "size": 200
             }));
         }
@@ -377,17 +377,17 @@ mod tests {
         let r = release_from_json(&fixture("v0.2.0", true), (0, 1, 4)).unwrap().unwrap();
         assert_eq!(r.version, (0, 2, 0));
         assert_eq!(r.version_string(), "0.2.0");
-        assert_eq!(r.msi.name, "CleanDesk-0.2.0-x64.msi");
+        assert_eq!(r.msi.name, "RotoDesk-0.2.0-x64.msi");
         assert_eq!(r.sums.name, SUMS_ASSET);
     }
 
     #[test]
     fn assets_with_the_wrong_name_or_host_are_refused() {
         let mut json = fixture("v0.2.0", true);
-        json["assets"][0]["name"] = serde_json::Value::String("CleanDesk-0.2.0-x64.msi\" & calc & \"".into());
+        json["assets"][0]["name"] = serde_json::Value::String("RotoDesk-0.2.0-x64.msi\" & calc & \"".into());
         assert!(release_from_json(&json, (0, 1, 4)).unwrap().is_none(), "no exact installer name: nothing offered");
         let mut json = fixture("v0.2.0", true);
-        json["assets"][0]["browser_download_url"] = serde_json::Value::String("https://evil.example/CleanDesk-0.2.0-x64.msi".into());
+        json["assets"][0]["browser_download_url"] = serde_json::Value::String("https://evil.example/RotoDesk-0.2.0-x64.msi".into());
         assert!(release_from_json(&json, (0, 1, 4)).is_err());
         assert!(is_release_asset_url("https://objects.githubusercontent.com/x/y"));
         assert!(!is_release_asset_url("http://github.com/x"));
@@ -417,12 +417,12 @@ mod tests {
     }
 
     /// The detached cmd script must survive cmd's quoting rules: run one that
-    /// waits on a child (like msiexec) and then "relaunches" (like CleanDesk),
+    /// waits on a child (like msiexec) and then "relaunches" (like RotoDesk),
     /// using paths with spaces, and check both steps happened.
     #[cfg(windows)]
     #[test]
     fn detached_script_waits_then_relaunches() {
-        let dir = std::env::temp_dir().join("cleandesk update test dir");
+        let dir = std::env::temp_dir().join("rotodesk update test dir");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let first = dir.join("first step.txt");
@@ -442,14 +442,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Talks to GitHub for real: `cargo test -p cleandesk-platform -- --ignored`.
+    /// Talks to GitHub for real: `cargo test -p rotodesk-platform -- --ignored`.
     #[test]
     #[ignore]
     fn live_check_against_github() {
         let newer = check("0.0.1").expect("GitHub reachable");
         let r = newer.expect("there is at least one published release with an MSI + SHA256SUMS");
         assert!(r.msi.size > 1_000_000);
-        let dir = std::env::temp_dir().join("cleandesk-update-test");
+        let dir = std::env::temp_dir().join("rotodesk-update-test");
         let path = download(&r, &dir, |_, _| {}).expect("download + checksum");
         assert!(path.is_file());
         let _ = std::fs::remove_dir_all(dir);

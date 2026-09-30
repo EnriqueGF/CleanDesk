@@ -1,27 +1,27 @@
-//! Tema visual de CleanDesk: fondo claro con acento verde.
+//! Tema visual de RotoDesk: fondo claro con acento verde.
 //!
 //! Centraliza colores, radios y espaciados para que la ventana principal, el
 //! visor y los diálogos compartan el mismo lenguaje visual. Todo son valores
-//! de `egui::Visuals`/`Style`; no hay recursos externos (fuentes o iconos), de
-//! modo que el binario sigue siendo autocontenido.
+//! de `egui::Visuals`/`Style`; fuentes e iconos se incluyen en el binario,
+//! de modo que la aplicación sigue siendo autocontenida.
 
 use egui::{Color32, CornerRadius, Margin, Stroke, Style, Visuals};
 
 // Paleta (claro / verde).
-pub const BG: Color32 = Color32::from_rgb(246, 248, 247); // fondo de página
+pub const BG: Color32 = Color32::from_rgb(244, 249, 247); // fondo de página
 pub const PANEL: Color32 = Color32::from_rgb(255, 255, 255); // cabecera, pie, ventanas
 pub const CARD: Color32 = Color32::from_rgb(255, 255, 255);
-pub const CARD_TINT: Color32 = Color32::from_rgb(232, 248, 242); // tarjetas verdosas
+pub const CARD_TINT: Color32 = Color32::from_rgb(218, 251, 241); // tarjetas verdosas
 pub const WIDGET: Color32 = Color32::from_rgb(243, 245, 244);
 pub const BORDER: Color32 = Color32::from_rgb(226, 232, 228);
 pub const BORDER_SOFT: Color32 = Color32::from_rgb(203, 213, 206);
-pub const TEXT: Color32 = Color32::from_rgb(23, 33, 28);
+pub const TEXT: Color32 = Color32::from_rgb(13, 30, 26);
 pub const TEXT_DIM: Color32 = Color32::from_rgb(86, 100, 92);
 pub const TEXT_MUTED: Color32 = Color32::from_rgb(140, 152, 145);
-pub const ACCENT: Color32 = Color32::from_rgb(0, 155, 114); // verde principal
-pub const ACCENT_STRONG: Color32 = Color32::from_rgb(0, 107, 80);
-pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(22, 190, 143);
-pub const ACCENT_DIM: Color32 = Color32::from_rgb(218, 245, 235); // fondos suaves verdes
+pub const ACCENT: Color32 = Color32::from_rgb(0, 125, 96); // texto y controles con contraste
+pub const ACCENT_STRONG: Color32 = Color32::from_rgb(0, 91, 70);
+pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(34, 211, 167); // verde del logo
+pub const ACCENT_DIM: Color32 = Color32::from_rgb(203, 247, 234);
 pub const WARN: Color32 = Color32::from_rgb(217, 119, 6);
 pub const DANGER: Color32 = Color32::from_rgb(220, 38, 38);
 pub const STAR: Color32 = Color32::from_rgb(245, 158, 11);
@@ -33,6 +33,12 @@ pub const RADIUS_SM: u8 = 9;
 
 /// Aplica el tema al contexto. Llamar una vez al crear la app.
 pub fn apply(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert("rotodesk-brand".into(), egui::FontData::from_static(
+        include_bytes!("../assets/fonts/BarlowCondensed-BlackItalic.ttf")).into());
+    fonts.families.insert(egui::FontFamily::Name("rotodesk-brand".into()),
+        vec!["rotodesk-brand".into()]);
+    ctx.set_fonts(fonts);
     let mut style: Style = (*ctx.style()).clone();
     let mut v = Visuals::light();
 
@@ -91,6 +97,23 @@ pub fn apply(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
+/// A compact, heavy italic wordmark inspired by the forum's visual character.
+pub fn wordmark(ui: &mut egui::Ui, size: f32) {
+    let family = egui::FontFamily::Name("rotodesk-brand".into());
+    let mut text = egui::text::LayoutJob::default();
+    for (part, color) in [("Roto", TEXT), ("Desk", ACCENT)] {
+        text.append(part, 0.0, egui::TextFormat {
+            font_id: egui::FontId::new(size, family.clone()), color, ..Default::default()
+        });
+    }
+    ui.label(text);
+}
+
+pub fn display_text(text: impl Into<String>, size: f32) -> egui::RichText {
+    egui::RichText::new(text).font(egui::FontId::new(size,
+        egui::FontFamily::Name("rotodesk-brand".into()))).color(TEXT)
+}
+
 /// Marco de tarjeta blanca con borde suave.
 pub fn card() -> egui::Frame {
     egui::Frame::new()
@@ -146,9 +169,9 @@ pub fn primary_button(text: &str) -> egui::Button<'static> {
     egui::Button::new(
         egui::RichText::new(text.to_owned())
             .strong()
-            .color(Color32::WHITE),
+            .color(TEXT),
     )
-    .fill(ACCENT)
+    .fill(ACCENT_LIGHT)
     .stroke(Stroke::NONE)
     .corner_radius(CornerRadius::same(RADIUS_SM))
 }
@@ -191,7 +214,7 @@ pub fn status_dot(ui: &mut egui::Ui, color: Color32, text: &str) {
 }
 
 /// Dibuja el ID en tres grupos grandes en verde.
-pub fn big_id(ui: &mut egui::Ui, id: cleandesk_proto::CleanDeskId) {
+pub fn big_id(ui: &mut egui::Ui, id: rotodesk_proto::RotoDeskId) {
     let s = id.to_string();
     ui.label(egui::RichText::new(s).size(38.0).strong().color(ACCENT));
 }
@@ -248,7 +271,7 @@ pub fn monitor_icon(painter: &egui::Painter, center: egui::Pos2, size: f32, colo
 
 /// Generated brand asset shared by the header, window and installer.
 pub fn brand(ui: &mut egui::Ui, size: f32) {
-    let id = egui::Id::new("cleandesk-brand-texture");
+    let id = egui::Id::new("rotodesk-brand-texture");
     let texture = ui
         .ctx()
         .data_mut(|data| data.get_temp::<egui::TextureHandle>(id));
@@ -262,7 +285,7 @@ pub fn brand(ui: &mut egui::Ui, size: f32) {
         );
         let texture = ui
             .ctx()
-            .load_texture("cleandesk-brand", color, egui::TextureOptions::LINEAR);
+            .load_texture("rotodesk-brand", color, egui::TextureOptions::LINEAR);
         ui.ctx()
             .data_mut(|data| data.insert_temp(id, texture.clone()));
         texture

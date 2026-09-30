@@ -1,7 +1,7 @@
 //! Shared server state: the device registry and active session routing table.
 //!
 //! Security invariants enforced here (see `docs/SECURITY.md`):
-//! * A CleanDesk ID is *derived* from the device's Ed25519 public key. The
+//! * A RotoDesk ID is *derived* from the device's Ed25519 public key. The
 //!   registry only ever stores an ID together with the key it was derived
 //!   from, so two different keys can never hold the same ID and a key can
 //!   never sit under a foreign ID.
@@ -15,8 +15,8 @@
 //!   per-connection budgets alone would let one machine open thousands of
 //!   sockets and grind registrations (each costs an Ed25519 verify).
 
-use cleandesk_proto::{
-    id::CleanDeskId,
+use rotodesk_proto::{
+    id::RotoDeskId,
     message::SignalMessage,
     session::{DeviceInfo, SessionId},
 };
@@ -42,7 +42,7 @@ pub const OUTBOUND_QUEUE: usize = 64;
 pub const CALLEE_BURST: u32 = 10;
 pub const CALLEE_WINDOW: Duration = Duration::from_secs(60);
 
-/// How long a CleanDesk ID stays reserved for the key that last registered
+/// How long a RotoDesk ID stays reserved for the key that last registered
 /// it. A different key that derives to the same ID (a ground collision, see
 /// `docs/SECURITY.md`) is refused for this long after the owner was last
 /// seen, even while the owner is offline.
@@ -165,7 +165,7 @@ pub struct Owner {
 /// a victim's ID cannot register while the victim is merely offline.
 #[derive(Default)]
 pub struct OwnerRegistry {
-    owners: Mutex<HashMap<CleanDeskId, Owner>>,
+    owners: Mutex<HashMap<RotoDeskId, Owner>>,
     path: Option<PathBuf>,
     hold: Duration,
 }
@@ -180,7 +180,7 @@ impl OwnerRegistry {
     /// set aside rather than overwritten.
     pub fn load(path: PathBuf) -> Self {
         let owners = match std::fs::read(&path) {
-            Ok(bytes) => match serde_json::from_slice::<HashMap<CleanDeskId, Owner>>(&bytes) {
+            Ok(bytes) => match serde_json::from_slice::<HashMap<RotoDeskId, Owner>>(&bytes) {
                 Ok(map) => map,
                 Err(e) => {
                     let aside = path.with_extension("json.corrupt");
@@ -207,11 +207,11 @@ impl OwnerRegistry {
 
     /// Record that `public_key` proved ownership of `id` now. `Err` when a
     /// different key still holds the ID.
-    pub fn claim(&self, id: CleanDeskId, public_key: &str) -> Result<(), RegisterError> {
+    pub fn claim(&self, id: RotoDeskId, public_key: &str) -> Result<(), RegisterError> {
         self.claim_at(id, public_key, unix_now())
     }
 
-    fn claim_at(&self, id: CleanDeskId, public_key: &str, now: u64) -> Result<(), RegisterError> {
+    fn claim_at(&self, id: RotoDeskId, public_key: &str, now: u64) -> Result<(), RegisterError> {
         let mut owners = self.owners.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(owner) = owners.get(&id) {
             let held = now.saturating_sub(owner.last_seen) < self.hold.as_secs();
@@ -223,7 +223,7 @@ impl OwnerRegistry {
         owners.insert(id, Owner { public_key: public_key.to_string(), last_seen: now });
         if owners.len() > MAX_OWNERS {
             // Drop the stalest fifth so this does not run on every claim.
-            let mut by_age: Vec<(CleanDeskId, u64)> = owners.iter().map(|(k, v)| (*k, v.last_seen)).collect();
+            let mut by_age: Vec<(RotoDeskId, u64)> = owners.iter().map(|(k, v)| (*k, v.last_seen)).collect();
             by_age.sort_by_key(|(_, seen)| *seen);
             for (k, _) in by_age.iter().take(MAX_OWNERS / 5) {
                 owners.remove(k);
@@ -263,8 +263,8 @@ fn unix_now() -> u64 {
 /// between the two endpoints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Session {
-    pub caller: CleanDeskId,
-    pub callee: CleanDeskId,
+    pub caller: RotoDeskId,
+    pub callee: RotoDeskId,
 }
 
 /// Why a registration was refused.
@@ -285,12 +285,12 @@ pub enum Role {
 /// Process-wide server state. Cheap to clone via `Arc`.
 #[derive(Default)]
 pub struct ServerState {
-    peers: DashMap<CleanDeskId, Peer>,
+    peers: DashMap<RotoDeskId, Peer>,
     sessions: DashMap<SessionId, Session>,
     next_conn: AtomicU64,
     ip_limits: IpLimits,
     owners: OwnerRegistry,
-    callee_limits: DashMap<CleanDeskId, RateLimiter>,
+    callee_limits: DashMap<RotoDeskId, RateLimiter>,
 }
 
 impl ServerState {
@@ -318,7 +318,7 @@ impl ServerState {
     }
 
     /// May `callee` receive another `IncomingRequest` now?
-    pub fn allow_incoming(&self, callee: CleanDeskId) -> bool {
+    pub fn allow_incoming(&self, callee: RotoDeskId) -> bool {
         let now = Instant::now();
         if self.callee_limits.len() > IP_TABLE_SOFT_CAP {
             self.callee_limits.retain(|_, rl| !rl.is_replenished_at(now));
@@ -332,7 +332,7 @@ impl ServerState {
     /// Is `conn` still the connection that holds `id`? A connection that
     /// was replaced by a newer registration of the same device must stop
     /// acting under the ID.
-    pub fn holds(&self, id: CleanDeskId, conn: ConnId) -> bool {
+    pub fn holds(&self, id: RotoDeskId, conn: ConnId) -> bool {
         self.peers.get(&id).map(|p| p.conn == conn).unwrap_or(false)
     }
 
@@ -354,7 +354,7 @@ impl ServerState {
         public_key: String,
         conn: ConnId,
         tx: Sender<SignalMessage>,
-    ) -> Result<CleanDeskId, RegisterError> {
+    ) -> Result<RotoDeskId, RegisterError> {
         let id = info.id;
         if let Some(existing) = self.peers.get(&id) {
             if existing.public_key != public_key {
@@ -365,7 +365,7 @@ impl ServerState {
             // is still alive there (e.g. the service helper while the GUI runs)
             // can stand down instead of believing it is reachable.
             let _ = existing.tx.try_send(SignalMessage::Error {
-                code: cleandesk_proto::message::ErrorCode::IdConflict,
+                code: rotodesk_proto::message::ErrorCode::IdConflict,
                 detail: "replaced by a newer registration of the same device".into(),
             });
             // Sessions that belonged to the old connection are dead: the peer
@@ -382,7 +382,7 @@ impl ServerState {
     /// Remove a peer and any sessions it participates in — but only if the
     /// entry still belongs to connection `conn`. A stale connection closing
     /// after a re-registration must not evict the live entry.
-    pub fn unregister(&self, id: CleanDeskId, conn: ConnId) {
+    pub fn unregister(&self, id: RotoDeskId, conn: ConnId) {
         let removed = self.peers.remove_if(&id, |_, p| p.conn == conn).is_some();
         if removed {
             self.sessions.retain(|_, s| s.caller != id && s.callee != id);
@@ -391,11 +391,11 @@ impl ServerState {
     }
 
     /// Look up a peer's outbound channel.
-    pub fn sender(&self, id: CleanDeskId) -> Option<Sender<SignalMessage>> {
+    pub fn sender(&self, id: RotoDeskId) -> Option<Sender<SignalMessage>> {
         self.peers.get(&id).map(|p| p.tx.clone())
     }
 
-    pub fn is_online(&self, id: CleanDeskId) -> bool {
+    pub fn is_online(&self, id: RotoDeskId) -> bool {
         self.peers.contains_key(&id)
     }
 
@@ -410,7 +410,7 @@ impl ServerState {
     /// Create a session routing entry. Any previous session between the same
     /// two endpoints (in this direction) is superseded, so a caller retrying
     /// cannot accumulate entries.
-    pub fn open_session(&self, session: SessionId, caller: CleanDeskId, callee: CleanDeskId) {
+    pub fn open_session(&self, session: SessionId, caller: RotoDeskId, callee: RotoDeskId) {
         self.sessions.retain(|_, s| !(s.caller == caller && s.callee == callee));
         self.sessions.insert(session, Session { caller, callee });
     }
@@ -420,7 +420,7 @@ impl ServerState {
     }
 
     /// The role `me` plays in `session`, if `me` is part of it at all.
-    pub fn role_in(&self, session: SessionId, me: CleanDeskId) -> Option<Role> {
+    pub fn role_in(&self, session: SessionId, me: RotoDeskId) -> Option<Role> {
         let s = *self.sessions.get(&session)?;
         if s.caller == me {
             Some(Role::Caller)
@@ -435,7 +435,7 @@ impl ServerState {
     pub fn peer_across(
         &self,
         session: SessionId,
-        me: CleanDeskId,
+        me: RotoDeskId,
     ) -> Option<Sender<SignalMessage>> {
         let s = *self.sessions.get(&session)?;
         let other = match self.role_in(session, me)? {
@@ -502,8 +502,8 @@ mod tests {
     use tokio::sync::mpsc;
     use uuid::Uuid;
 
-    fn id(n: u64) -> CleanDeskId {
-        CleanDeskId::new(n).unwrap()
+    fn id(n: u64) -> RotoDeskId {
+        RotoDeskId::new(n).unwrap()
     }
 
     fn info(n: u64) -> DeviceInfo {
@@ -535,7 +535,7 @@ mod tests {
 
     #[test]
     fn owner_registry_round_trips_through_disk() {
-        let dir = std::env::temp_dir().join(format!("cleandesk-owners-{}", Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("rotodesk-owners-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("owners.json");
         let reg = OwnerRegistry::load(path.clone());

@@ -1,10 +1,10 @@
 //! End-to-end tests against the public API only (as a consumer such as
-//! `cleandesk-host`/`cleandesk-client` would use it): build a `RawFrame`,
+//! `rotodesk-host`/`rotodesk-client` would use it): build a `RawFrame`,
 //! push it through `TileEncoder`, pull it back through `TileDecoder`, check
 //! what comes out.
 
-use cleandesk_codec::{DecodedImage, RawFrame, TileDecoder, TileEncoder, VideoDecoder, VideoEncoder};
-use cleandesk_proto::quality::QualityParams;
+use rotodesk_codec::{DecodedImage, RawFrame, TileDecoder, TileEncoder, VideoDecoder, VideoEncoder};
+use rotodesk_proto::quality::QualityParams;
 
 fn balanced_params() -> QualityParams {
     QualityParams { target_fps: 30, quality: 75, subsample: true }

@@ -1,15 +1,15 @@
-# CleanDesk — Architecture
+# RotoDesk — Architecture
 
 ## Design goal
 
 A **low-latency**, **secure** and **lightweight** remote desktop, with a
 **P2P-by-default** connection and a **relay** only as a last resort. All in
-Rust, with a clear contract boundary (`cleandesk-proto`) shared by client, host,
+Rust, with a clear contract boundary (`rotodesk-proto`) shared by client, host,
 server and relay.
 
 ## Communication planes
 
-CleanDesk separates three planes, each with its optimal serialization:
+RotoDesk separates three planes, each with its optimal serialization:
 
 | Plane | Channel | Serialization | Content |
 |---|---|---|---|
@@ -35,8 +35,8 @@ host       ← host role: capture→encode→send; receive→inject input
 client     ← viewer role: receive→decode; capture→send input
 gui        ← eframe/egui: main window + session viewer
 app        ← binary: GUI / --host / --connect modes
-signal-server ← binary: CleanDesk Server (signaling)
-relay-server  ← binary: CleanDesk Relay (TURN fallback; --community announces itself in the DHT)
+signal-server ← binary: RotoDesk Server (signaling)
+relay-server  ← binary: RotoDesk Relay (TURN fallback; --community announces itself in the DHT)
 platform   ← OS integration: start with Windows, SCM service, presence lock
 discovery  ← serverless rendezvous: mDNS, BitTorrent DHT (BEP 44), Nostr, UPnP
 ```
@@ -53,16 +53,16 @@ transport ─► proto     signal-server ─► proto, crypto
 
 ## Community mode (serverless)
 
-`cleandesk-discovery` replaces the CleanDesk Server with public infrastructure:
+`rotodesk-discovery` replaces the RotoDesk Server with public infrastructure:
 
 | Need | Mechanism |
 |---|---|
-| Find a machine on the LAN | mDNS `_cleandesk._tcp` with ID, key and port in the TXT record |
+| Find a machine on the LAN | mDNS `_rotodesk._tcp` with ID, key and port in the TXT record |
 | Find a machine by ID on the Internet | BitTorrent mainline DHT: BEP 44 mutable item signed with the host's key, published under its key and under a key derived from the ID |
 | Exchange SDP/ICE when the host is reachable | direct TCP link (port 7423) with mutual Ed25519 challenge-response |
 | Exchange SDP/ICE when it is not | ephemeral events (kind 27420) on public Nostr relays, NIP-44 encrypted and with an Ed25519↔Nostr binding signature |
 | Be reachable behind the router | UPnP/IGD: mapping of 7423/TCP and 7424/UDP; the external IP is announced as a 1:1 ICE candidate |
-| Plan B with no direct route | community TURN relays (`cleandesk-relay-server --community`) announced with `announce_peer` on a well-known infohash |
+| Plan B with no direct route | community TURN relays (`rotodesk-relay-server --community`) announced with `announce_peer` on a well-known infohash |
 
 Every 10 min the host publishes a signed `Record` {key, Nostr key, endpoints,
 time}. The viewer resolves LAN → DHT by pinned key → DHT by ID, verifies the
@@ -73,7 +73,7 @@ minting the session.
 
 ## Connection flow (summary)
 
-1. Both clients register with the **CleanDesk Server** (WS): they send their
+1. Both clients register with the **RotoDesk Server** (WS): they send their
    Ed25519 public key and the ID derived from it, sign the server's nonce
    (`RegisterChallenge` → `RegisterProof`) and receive `Registered`. The server
    rejects IDs that do not derive from the key, and invalid signatures.

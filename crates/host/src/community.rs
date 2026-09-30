@@ -1,4 +1,4 @@
-//! Community-mode host: no CleanDesk Server in the loop.
+//! Community-mode host: no RotoDesk Server in the loop.
 //!
 //! On start the host:
 //! 1. binds the direct-signaling TCP listener and (best effort) maps it plus
@@ -25,7 +25,7 @@
 
 use crate::{emit, HostConfig, HostCore, HostEvent, Approver};
 use anyhow::{Context, Result};
-use cleandesk_discovery::{
+use rotodesk_discovery::{
     dht::DhtNode,
     direct::{DirectLink, DirectListener},
     lan::LanAnnouncer,
@@ -34,11 +34,11 @@ use cleandesk_discovery::{
     upnp::{MapRequest, PortMapping, Protocol},
     COMMUNITY_TURN_PASS, COMMUNITY_TURN_USER, DEFAULT_DIRECT_PORT, DEFAULT_ICE_UDP_PORT,
 };
-use cleandesk_proto::{
+use rotodesk_proto::{
     message::{AuthKind, ErrorCode, SignalMessage},
     session::{DeviceInfo, SessionId},
 };
-use cleandesk_transport::{QueueOut, SignalOut, TurnServer};
+use rotodesk_transport::{QueueOut, SignalOut, TurnServer};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -58,7 +58,7 @@ pub struct CommunityOptions {
     pub ice_udp_port: u16,
     /// Try UPnP/IGD port mapping.
     pub upnp: bool,
-    /// Nostr relays; empty = defaults / `CLEANDESK_NOSTR_RELAYS`.
+    /// Nostr relays; empty = defaults / `ROTODESK_NOSTR_RELAYS`.
     pub nostr_relays: Vec<String>,
     /// Use the DHT (disable only for LAN-only setups).
     pub dht: bool,
@@ -107,7 +107,7 @@ enum LinkId {
 
 struct Link {
     out: Arc<dyn SignalOut>,
-    peer_id: cleandesk_proto::CleanDeskId,
+    peer_id: rotodesk_proto::RotoDeskId,
     /// The peer's Ed25519 key (base64), proven by the link's handshake or
     /// envelope; what the rate limiter keys on.
     peer_key: String,
@@ -119,7 +119,7 @@ struct Link {
 }
 
 impl Link {
-    fn new(out: Arc<dyn SignalOut>, peer_id: cleandesk_proto::CleanDeskId, peer_key: String, peer_device: Option<DeviceInfo>, now: Instant) -> Self {
+    fn new(out: Arc<dyn SignalOut>, peer_id: rotodesk_proto::RotoDeskId, peer_key: String, peer_device: Option<DeviceInfo>, now: Instant) -> Self {
         Self { out, peer_id, peer_key, peer_device, last_seen: now, closed: Arc::new(AtomicBool::new(false)) }
     }
 
@@ -299,7 +299,7 @@ pub async fn serve_community(config: HostConfig, approver: Arc<dyn Approver>) ->
         if let Some(m) = mapping {
             endpoints.push(m.external_addr(direct_port));
         }
-        for ip in cleandesk_discovery::upnp::local_addresses() {
+        for ip in rotodesk_discovery::upnp::local_addresses() {
             endpoints.push(SocketAddr::new(ip, direct_port));
         }
         let mut record = Record::new(
@@ -307,11 +307,11 @@ pub async fn serve_community(config: HostConfig, approver: Arc<dyn Approver>) ->
             nostr_hex.clone(),
             endpoints,
             alias.clone(),
-            cleandesk_discovery_now(),
+            rotodesk_discovery_now(),
         );
         // Viewers keep the MAC with the contact so they can wake this
         // machine later (Wake-on-LAN); `set_mac` re-signs the record.
-        record.set_mac(&record_identity, cleandesk_discovery::wol::local_mac_address());
+        record.set_mac(&record_identity, rotodesk_discovery::wol::local_mac_address());
         record
     };
     if let Some(node) = &dht {
@@ -528,7 +528,7 @@ fn translate(
     msg: SignalMessage,
     link_id: &LinkId,
     link: &Link,
-    my_id: cleandesk_proto::CleanDeskId,
+    my_id: rotodesk_proto::RotoDeskId,
     sessions: &mut HashMap<SessionId, SessionBinding>,
     now: Instant,
 ) -> Option<SignalMessage> {
@@ -620,7 +620,7 @@ fn spawn_direct_driver(
     });
 }
 
-fn cleandesk_discovery_now() -> u64 {
+fn rotodesk_discovery_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -630,11 +630,11 @@ fn cleandesk_discovery_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cleandesk_proto::CleanDeskId;
+    use rotodesk_proto::RotoDeskId;
 
     fn link(now: Instant, key: &str) -> (Link, mpsc::UnboundedReceiver<SignalMessage>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (Link::new(Arc::new(QueueOut(tx)), CleanDeskId::new(100_000_001).unwrap(), key.into(), None, now), rx)
+        (Link::new(Arc::new(QueueOut(tx)), RotoDeskId::new(100_000_001).unwrap(), key.into(), None, now), rx)
     }
 
     #[test]
@@ -727,18 +727,18 @@ mod tests {
     #[test]
     fn translate_binds_sessions_to_their_link() {
         let t0 = Instant::now();
-        let my_id = CleanDeskId::new(100_000_009).unwrap();
+        let my_id = RotoDeskId::new(100_000_009).unwrap();
         let mut sessions = HashMap::new();
         let (a, _ra) = link(t0, "a");
         let (b, _rb) = link(t0, "b");
-        let req = |from: CleanDeskId| SignalMessage::ConnectRequest {
+        let req = |from: RotoDeskId| SignalMessage::ConnectRequest {
             target: my_id,
             from: DeviceInfo { id: from, alias: None, hostname: String::new(), os: "t".into(), app_version: "0".into() },
-            requested: cleandesk_proto::permissions::Permissions::interactive(),
-            quality: cleandesk_proto::quality::QualityProfile::Auto,
+            requested: rotodesk_proto::permissions::Permissions::interactive(),
+            quality: rotodesk_proto::quality::QualityProfile::Auto,
             auth_proof: None,
         };
-        let forged = CleanDeskId::new(100_000_002).unwrap();
+        let forged = RotoDeskId::new(100_000_002).unwrap();
         let Some(SignalMessage::IncomingRequest { session, from, .. }) =
             translate(req(forged), &LinkId::Direct(1), &a, my_id, &mut sessions, t0)
         else {
@@ -746,7 +746,7 @@ mod tests {
         };
         assert_eq!(from.id, a.peer_id, "self-declared id is replaced by the proven one");
         // Signals on that session from another link are dropped.
-        let sig = SignalMessage::Signal { session, payload: cleandesk_proto::message::SignalPayload::Answer { sdp: String::new() } };
+        let sig = SignalMessage::Signal { session, payload: rotodesk_proto::message::SignalPayload::Answer { sdp: String::new() } };
         assert!(translate(sig.clone(), &LinkId::Direct(2), &b, my_id, &mut sessions, t0).is_none());
         assert!(translate(sig, &LinkId::Direct(1), &a, my_id, &mut sessions, t0).is_some());
         // A retry from the same link replaces its pending session.
@@ -755,10 +755,10 @@ mod tests {
         assert!(!sessions.contains_key(&session));
         // Requests for another id are ignored.
         let other = SignalMessage::ConnectRequest {
-            target: CleanDeskId::new(100_000_003).unwrap(),
+            target: RotoDeskId::new(100_000_003).unwrap(),
             from: DeviceInfo { id: forged, alias: None, hostname: String::new(), os: "t".into(), app_version: "0".into() },
-            requested: cleandesk_proto::permissions::Permissions::interactive(),
-            quality: cleandesk_proto::quality::QualityProfile::Auto,
+            requested: rotodesk_proto::permissions::Permissions::interactive(),
+            quality: rotodesk_proto::quality::QualityProfile::Auto,
             auth_proof: None,
         };
         assert!(translate(other, &LinkId::Direct(1), &a, my_id, &mut sessions, t0).is_none());
@@ -770,10 +770,10 @@ mod tests {
         let mut limiter = ConnectLimiter::new(1, 10, Duration::from_secs(60), t0);
         let (l, mut rx) = link(t0, "k");
         let req = SignalMessage::ConnectRequest {
-            target: CleanDeskId::new(100_000_009).unwrap(),
+            target: RotoDeskId::new(100_000_009).unwrap(),
             from: DeviceInfo { id: l.peer_id, alias: None, hostname: String::new(), os: "t".into(), app_version: "0".into() },
-            requested: cleandesk_proto::permissions::Permissions::interactive(),
-            quality: cleandesk_proto::quality::QualityProfile::Auto,
+            requested: rotodesk_proto::permissions::Permissions::interactive(),
+            quality: rotodesk_proto::quality::QualityProfile::Auto,
             auth_proof: None,
         };
         assert!(gate_connect(&req, &l, &mut limiter, t0).await);

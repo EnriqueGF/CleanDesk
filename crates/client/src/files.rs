@@ -1,6 +1,6 @@
 //! File transfer on the viewer (spec section 13): sending local files to the
 //! host and receiving files the host offers. Byte accounting, flow control
-//! and naming rules come from `cleandesk_proto::files`; this module adds the
+//! and naming rules come from `rotodesk_proto::files`; this module adds the
 //! disk and channel I/O and turns everything into [`ClientEvent`]s.
 //!
 //! One task ([`run_files`]) owns all transfer state for a session. Each
@@ -9,13 +9,13 @@
 
 use crate::ClientEvent;
 use bytes::Bytes;
-use cleandesk_proto::{
+use rotodesk_proto::{
     files::{dedupe_file_name, FileChunk, IncomingTable, Outgoing, PROGRESS_INTERVAL},
     frame,
     message::{FileTransferMsg, SessionMessage},
     permissions::Permissions,
 };
-use cleandesk_transport::{Channel, PeerConnection};
+use rotodesk_transport::{Channel, PeerConnection};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -25,12 +25,12 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 /// Where received files go when the embedder configured nothing: the OS
-/// downloads folder (or the temp dir as a last resort) plus `CleanDesk`.
+/// downloads folder (or the temp dir as a last resort) plus `RotoDesk`.
 pub fn default_downloads_dir() -> PathBuf {
     directories::UserDirs::new()
         .and_then(|u| u.download_dir().map(Path::to_path_buf))
         .unwrap_or_else(std::env::temp_dir)
-        .join("CleanDesk")
+        .join("RotoDesk")
 }
 
 /// Pick a non-colliding path for `name` inside `dir`.
@@ -383,7 +383,7 @@ async fn send_file_inner(
     }
 
     let mut file = tokio::fs::File::open(path).await.map_err(|e| local_failure(format!("cannot open file: {e}")))?;
-    let mut buf = vec![0u8; cleandesk_proto::files::MAX_CHUNK_DATA];
+    let mut buf = vec![0u8; rotodesk_proto::files::MAX_CHUNK_DATA];
     let mut last_event_at = 0u64;
     loop {
         // Apply whatever arrived without blocking (acks widen the window).
@@ -455,10 +455,10 @@ mod tests {
 
     #[test]
     fn unique_path_sanitised_names_dedupe_against_disk() {
-        let dir = std::env::temp_dir().join(format!("cleandesk-client-files-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rotodesk-client-files-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let name = cleandesk_proto::files::sanitize_file_name("..\\..\\report.pdf");
+        let name = rotodesk_proto::files::sanitize_file_name("..\\..\\report.pdf");
         assert_eq!(name, "report.pdf");
         assert_eq!(unique_path(&dir, &name), dir.join("report.pdf"));
         std::fs::write(dir.join("report.pdf"), b"x").unwrap();
@@ -466,7 +466,7 @@ mod tests {
         std::fs::write(dir.join("report (2).pdf"), b"x").unwrap();
         assert_eq!(unique_path(&dir, &name), dir.join("report (3).pdf"));
         // The chosen path always stays inside the downloads dir.
-        assert!(unique_path(&dir, &cleandesk_proto::files::sanitize_file_name("../../x")).starts_with(&dir));
+        assert!(unique_path(&dir, &rotodesk_proto::files::sanitize_file_name("../../x")).starts_with(&dir));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

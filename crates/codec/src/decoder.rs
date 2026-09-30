@@ -9,7 +9,7 @@
 
 use std::io::Read;
 
-use cleandesk_proto::message::VideoFrame;
+use rotodesk_proto::message::VideoFrame;
 use tracing::{debug, trace};
 
 use crate::{
@@ -206,13 +206,13 @@ impl TileDecoder {
         }
         let canvas = match (&mut self.canvas, frame.keyframe) {
             (Some(canvas), true) => {
-                debug!(width = frame.width, height = frame.height, "cleandesk-codec: resetting canvas");
+                debug!(width = frame.width, height = frame.height, "rotodesk-codec: resetting canvas");
                 canvas.reset(frame.width, frame.height);
                 canvas
             }
             (Some(canvas), false) => canvas,
             (slot @ None, _) => {
-                debug!(width = frame.width, height = frame.height, "cleandesk-codec: allocating canvas");
+                debug!(width = frame.width, height = frame.height, "rotodesk-codec: allocating canvas");
                 slot.insert(Canvas::blank(frame.width, frame.height))
             }
         };
@@ -244,7 +244,7 @@ impl TileDecoder {
             sequence = frame.sequence,
             keyframe = frame.keyframe,
             tiles = parsed.tiles.len(),
-            "cleandesk-codec: decoded frame"
+            "rotodesk-codec: decoded frame"
         );
 
         out.clear();

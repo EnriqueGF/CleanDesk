@@ -1,8 +1,8 @@
 //! Process elevation (spec §24, privileged control).
 //!
 //! A medium-integrity process cannot send input to windows of an elevated
-//! (administrator) program: UIPI silently drops it. CleanDesk therefore offers
-//! *privileged control*: preferably the CleanDesk service hosts (it runs as
+//! (administrator) program: UIPI silently drops it. RotoDesk therefore offers
+//! *privileged control*: preferably the RotoDesk service hosts (it runs as
 //! LocalSystem and can even follow the UAC secure desktop, see
 //! [`crate::desktop`]); when the service is not installed, the app can
 //! relaunch itself elevated so at least administrator windows on the normal

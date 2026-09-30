@@ -12,7 +12,7 @@
 //!   loopback, link-local, private (RFC 1918 / ULA), shared-address-space and
 //!   multicast ranges would let any client poke at the relay operator's own
 //!   machine and network; those datagrams are silently dropped unless the
-//!   operator opts in (`CLEANDESK_RELAY_ALLOW_PRIVATE_PEERS=1`, for a relay
+//!   operator opts in (`ROTODESK_RELAY_ALLOW_PRIVATE_PEERS=1`, for a relay
 //!   that serves a private LAN). Datagrams *from* such sources are dropped
 //!   too, so a spoofed "peer" inside the network cannot be reflected out.
 //! * **Quotas.** Each allocation (one relay socket) may live at most

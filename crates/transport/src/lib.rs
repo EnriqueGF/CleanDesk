@@ -1,15 +1,15 @@
-//! cleandesk-transport
+//! rotodesk-transport
 //!
-//! The transport backbone shared by the CleanDesk host and client:
+//! The transport backbone shared by the RotoDesk host and client:
 //!
-//! * [`SignalingClient`] — speaks JSON [`SignalMessage`](cleandesk_proto::message::SignalMessage)
-//!   over a WebSocket to the CleanDesk Server (registration, connection
+//! * [`SignalingClient`] — speaks JSON [`SignalMessage`](rotodesk_proto::message::SignalMessage)
+//!   over a WebSocket to the RotoDesk Server (registration, connection
 //!   requests, and SDP/ICE relay).
 //! * [`PeerConnection`] — a WebRTC peer connection (ICE/STUN/TURN + DTLS) with
-//!   the four named data channels ([`Channel`]) CleanDesk sessions use.
+//!   the four named data channels ([`Channel`]) RotoDesk sessions use.
 //!
 //! Both are implemented from public standards (WebRTC, ICE/STUN/TURN,
-//! WebSocket); the wire contract itself lives in `cleandesk-proto`.
+//! WebSocket); the wire contract itself lives in `rotodesk-proto`.
 
 pub mod error;
 pub mod peer;

@@ -1,24 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  CleanDesk Windows installer (WiX 3.x).
+  RotoDesk Windows installer (WiX 3.x).
 
   Build with installer/build-msi.ps1 (it runs cargo build -release, then
-  candle/light). Installs cleandesk.exe under Program Files, adds Start Menu
+  candle/light). Installs rotodesk.exe under Program Files, adds Start Menu
   and Desktop shortcuts and an Add/Remove Programs entry. Upgrades are
   handled by MajorUpgrade with a stable UpgradeCode; the ProductId is
   regenerated on every build ("*").
 
   Install options (also settable on the msiexec command line for silent
-  installs, e.g. `msiexec /i CleanDesk.msi /qn STARTWITHWINDOWS=0
+  installs, e.g. `msiexec /i RotoDesk.msi /qn STARTWITHWINDOWS=0
   INSTALLDESKTOPSHORTCUT=0`):
-    STARTWITHWINDOWS       "1" (default) writes the HKCU Run value "CleanDesk"
+    STARTWITHWINDOWS       "1" (default) writes the HKCU Run value "RotoDesk"
                            so the app starts at sign-in. The app's own
                            "Start with Windows" setting writes the same value
                            name, so both stay consistent.
     INSTALLDESKTOPSHORTCUT "1" (default) creates the desktop shortcut.
   The interactive UI exposes both on the OptionsDlg page (WixUI_FeatureTree
   with OptionsDlg inserted between the license and the feature tree) and
-  offers "Launch CleanDesk" on the exit page.
+  offers "Launch RotoDesk" on the exit page.
 
   The Windows service is not installed by the MSI on purpose: the app installs
   it on demand from Settings → System (UAC prompt), so users who only want the
@@ -28,25 +28,25 @@
      xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension"
      xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
   <Product Id="*"
-           Name="CleanDesk"
+           Name="RotoDesk"
            Language="1033"
            Codepage="1252"
            Version="$(var.Version)"
-           Manufacturer="CleanDesk"
+           Manufacturer="RotoDesk"
            UpgradeCode="8B1B0E52-6C1D-4F5B-9C8E-3A2D1E7F0C11">
 
     <Package InstallerVersion="500"
              Compressed="yes"
              InstallScope="perMachine"
-             Description="CleanDesk: fast, lightweight and secure remote desktop"
-             Manufacturer="CleanDesk" />
+             Description="RotoDesk: fast, lightweight and secure remote desktop"
+             Manufacturer="RotoDesk" />
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of CleanDesk is already installed." />
+    <MajorUpgrade Schedule="afterInstallExecute" DowngradeErrorMessage="A newer version of RotoDesk is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <Icon Id="cleandesk.ico" SourceFile="$(var.SourceDir)\installer\cleandesk.ico" />
-    <Property Id="ARPPRODUCTICON" Value="cleandesk.ico" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/EnriqueGF/CleanDesk" />
+    <Icon Id="rotodesk.ico" SourceFile="$(var.SourceDir)\installer\rotodesk.ico" />
+    <Property Id="ARPPRODUCTICON" Value="rotodesk.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/EnriqueGF/RotoDesk" />
     <Property Id="ARPNOMODIFY" Value="1" />
 
     <!-- Install options. Secure="yes" so values passed on the command line
@@ -56,78 +56,89 @@
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
-        <Directory Id="INSTALLFOLDER" Name="CleanDesk" />
+        <Directory Id="INSTALLFOLDER" Name="RotoDesk" />
       </Directory>
       <Directory Id="ProgramMenuFolder">
-        <Directory Id="ProgramMenuDir" Name="CleanDesk" />
+        <Directory Id="ProgramMenuDir" Name="RotoDesk" />
       </Directory>
       <Directory Id="DesktopFolder" />
     </Directory>
 
     <DirectoryRef Id="INSTALLFOLDER">
-      <Component Id="MainExecutable" Guid="2F6C4A9E-1B3D-4E7A-8C5F-6D2E9A0B1C33" Win64="yes">
-        <File Id="cleandesk.exe"
-              Source="$(var.SourceDir)\target\release\cleandesk.exe"
+      <Component Id="BrandCredits" Guid="*" Win64="yes">
+        <File Id="BrandCreditsFile" Name="BRAND.txt" Source="$(var.SourceDir)\crates\gui\assets\BRAND.txt" KeyPath="yes" />
+      </Component>
+      <Component Id="FontLicense" Guid="*" Win64="yes">
+        <File Id="FontLicenseFile" Name="OFL-BarlowCondensed.txt" Source="$(var.SourceDir)\crates\gui\assets\fonts\OFL-BarlowCondensed.txt" KeyPath="yes" />
+      </Component>
+      <Component Id="MainExecutable" Guid="*" Win64="yes">
+        <File Id="rotodesk.exe"
+              Source="$(var.SourceDir)\target\release\rotodesk.exe"
               KeyPath="yes" />
+        <!-- Transitional SCM lookup: the previous manually installed service
+             must stop before its executable is removed by the major upgrade. -->
+        <ServiceControl Id="StopLegacyService" Name="CleanDesk" Stop="install" Wait="yes" />
         <!-- Inbound rules so LAN discovery, direct signaling and ICE work
              without a manual firewall prompt. -->
-        <fire:FirewallException Id="FwDirect" Name="CleanDesk (direct signaling)"
+        <fire:FirewallException Id="FwDirect" Name="RotoDesk (direct signaling)"
                                 Port="7423" Protocol="tcp" Scope="any" IgnoreFailure="yes" />
-        <fire:FirewallException Id="FwIce" Name="CleanDesk (WebRTC)"
+        <fire:FirewallException Id="FwIce" Name="RotoDesk (WebRTC)"
                                 Port="7424" Protocol="udp" Scope="any" IgnoreFailure="yes" />
-        <fire:FirewallException Id="FwMdns" Name="CleanDesk (mDNS)"
+        <fire:FirewallException Id="FwMdns" Name="RotoDesk (mDNS)"
                                 Port="5353" Protocol="udp" Scope="localSubnet" IgnoreFailure="yes" />
       </Component>
-      <Component Id="RelayExecutable" Guid="7A1E2D3C-4B5F-4A6E-9D8C-0F1E2D3C4B55" Win64="yes">
-        <File Id="cleandesk_relay_server.exe"
-              Source="$(var.SourceDir)\target\release\cleandesk-relay-server.exe"
+      <Component Id="RelayExecutable" Guid="*" Win64="yes">
+        <File Id="rotodesk_relay_server.exe"
+              Source="$(var.SourceDir)\target\release\rotodesk-relay-server.exe"
               KeyPath="yes" />
       </Component>
-      <Component Id="SignalExecutable" Guid="C3D4E5F6-A7B8-4C9D-8E0F-1A2B3C4D5E66" Win64="yes">
-        <File Id="cleandesk_signal_server.exe"
-              Source="$(var.SourceDir)\target\release\cleandesk-signal-server.exe"
+      <Component Id="SignalExecutable" Guid="*" Win64="yes">
+        <File Id="rotodesk_signal_server.exe"
+              Source="$(var.SourceDir)\target\release\rotodesk-signal-server.exe"
               KeyPath="yes" />
       </Component>
       <!-- Autostart at sign-in for the installing user. Same value name the
            app writes from its own settings page, so toggling either side
            keeps a single entry. -->
-      <Component Id="StartWithWindows" Guid="D4E5F6A7-B8C9-4D0E-9F1A-2B3C4D5E6F99" Win64="yes">
+      <Component Id="StartWithWindows" Guid="*" Win64="yes">
         <Condition>STARTWITHWINDOWS = "1"</Condition>
         <RegistryValue Root="HKCU"
                        Key="Software\Microsoft\Windows\CurrentVersion\Run"
-                       Name="CleanDesk"
+                       Name="RotoDesk"
                        Type="string"
-                       Value="&quot;[INSTALLFOLDER]cleandesk.exe&quot;"
+                       Value="&quot;[INSTALLFOLDER]rotodesk.exe&quot;"
                        KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
     <DirectoryRef Id="ProgramMenuDir">
-      <Component Id="StartMenuShortcut" Guid="5E6F7A8B-9C0D-4E1F-A2B3-C4D5E6F7A877">
-        <Shortcut Id="StartMenuCleanDesk"
-                  Name="CleanDesk"
-                  Description="CleanDesk remote desktop"
-                  Target="[INSTALLFOLDER]cleandesk.exe"
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="StartMenuRotoDesk"
+                  Name="RotoDesk"
+                  Description="RotoDesk remote desktop"
+                  Target="[INSTALLFOLDER]rotodesk.exe"
                   WorkingDirectory="INSTALLFOLDER"
-                  Icon="cleandesk.ico" />
+                  Icon="rotodesk.ico" />
         <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
-        <RegistryValue Root="HKCU" Key="Software\CleanDesk" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
+        <RegistryValue Root="HKCU" Key="Software\RotoDesk" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
     <DirectoryRef Id="DesktopFolder">
-      <Component Id="DesktopShortcut" Guid="9A0B1C2D-3E4F-4A5B-8C7D-6E5F4A3B2C88">
+      <Component Id="DesktopShortcut" Guid="*">
         <Condition>INSTALLDESKTOPSHORTCUT = "1"</Condition>
-        <Shortcut Id="DesktopCleanDesk"
-                  Name="CleanDesk"
-                  Target="[INSTALLFOLDER]cleandesk.exe"
+        <Shortcut Id="DesktopRotoDesk"
+                  Name="RotoDesk"
+                  Target="[INSTALLFOLDER]rotodesk.exe"
                   WorkingDirectory="INSTALLFOLDER"
-                  Icon="cleandesk.ico" />
-        <RegistryValue Root="HKCU" Key="Software\CleanDesk" Name="Desktop" Type="integer" Value="1" KeyPath="yes" />
+                  Icon="rotodesk.ico" />
+        <RegistryValue Root="HKCU" Key="Software\RotoDesk" Name="Desktop" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
-    <Feature Id="Main" Title="CleanDesk" Level="1" Absent="disallow">
+    <Feature Id="Main" Title="RotoDesk" Level="1" Absent="disallow">
+      <ComponentRef Id="BrandCredits" />
+      <ComponentRef Id="FontLicense" />
       <ComponentRef Id="MainExecutable" />
       <ComponentRef Id="StartMenuShortcut" />
       <ComponentRef Id="DesktopShortcut" />
@@ -138,16 +149,21 @@
       <ComponentRef Id="SignalExecutable" />
     </Feature>
 
-    <!-- "Launch CleanDesk" checkbox on the exit page. -->
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch CleanDesk" />
+    <!-- "Launch RotoDesk" checkbox on the exit page. -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch RotoDesk" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
-    <Property Id="WixShellExecTarget" Value="[#cleandesk.exe]" />
-    <CustomAction Id="LaunchCleanDesk"
+    <Property Id="WixShellExecTarget" Value="[#rotodesk.exe]" />
+    <CustomAction Id="MigrateLegacyService" FileKey="rotodesk.exe" ExeCommand="--migrate-service"
+                  Execute="deferred" Impersonate="no" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="MigrateLegacyService" After="InstallFiles">NOT REMOVE</Custom>
+    </InstallExecuteSequence>
+    <CustomAction Id="LaunchRotoDesk"
                   BinaryKey="WixCA"
                   DllEntry="WixShellExec"
                   Impersonate="yes" />
 
-    <UI Id="WixUI_CleanDesk">
+    <UI Id="WixUI_RotoDesk">
       <UIRef Id="WixUI_FeatureTree" />
 
       <!-- Options page inserted between the license and the feature tree.
@@ -158,11 +174,11 @@
         <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.LicenseAgreementDlgBannerBitmap)" />
         <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
         <Control Id="Title" Type="Text" X="15" Y="6" Width="300" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Install options" />
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="340" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose how CleanDesk integrates with Windows." />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="340" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose how RotoDesk integrates with Windows." />
 
         <Control Id="StartWithWindowsCheck" Type="CheckBox" X="26" Y="70" Width="320" Height="17"
                  Property="STARTWITHWINDOWS" CheckBoxValue="1"
-                 Text="&amp;Start CleanDesk when I sign in" />
+                 Text="&amp;Start RotoDesk when I sign in" />
         <Control Id="StartWithWindowsHelp" Type="Text" X="40" Y="88" Width="310" Height="24" NoPrefix="yes"
                  Text="Keeps the host reachable after a reboot. You can change this later from Settings." />
 
@@ -183,7 +199,7 @@
       <Publish Dialog="OptionsDlg" Control="Next" Event="NewDialog" Value="CustomizeDlg">1</Publish>
       <Publish Dialog="CustomizeDlg" Control="Back" Event="NewDialog" Value="OptionsDlg" Order="3">NOT Installed</Publish>
 
-      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchCleanDesk">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed</Publish>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchRotoDesk">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed</Publish>
     </UI>
 
     <WixVariable Id="WixUILicenseRtf" Value="$(var.SourceDir)\installer\license.rtf" />

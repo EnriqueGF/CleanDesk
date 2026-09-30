@@ -1,6 +1,6 @@
-//! cleandesk-input
+//! rotodesk-input
 //!
-//! Input **injection** for CleanDesk's host role: it replays the
+//! Input **injection** for RotoDesk's host role: it replays the
 //! [`InputEvent`]s that arrived from the viewer onto the local desktop via the
 //! Windows `SendInput` API.
 //!
@@ -21,7 +21,7 @@
 //! pure function [`axis_to_absolute`] (and [`mouse_move_absolute`]), kept free
 //! of any Windows call so it is unit-tested without a desktop.
 
-use cleandesk_proto::message::{InputEvent, MonitorInfo};
+use rotodesk_proto::message::{InputEvent, MonitorInfo};
 
 /// Crate version string, handy for diagnostics.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -104,11 +104,11 @@ pub struct WinInputInjector;
 #[cfg(not(windows))]
 impl InputInjector for WinInputInjector {
     fn inject(&mut self, _ev: InputEvent, _monitor: &MonitorInfo) -> anyhow::Result<()> {
-        anyhow::bail!("cleandesk-input: SendInput is only available on Windows")
+        anyhow::bail!("rotodesk-input: SendInput is only available on Windows")
     }
 
     fn set_local_input_blocked(&mut self, _blocked: bool) -> anyhow::Result<()> {
-        anyhow::bail!("cleandesk-input: BlockInput is only available on Windows")
+        anyhow::bail!("rotodesk-input: BlockInput is only available on Windows")
     }
 }
 
@@ -150,7 +150,7 @@ pub fn block_local_input(blocked: bool) -> anyhow::Result<()> {
 /// `SeTcbPrivilege` (`SendSAS`); an interactive process cannot. This sends
 /// Ctrl+Shift+Esc through `SendInput` instead, which opens Task Manager — the
 /// most common reason a support technician reaches for Ctrl+Alt+Del. When
-/// CleanDesk runs as a service the real sequence can replace this.
+/// RotoDesk runs as a service the real sequence can replace this.
 #[cfg(windows)]
 pub fn send_secure_attention() -> anyhow::Result<()> {
     win::send_secure_attention()
@@ -158,23 +158,23 @@ pub fn send_secure_attention() -> anyhow::Result<()> {
 
 #[cfg(not(windows))]
 pub fn lock_workstation() -> anyhow::Result<()> {
-    anyhow::bail!("cleandesk-input: LockWorkStation is only available on Windows")
+    anyhow::bail!("rotodesk-input: LockWorkStation is only available on Windows")
 }
 
 #[cfg(not(windows))]
 pub fn block_local_input(_blocked: bool) -> anyhow::Result<()> {
-    anyhow::bail!("cleandesk-input: BlockInput is only available on Windows")
+    anyhow::bail!("rotodesk-input: BlockInput is only available on Windows")
 }
 
 #[cfg(not(windows))]
 pub fn send_secure_attention() -> anyhow::Result<()> {
-    anyhow::bail!("cleandesk-input: secure attention is only available on Windows")
+    anyhow::bail!("rotodesk-input: secure attention is only available on Windows")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cleandesk_proto::message::MonitorInfo;
+    use rotodesk_proto::message::MonitorInfo;
 
     fn mon(width: u32, height: u32, ox: i32, oy: i32) -> MonitorInfo {
         MonitorInfo { index: 0, width, height, primary: true, origin_x: ox, origin_y: oy }

@@ -1,4 +1,4 @@
-//! The CleanDesk Service (spec §24).
+//! The RotoDesk Service (spec §24).
 //!
 //! # Why a supervisor + helper
 //!
@@ -9,7 +9,7 @@
 //!
 //! 1. finds the active console session (`WTSGetActiveConsoleSessionId`),
 //! 2. duplicates its own `LocalSystem` token into that session and launches
-//!    `cleandesk.exe --host --data-dir <dir>` there with `CreateProcessAsUserW`
+//!    `rotodesk.exe --host --data-dir <dir>` there with `CreateProcessAsUserW`
 //!    (the standard technique for pre-login remote access),
 //! 3. restarts the helper whenever it exits or the console session changes
 //!    (logon, logoff, fast user switching all recreate the session).
@@ -29,12 +29,12 @@ use crate::Result;
 use std::path::{Path, PathBuf};
 
 /// Service name registered with the SCM.
-pub const SERVICE_NAME: &str = "CleanDesk";
+pub const SERVICE_NAME: &str = "RotoDesk";
 /// Human-readable display name.
-pub const DISPLAY_NAME: &str = "CleanDesk Remote Access";
+pub const DISPLAY_NAME: &str = "RotoDesk Remote Access";
 /// Description shown in `services.msc`.
 pub const DESCRIPTION: &str =
-    "Keeps CleanDesk available for unattended access before sign-in and after sign-out.";
+    "Keeps RotoDesk available for unattended access before sign-in and after sign-out.";
 
 /// Installed state as reported by the SCM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,7 +60,7 @@ pub fn helper_args(data_dir: &Path) -> Vec<String> {
 
 /// Environment variable: `1` lets the service be installed from an
 /// executable outside Program Files (development only).
-pub const ENV_SERVICE_ALLOW_ANY_PATH: &str = "CLEANDESK_SERVICE_ALLOW_ANY_PATH";
+pub const ENV_SERVICE_ALLOW_ANY_PATH: &str = "ROTODESK_SERVICE_ALLOW_ANY_PATH";
 
 /// May `exe` be registered as a LocalSystem service binary? Only when it
 /// lives under one of `program_dirs` (Program Files, which standard users
@@ -159,12 +159,63 @@ mod imp {
         parse_sc_query(code, &out)
     }
 
+    /// Read the previous service's configured data path, independent of the
+    /// language used by sc.exe. Only the SCM configuration is inspected.
+    pub fn legacy_data_dir() -> Result<Option<PathBuf>> {
+        use windows::core::PCWSTR;
+        use windows::Win32::Foundation::{LocalFree, HLOCAL, ERROR_FILE_NOT_FOUND};
+        use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_RT_REG_EXPAND_SZ};
+        use windows::Win32::UI::Shell::CommandLineToArgvW;
+        let key = wide(OsStr::new(&format!("SYSTEM\\CurrentControlSet\\Services\\{}", rotodesk_proto::compat::LEGACY_PRODUCT)));
+        let value = wide(OsStr::new("ImagePath"));
+        let mut buffer = vec![0u16; 32768];
+        let mut bytes = (buffer.len() * 2) as u32;
+        // SAFETY: buffers remain live, and the registry call bounds its write
+        // using `bytes`. Shell owns the argv array, freed after copying it.
+        unsafe {
+            let status = RegGetValueW(HKEY_LOCAL_MACHINE, PCWSTR(key.as_ptr()), PCWSTR(value.as_ptr()),
+                RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, None, Some(buffer.as_mut_ptr().cast()), Some(&mut bytes));
+            if status == ERROR_FILE_NOT_FOUND { return Ok(None); }
+            status.ok().map_err(|e| PlatformError::Win(e.to_string()))?;
+            let mut count = 0;
+            let argv = CommandLineToArgvW(PCWSTR(buffer.as_ptr()), &mut count);
+            if argv.is_null() { return Err(PlatformError::Other("could not parse service ImagePath".into())); }
+            let args = std::slice::from_raw_parts(argv, count as usize).iter()
+                .map(|p| p.to_string()).collect::<std::result::Result<Vec<_>, _>>();
+            let _ = LocalFree(Some(HLOCAL(argv.cast())));
+            let args = args.map_err(|e| PlatformError::Win(e.to_string()))?;
+            let data = args.windows(2).find(|a| a[0] == "--data-dir").map(|a| PathBuf::from(&a[1]));
+            data.map(Some).ok_or_else(|| PlatformError::Other("previous service has no data directory; refusing to change its identity".into()))
+        }
+    }
+
+    /// Retire the previous service only after the replacement has started.
+    pub fn stop_legacy() -> Result<()> {
+        let name = rotodesk_proto::compat::LEGACY_PRODUCT;
+        let _ = sc(&["stop", name]);
+        for _ in 0..40 {
+            let (code, output) = sc(&["query", name]);
+            if parse_sc_query(code, &output) == ServiceStatus::NotInstalled { return Ok(()); }
+            if parse_sc_query(code, &output) == ServiceStatus::Stopped { return Ok(()); }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        Err(PlatformError::Other("previous service did not stop; migration is incomplete".into()))
+    }
+
+    pub fn retire_legacy() -> Result<()> {
+        stop_legacy()?;
+        let name = rotodesk_proto::compat::LEGACY_PRODUCT;
+        let (code, output) = sc(&["query", name]);
+        if parse_sc_query(code, &output) == ServiceStatus::NotInstalled { return Ok(()); }
+        sc_ok(&["delete", name]).map(|_| ())
+    }
+
     /// Create + start the service. Must already run elevated.
     pub fn install_here(exe: &Path, data_dir: &Path) -> Result<()> {
-        let allow_any = std::env::var(ENV_SERVICE_ALLOW_ANY_PATH).is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes"));
+        let allow_any = rotodesk_proto::compat::env(ENV_SERVICE_ALLOW_ANY_PATH).is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes"));
         if !allow_any && !exe_location_allowed(exe, &program_dirs()) {
             return Err(PlatformError::Other(format!(
-                "refusing to register {} as a service: install CleanDesk (MSI) so the service runs from Program Files",
+                "refusing to register {} as a service: install RotoDesk (MSI) so the service runs from Program Files",
                 exe.display()
             )));
         }
@@ -428,10 +479,10 @@ mod imp {
             });
         };
         set(ServiceState::Running);
-        info!("CleanDesk Service running");
+        info!("RotoDesk Service running");
         supervise(exe, data_dir, stop);
         set(ServiceState::Stopped);
-        info!("CleanDesk Service stopped");
+        info!("RotoDesk Service stopped");
     }
 }
 
@@ -443,6 +494,9 @@ mod imp {
     pub fn status() -> ServiceStatus {
         ServiceStatus::NotInstalled
     }
+    pub fn legacy_data_dir() -> Result<Option<PathBuf>> { Ok(None) }
+    pub fn stop_legacy() -> Result<()> { Ok(()) }
+    pub fn retire_legacy() -> Result<()> { Ok(()) }
     pub fn install_here(_exe: &Path, _data_dir: &Path) -> Result<()> {
         Err(PlatformError::Unsupported)
     }
@@ -460,7 +514,8 @@ mod imp {
     }
 }
 
-pub use imp::{install_here, request_install, request_uninstall, run_service, status, uninstall_here};
+pub use imp::{install_here, request_install, request_uninstall, run_service, status, uninstall_here,
+    legacy_data_dir, stop_legacy, retire_legacy};
 
 #[cfg(test)]
 mod tests {
@@ -469,7 +524,7 @@ mod tests {
     #[test]
     fn sc_query_parsing() {
         assert_eq!(parse_sc_query(1060, "[SC] EnumQueryServicesStatus:OpenService FAILED 1060"), ServiceStatus::NotInstalled);
-        assert_eq!(parse_sc_query(0, "SERVICE_NAME: CleanDesk\n        STATE              : 4  RUNNING"), ServiceStatus::Running);
+        assert_eq!(parse_sc_query(0, "SERVICE_NAME: RotoDesk\n        STATE              : 4  RUNNING"), ServiceStatus::Running);
         assert_eq!(parse_sc_query(0, "        STATE              : 1  STOPPED"), ServiceStatus::Stopped);
         assert_eq!(parse_sc_query(0, "        STATE              : 2  START_PENDING"), ServiceStatus::Other);
         assert_eq!(parse_sc_query(-1, ""), ServiceStatus::NotInstalled);
@@ -485,10 +540,10 @@ mod tests {
     #[test]
     fn service_binary_must_live_under_program_files() {
         let dirs = vec![PathBuf::from("C:\\Program Files"), PathBuf::from("C:\\Program Files (x86)"), PathBuf::new()];
-        assert!(exe_location_allowed(Path::new("C:\\Program Files\\CleanDesk\\cleandesk.exe"), &dirs));
-        assert!(exe_location_allowed(Path::new("c:/program files (x86)/CleanDesk/cleandesk.exe"), &dirs));
-        assert!(!exe_location_allowed(Path::new("C:\\Users\\me\\Downloads\\cleandesk.exe"), &dirs));
-        assert!(!exe_location_allowed(Path::new("C:\\Program Files Extra\\cleandesk.exe"), &dirs), "prefix must be a directory boundary");
+        assert!(exe_location_allowed(Path::new("C:\\Program Files\\RotoDesk\\rotodesk.exe"), &dirs));
+        assert!(exe_location_allowed(Path::new("c:/program files (x86)/RotoDesk/rotodesk.exe"), &dirs));
+        assert!(!exe_location_allowed(Path::new("C:\\Users\\me\\Downloads\\rotodesk.exe"), &dirs));
+        assert!(!exe_location_allowed(Path::new("C:\\Program Files Extra\\rotodesk.exe"), &dirs), "prefix must be a directory boundary");
         assert!(!exe_location_allowed(Path::new("C:\\Program Files"), &dirs));
     }
 }

@@ -19,27 +19,27 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.14"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-authors = ["CleanDesk Contributors"]
-repository = "https://github.com/EnriqueGF/CleanDesk"
+authors = ["RotoDesk Contributors"]
+repository = "https://github.com/EnriqueGF/RotoDesk"
 
 [workspace.dependencies]
 # Internal crates
-cleandesk-proto = { path = "crates/proto" }
-cleandesk-crypto = { path = "crates/crypto" }
-cleandesk-transport = { path = "crates/transport" }
-cleandesk-capture = { path = "crates/capture" }
-cleandesk-codec = { path = "crates/codec" }
-cleandesk-input = { path = "crates/input" }
-cleandesk-platform = { path = "crates/platform" }
-cleandesk-discovery = { path = "crates/discovery" }
-cleandesk-core = { path = "crates/core" }
-cleandesk-host = { path = "crates/host" }
-cleandesk-client = { path = "crates/client" }
-cleandesk-gui = { path = "crates/gui" }
+rotodesk-proto = { path = "crates/proto" }
+rotodesk-crypto = { path = "crates/crypto" }
+rotodesk-transport = { path = "crates/transport" }
+rotodesk-capture = { path = "crates/capture" }
+rotodesk-codec = { path = "crates/codec" }
+rotodesk-input = { path = "crates/input" }
+rotodesk-platform = { path = "crates/platform" }
+rotodesk-discovery = { path = "crates/discovery" }
+rotodesk-core = { path = "crates/core" }
+rotodesk-host = { path = "crates/host" }
+rotodesk-client = { path = "crates/client" }
+rotodesk-gui = { path = "crates/gui" }
 
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }

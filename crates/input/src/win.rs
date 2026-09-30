@@ -5,7 +5,7 @@
 //! the pixel→`0..=65535` mapping is the pure [`crate::axis_to_absolute`].
 
 use anyhow::Context as _;
-use cleandesk_proto::message::{InputEvent, MonitorInfo, MouseButton};
+use rotodesk_proto::message::{InputEvent, MonitorInfo, MouseButton};
 use windows::Win32::System::Shutdown::LockWorkStation;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     BlockInput, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
@@ -51,7 +51,7 @@ impl WinInputInjector {
     pub fn new() -> Self {
         let (tx, rx) = std::sync::mpsc::channel::<Job>();
         let spawned = std::thread::Builder::new()
-            .name("cleandesk-input".into())
+            .name("rotodesk-input".into())
             .spawn(move || injector_thread(rx));
         if let Err(e) = spawned {
             tracing::error!(error = %e, "could not spawn the input thread; input will be dropped");
@@ -70,7 +70,7 @@ fn injector_thread(rx: std::sync::mpsc::Receiver<Job>) {
         if force_attach || last_attach.elapsed() >= ATTACH_INTERVAL {
             last_attach = std::time::Instant::now();
             force_attach = false;
-            match cleandesk_platform::desktop::attach_input_desktop() {
+            match rotodesk_platform::desktop::attach_input_desktop() {
                 Ok(true) => tracing::info!("input thread followed the input desktop"),
                 Ok(false) => {}
                 Err(e) => tracing::debug!(error = %e, "could not follow the input desktop"),

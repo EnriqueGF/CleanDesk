@@ -38,13 +38,13 @@ pub fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], CryptoError> 
     Ok(out)
 }
 
-/// Derive the shared key for CleanDesk unattended-access authentication.
+/// Derive the shared key for RotoDesk unattended-access authentication.
 ///
-/// The salt is bound to the host's numeric CleanDesk ID so that both the host
+/// The salt is bound to the host's numeric RotoDesk ID so that both the host
 /// and the connecting viewer derive the *same* key from the shared password,
 /// without any secret salt needing to be exchanged.
 pub fn unattended_key(password: &str, host_id: u64) -> Result<[u8; 32], CryptoError> {
-    let salt = format!("cleandesk-unattended-{host_id}");
+    let salt = format!("{}-{host_id}", rotodesk_proto::compat::UNATTENDED_SALT_NAMESPACE);
     derive_key(password, salt.as_bytes())
 }
 

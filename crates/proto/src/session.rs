@@ -1,6 +1,6 @@
 //! Session-level value types shared by both peers.
 
-use crate::{id::CleanDeskId, permissions::Permissions};
+use crate::{id::RotoDeskId, permissions::Permissions};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -8,14 +8,14 @@ use uuid::Uuid;
 /// address book.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceInfo {
-    pub id: CleanDeskId,
-    /// Optional user alias, e.g. `pc-oficina.clean`.
+    pub id: RotoDeskId,
+    /// Optional user alias, e.g. `pc-oficina.roto`.
     pub alias: Option<String>,
     /// OS-reported hostname.
     pub hostname: String,
     /// Human-readable OS string, e.g. "Windows 11 Pro".
     pub os: String,
-    /// CleanDesk client version.
+    /// RotoDesk client version.
     pub app_version: String,
 }
 

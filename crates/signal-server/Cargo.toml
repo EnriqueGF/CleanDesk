@@ -1,22 +1,22 @@
 [package]
-name = "cleandesk-signal-server"
+name = "rotodesk-signal-server"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "CleanDesk Server: device registry, ID resolution and WebRTC signaling relay."
+description = "RotoDesk Server: device registry, ID resolution and WebRTC signaling relay."
 
 [lib]
-name = "cleandesk_signal_server"
+name = "rotodesk_signal_server"
 path = "src/lib.rs"
 
 [[bin]]
-name = "cleandesk-signal-server"
+name = "rotodesk-signal-server"
 path = "src/main.rs"
 
 [dependencies]
-cleandesk-proto.workspace = true
-cleandesk-crypto.workspace = true
+rotodesk-proto.workspace = true
+rotodesk-crypto.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 futures-util.workspace = true
@@ -30,6 +30,6 @@ uuid.workspace = true
 base64.workspace = true
 
 [dev-dependencies]
-cleandesk-host.workspace = true
-cleandesk-client.workspace = true
+rotodesk-host.workspace = true
+rotodesk-client.workspace = true
 tracing-subscriber.workspace = true

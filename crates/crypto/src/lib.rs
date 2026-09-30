@@ -1,8 +1,8 @@
-//! Cryptographic primitives for CleanDesk.
+//! Cryptographic primitives for RotoDesk.
 //!
 //! Scope (spec section 18):
 //! * [`identity`] — a per-device Ed25519 keypair (the device's cryptographic
-//!   identity) with a stable fingerprint, plus CleanDesk ID generation.
+//!   identity) with a stable fingerprint, plus RotoDesk ID generation.
 //! * [`password`] — Argon2id hashing for the *unattended access* password, so
 //!   it is never stored in plaintext.
 //! * [`token`] — random, expiring session tokens for trusted devices.
@@ -13,7 +13,7 @@
 //!   to the actual encrypted channel and a rendezvous cannot sit in the middle.
 //!
 //! Transport encryption itself (DTLS/SRTP) is provided by the WebRTC stack in
-//! `cleandesk-transport`; this crate covers identity and authentication.
+//! `rotodesk-transport`; this crate covers identity and authentication.
 
 pub mod identity;
 pub mod password;

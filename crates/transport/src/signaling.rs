@@ -1,4 +1,4 @@
-//! Signaling client: JSON [`SignalMessage`]s over a WebSocket to the CleanDesk
+//! Signaling client: JSON [`SignalMessage`]s over a WebSocket to the RotoDesk
 //! Server.
 //!
 //! The socket is split in two: a background *reader* task decodes inbound text
@@ -16,8 +16,8 @@
 use crate::error::TransportError;
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use cleandesk_proto::{
-    id::CleanDeskId,
+use rotodesk_proto::{
+    id::RotoDeskId,
     message::{register_proof_message, SignalMessage},
     session::DeviceInfo,
     PROTOCOL_VERSION,
@@ -40,7 +40,7 @@ const MAX_NONCE_BYTES: usize = 64;
 
 /// Environment variable: `1` allows plaintext `ws://` towards non-local
 /// servers (a lab, a reverse proxy on a trusted network).
-pub const ENV_ALLOW_INSECURE_SIGNALING: &str = "CLEANDESK_ALLOW_INSECURE_SIGNALING";
+pub const ENV_ALLOW_INSECURE_SIGNALING: &str = "ROTODESK_ALLOW_INSECURE_SIGNALING";
 
 /// How long [`SignalingClient::register`] waits for each server reply.
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(10);
@@ -54,8 +54,8 @@ const INBOUND_CAPACITY: usize = 128;
 
 /// Signs the server's registration challenge with the device's private key.
 ///
-/// Kept as a trait rather than a dependency on `cleandesk-crypto` so this
-/// crate stays a pure transport; `cleandesk_crypto::identity::Identity`
+/// Kept as a trait rather than a dependency on `rotodesk-crypto` so this
+/// crate stays a pure transport; `rotodesk_crypto::identity::Identity`
 /// implements the same shape via [`SignalingClient::register`]'s closure form.
 pub trait ChallengeSigner: Send + Sync {
     /// Ed25519 signature, base64, over the given message bytes.
@@ -71,7 +71,7 @@ where
     }
 }
 
-/// A connected signaling session with the CleanDesk Server.
+/// A connected signaling session with the RotoDesk Server.
 pub struct SignalingClient {
     /// Outbound queue drained by the writer task.
     out_tx: mpsc::UnboundedSender<SignalMessage>,
@@ -86,7 +86,7 @@ impl SignalingClient {
     /// Connect to `ws://host:port/` (or `wss://…`) and start the reader/writer
     /// tasks.
     pub async fn connect(url: &str) -> Result<Self> {
-        check_scheme(url, std::env::var(ENV_ALLOW_INSECURE_SIGNALING).is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes")))?;
+        check_scheme(url, rotodesk_proto::compat::env(ENV_ALLOW_INSECURE_SIGNALING).is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes")))?;
         let config = WebSocketConfig {
             max_message_size: Some(MAX_INBOUND_MESSAGE_BYTES),
             max_frame_size: Some(MAX_INBOUND_MESSAGE_BYTES),
@@ -167,7 +167,7 @@ impl SignalingClient {
         })
     }
 
-    /// Register this device and await the server-confirmed [`CleanDeskId`].
+    /// Register this device and await the server-confirmed [`RotoDeskId`].
     ///
     /// Flow: send `Register`, receive `RegisterChallenge { nonce }`, answer with
     /// `RegisterProof { signature }` produced by `signer` over
@@ -182,7 +182,7 @@ impl SignalingClient {
         device: DeviceInfo,
         public_key_b64: String,
         signer: &dyn ChallengeSigner,
-    ) -> Result<CleanDeskId> {
+    ) -> Result<RotoDeskId> {
         let device_id = device.id;
         self.send(SignalMessage::Register {
             device,
@@ -276,7 +276,7 @@ impl Drop for SignalingClient {
 }
 
 /// Anything that can carry a [`SignalMessage`] to the other side of a
-/// rendezvous: the CleanDesk Server socket, a direct TCP link, a Nostr
+/// rendezvous: the RotoDesk Server socket, a direct TCP link, a Nostr
 /// relay. Host and viewer code are written against this so every rendezvous
 /// mechanism reuses the same session logic.
 #[async_trait::async_trait]

@@ -1,13 +1,13 @@
-//! cleandesk-discovery — rendezvous without a CleanDesk server ("modo
+//! rotodesk-discovery — rendezvous without a RotoDesk server ("modo
 //! comunitario").
 //!
-//! The private mode keeps a CleanDesk Server in the loop for registration and
+//! The private mode keeps a RotoDesk Server in the loop for registration and
 //! signaling. Community mode replaces it with public infrastructure nobody in
 //! the project has to run:
 //!
 //! | Need | Mechanism | Module |
 //! |---|---|---|
-//! | Find a host on the same LAN instantly | mDNS (`_cleandesk._tcp`) | [`lan`] |
+//! | Find a host on the same LAN instantly | mDNS (`_rotodesk._tcp`) | [`lan`] |
 //! | Find a host anywhere from its ID | BitTorrent mainline DHT, BEP 44 mutable items | [`dht`] |
 //! | Exchange SDP/ICE when the host is reachable | direct TCP link, mutual Ed25519 challenge | [`direct`] |
 //! | Exchange SDP/ICE when it is not | public Nostr relays, NIP-44 encrypted ephemeral events | [`nostr_link`] |
@@ -15,7 +15,7 @@
 //! | Find community relays when there is no direct route | DHT `announce_peer` on a well-known infohash | [`dht`] |
 //!
 //! Everything a host publishes is a signed [`Record`]; everything a viewer
-//! learns is verified against the host's Ed25519 key and the CleanDesk ID
+//! learns is verified against the host's Ed25519 key and the RotoDesk ID
 //! derived from it, so the public rendezvous systems only ever act as *hints*.
 //!
 //! # ID binding caveat
@@ -53,7 +53,7 @@ pub enum DiscoveryError {
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
     #[error("crypto error: {0}")]
-    Crypto(#[from] cleandesk_crypto::CryptoError),
+    Crypto(#[from] rotodesk_crypto::CryptoError),
     #[error("record rejected: {0}")]
     BadRecord(String),
     #[error("peer failed authentication: {0}")]
@@ -82,12 +82,12 @@ pub type Result<T> = std::result::Result<T, DiscoveryError>;
 ///
 /// History: v1 signed the same challenge message as the server registration
 /// (a host's direct handshake signature could be replayed to register its ID
-/// on a CleanDesk Server); v2 binds the direct proof to both keys and the
+/// on a RotoDesk Server); v2 binds the direct proof to both keys and the
 /// role, bounds a record's clock skew, and requires signed relay records.
 pub const RENDEZVOUS_VERSION: u8 = 2;
 
 /// Name prefix for the mDNS service type, DHT salts and infohashes.
-pub const NAMESPACE: &str = "cleandesk-v2";
+pub const NAMESPACE: &str = rotodesk_proto::compat::DISCOVERY_NAMESPACE;
 
 /// Deadline helpers shared by the backends.
 pub(crate) mod time {
@@ -104,8 +104,8 @@ pub(crate) mod time {
 /// The trade-off (an open relay anyone can use as a UDP proxy) is what the
 /// relay's peer-address filter and per-allocation quotas bound; see
 /// `docs/SECURITY.md`.
-pub const COMMUNITY_TURN_USER: &str = "cleandesk";
-pub const COMMUNITY_TURN_PASS: &str = "cleandesk-community";
+pub const COMMUNITY_TURN_USER: &str = rotodesk_proto::compat::TURN_USER;
+pub const COMMUNITY_TURN_PASS: &str = rotodesk_proto::compat::TURN_PASSWORD;
 
 /// Default TCP port for direct signaling and UDP port for ICE in community
 /// mode (both forwarded through UPnP when possible).

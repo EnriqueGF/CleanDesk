@@ -4,7 +4,7 @@
 
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
-use cleandesk_relay_server::{
+use rotodesk_relay_server::{
     RelayConfig, RelayError, RelayHandle, DEFAULT_REALM, ENV_ALLOW_PRIVATE_PEERS, ENV_BIND,
     ENV_MAX_ALLOCATIONS_PER_IP, ENV_PORT, ENV_PUBLIC_IP, ENV_USERS,
 };
@@ -27,7 +27,7 @@ async fn start_relay_with(extra: &[(&str, &str)]) -> RelayHandle {
     ];
     vars.extend_from_slice(extra);
     let cfg = RelayConfig::from_vars(vars).expect("config");
-    cleandesk_relay_server::run(cfg)
+    rotodesk_relay_server::run(cfg)
         .await
         .expect("relay starts")
 }
@@ -163,7 +163,7 @@ async fn bind_failure_is_reported_not_panicked() {
         (ENV_USERS, USERS),
     ])
     .expect("config");
-    let err = cleandesk_relay_server::run(cfg)
+    let err = rotodesk_relay_server::run(cfg)
         .await
         .err()
         .expect("second bind fails");

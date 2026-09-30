@@ -7,9 +7,9 @@
 //! format — bump the version and update the table on purpose, never by
 //! accident.
 
-use cleandesk_proto::{
+use rotodesk_proto::{
     frame::{decode_payload, encode_payload, encode_vec, FrameCodec},
-    id::CleanDeskId,
+    id::RotoDeskId,
     files::{FileChunk, MAX_CHUNK_DATA},
     media::FrameChunk,
     message::{
@@ -24,8 +24,8 @@ use cleandesk_proto::{
 
 fn device() -> DeviceInfo {
     DeviceInfo {
-        id: CleanDeskId::new(548_291_743).unwrap(),
-        alias: Some("pc-oficina.clean".into()),
+        id: RotoDeskId::new(548_291_743).unwrap(),
+        alias: Some("pc-oficina.roto".into()),
         hostname: "OFICINA-PC".into(),
         os: "Windows 11 Pro".into(),
         app_version: "0.1.0".into(),
@@ -259,25 +259,25 @@ fn version_compatibility_is_major_only() {
 }
 
 #[test]
-fn cleandesk_id_edge_cases() {
+fn rotodesk_id_edge_cases() {
     // Non-digit noise is stripped, but a completely non-numeric string fails.
-    assert!(CleanDeskId::parse("abc").is_err());
-    assert!(CleanDeskId::parse("").is_err());
-    assert_eq!(CleanDeskId::parse(" 548.291.743 ").unwrap().value(), 548_291_743);
+    assert!(RotoDeskId::parse("abc").is_err());
+    assert!(RotoDeskId::parse("").is_err());
+    assert_eq!(RotoDeskId::parse(" 548.291.743 ").unwrap().value(), 548_291_743);
     // Leading zeros can't make a valid 9-digit ID.
-    assert!(CleanDeskId::parse("000 000 001").is_err());
+    assert!(RotoDeskId::parse("000 000 001").is_err());
     // Ten digits are accepted (future headroom) and still group in threes.
-    let ten = CleanDeskId::new(1_234_567_890).unwrap();
+    let ten = RotoDeskId::new(1_234_567_890).unwrap();
     assert_eq!(ten.to_string(), "1 234 567 890");
     // Eleven digits overflow the allowed range.
-    assert!(CleanDeskId::new(12_345_678_901).is_err());
+    assert!(RotoDeskId::new(12_345_678_901).is_err());
     // A huge numeric string doesn't panic on u64 overflow either.
-    assert!(CleanDeskId::parse("99999999999999999999999").is_err());
+    assert!(RotoDeskId::parse("99999999999999999999999").is_err());
 }
 
 #[test]
 fn reject_reasons_roundtrip_in_json_and_postcard() {
-    use cleandesk_proto::message::RejectReason;
+    use rotodesk_proto::message::RejectReason;
     for r in [
         RejectReason::UserDeclined,
         RejectReason::Busy,

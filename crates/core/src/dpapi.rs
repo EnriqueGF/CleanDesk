@@ -15,7 +15,7 @@
 use crate::{CoreError, Result};
 
 /// Marker at the start of a protected file.
-pub const MAGIC: &[u8] = b"CLEANDESK-DPAPI-1\n";
+pub const MAGIC: &[u8] = b"ROTODESK-DPAPI-1\n";
 
 /// Wrap `plain` for storage.
 pub fn protect(plain: &[u8]) -> Result<Vec<u8>> {
@@ -27,7 +27,7 @@ pub fn protect(plain: &[u8]) -> Result<Vec<u8>> {
 
 /// Undo [`protect`]; bytes without the marker are returned unchanged.
 pub fn unprotect(stored: &[u8]) -> Result<Vec<u8>> {
-    match stored.strip_prefix(MAGIC) {
+    match stored.strip_prefix(MAGIC).or_else(|| stored.strip_prefix(rotodesk_proto::compat::LEGACY_DPAPI_MAGIC)) {
         Some(blob) => imp::unprotect(blob),
         None => Ok(stored.to_vec()),
     }
@@ -35,7 +35,7 @@ pub fn unprotect(stored: &[u8]) -> Result<Vec<u8>> {
 
 /// Is this file already protected?
 pub fn is_protected(stored: &[u8]) -> bool {
-    stored.starts_with(MAGIC)
+    stored.starts_with(MAGIC) || stored.starts_with(rotodesk_proto::compat::LEGACY_DPAPI_MAGIC)
 }
 
 #[cfg(windows)]
@@ -104,6 +104,10 @@ mod tests {
         assert_eq!(unprotect(&stored).unwrap(), secret);
         assert!(!is_protected(secret));
         assert_eq!(unprotect(secret).unwrap(), secret);
+        let mut previous = rotodesk_proto::compat::LEGACY_DPAPI_MAGIC.to_vec();
+        previous.extend_from_slice(&stored[MAGIC.len()..]);
+        assert!(is_protected(&previous));
+        assert_eq!(unprotect(&previous).unwrap(), secret);
     }
 
     #[cfg(windows)]

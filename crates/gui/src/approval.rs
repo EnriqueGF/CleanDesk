@@ -6,8 +6,8 @@
 //! `oneshot::Sender` por el que la interfaz devuelve la [`Decision`]. Mientras
 //! tanto la tarea del host queda a la espera del oneshot.
 
-use cleandesk_host::{Approver, Decision};
-use cleandesk_proto::{
+use rotodesk_host::{Approver, Decision};
+use rotodesk_proto::{
     message::{AuthKind, RejectReason},
     permissions::Permissions,
     session::DeviceInfo,
@@ -62,17 +62,17 @@ pub struct GuiApprover {
     requests: mpsc::Sender<PendingRequest>,
     /// What an unattended (password) caller may get without a human. Same
     /// default as the headless host: the interactive set, everything with
-    /// `CLEANDESK_UNATTENDED_FULL=1`.
+    /// `ROTODESK_UNATTENDED_FULL=1`.
     unattended_allowed: Permissions,
 }
 
 /// Environment variable: `1` lets unattended callers request every permission
 /// instead of only the interactive set (shared with the headless host).
-pub const ENV_UNATTENDED_FULL: &str = "CLEANDESK_UNATTENDED_FULL";
+pub const ENV_UNATTENDED_FULL: &str = "ROTODESK_UNATTENDED_FULL";
 
 impl GuiApprover {
     pub fn new(requests: mpsc::Sender<PendingRequest>) -> Self {
-        let full = std::env::var(ENV_UNATTENDED_FULL).is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes"));
+        let full = rotodesk_proto::compat::env(ENV_UNATTENDED_FULL).is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes"));
         let unattended_allowed = if full { Permissions::full() } else { Permissions::interactive() };
         Self { requests, unattended_allowed }
     }
@@ -94,7 +94,7 @@ impl Approver for GuiApprover {
         if matches!(auth, AuthKind::UnattendedPassword) {
             // La contraseña da acceso interactivo; reiniciar, transferir
             // archivos o bloquear el teclado local siguen exigiendo a la
-            // persona del host (o `CLEANDESK_UNATTENDED_FULL=1`).
+            // persona del host (o `ROTODESK_UNATTENDED_FULL=1`).
             let granted = requested & self.unattended_allowed;
             if granted != requested {
                 tracing::info!(from = %from.id, ?requested, ?granted, "narrowing unattended request (set {ENV_UNATTENDED_FULL}=1 to allow all)");
@@ -133,7 +133,7 @@ pub const PERMISSION_ITEMS: &[(Permissions, &str)] = &[
     (Permissions::FILE_TRANSFER, "File transfer"),
     (Permissions::AUDIO, "Remote audio"),
     (Permissions::RESTART_MACHINE, "Restart machine"),
-    (Permissions::RESTART_CLEANDESK, "Restart CleanDesk"),
+    (Permissions::RESTART_ROTODESK, "Restart RotoDesk"),
     (Permissions::ADMIN_ACTIONS, "Admin actions"),
     (Permissions::LOCK_LOCAL_INPUT, "Lock local keyboard/mouse"),
 ];

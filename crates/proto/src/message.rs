@@ -1,6 +1,6 @@
 //! All wire messages, split into three planes:
 //!
-//! * [`SignalMessage`] — client ↔ CleanDesk Server (WebSocket JSON). Handles
+//! * [`SignalMessage`] — client ↔ RotoDesk Server (WebSocket JSON). Handles
 //!   registration, ID resolution, connection requests and WebRTC signaling
 //!   relay (SDP + ICE).
 //! * [`SessionMessage`] — peer ↔ peer on the reliable *control* data channel:
@@ -9,7 +9,7 @@
 //!   video data channels respectively.
 
 use crate::{
-    id::CleanDeskId,
+    id::RotoDeskId,
     permissions::Permissions,
     quality::QualityProfile,
     session::{DeviceInfo, SessionId, SessionStats},
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 // Signaling plane (client ↔ server)
 // ---------------------------------------------------------------------------
 
-/// Messages exchanged with the CleanDesk Server over the signaling WebSocket.
+/// Messages exchanged with the RotoDesk Server over the signaling WebSocket.
 ///
 /// Serialized as JSON (human-debuggable, and the signaling volume is tiny
 /// compared to media).
@@ -31,8 +31,8 @@ pub enum SignalMessage {
     /// Client → Server: register this device so it can receive connections.
     ///
     /// `device.id` must be the ID derived from `public_key` (see
-    /// `cleandesk_crypto::identity`); the server refuses anything else so a
-    /// client cannot claim somebody else's CleanDesk ID.
+    /// `rotodesk_crypto::identity`); the server refuses anything else so a
+    /// client cannot claim somebody else's RotoDesk ID.
     Register {
         device: DeviceInfo,
         protocol: Version,
@@ -50,11 +50,11 @@ pub enum SignalMessage {
     /// Client → Server: Ed25519 signature (base64) over the challenge.
     RegisterProof { signature: String },
     /// Server → Client: registration accepted; here is your (confirmed) ID.
-    Registered { id: CleanDeskId },
+    Registered { id: RotoDeskId },
 
     /// Client → Server: I want to connect to `target`.
     ConnectRequest {
-        target: CleanDeskId,
+        target: RotoDeskId,
         /// Info about the *caller*, shown to the callee.
         from: DeviceInfo,
         requested: Permissions,
@@ -95,17 +95,17 @@ pub enum SignalMessage {
     Ping { nonce: u64 },
     Pong { nonce: u64 },
     /// Registered client → server: bounded online-status lookup, without a session.
-    PresenceQuery { devices: Vec<CleanDeskId> },
+    PresenceQuery { devices: Vec<RotoDeskId> },
     /// Server → client: the queried IDs currently registered and reachable.
-    PresenceSnapshot { online: Vec<CleanDeskId> },
+    PresenceSnapshot { online: Vec<RotoDeskId> },
 }
 
 /// Domain-separated bytes a client signs to answer a
 /// [`SignalMessage::RegisterChallenge`]: a fixed prefix plus the raw nonce
 /// bytes. The prefix guarantees a registration signature can never be reused
-/// as a signature over some other CleanDesk message.
+/// as a signature over some other RotoDesk message.
 pub fn register_proof_message(nonce: &[u8]) -> Vec<u8> {
-    const PREFIX: &[u8] = b"cleandesk-register-v1:";
+    const PREFIX: &[u8] = crate::compat::REGISTER_PROOF_PREFIX;
     let mut out = Vec::with_capacity(PREFIX.len() + nonce.len());
     out.extend_from_slice(PREFIX);
     out.extend_from_slice(nonce);
@@ -123,7 +123,7 @@ pub enum AuthKind {
 
 /// A zero-knowledge-ish proof that the caller holds the unattended secret,
 /// without sending the secret itself. The concrete scheme lives in
-/// `cleandesk-crypto`; this is just the transported bytes.
+/// `rotodesk-crypto`; this is just the transported bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthProof {
     /// Server-issued challenge this proof answers.
@@ -167,7 +167,7 @@ pub enum ErrorCode {
     Unauthorized,
     Internal,
     VersionMismatch,
-    /// The derived CleanDesk ID is already registered by a different key.
+    /// The derived RotoDesk ID is already registered by a different key.
     IdConflict,
 }
 
@@ -229,7 +229,7 @@ pub enum SessionMessage {
     RemoteAction { action: RemoteAction },
     /// Both directions, **the first message on the control channel** (before
     /// `Hello`): binds the peer's Ed25519 identity to this very DTLS session.
-    /// `signature_b64` signs `cleandesk_crypto::session::session_proof_message`
+    /// `signature_b64` signs `rotodesk_crypto::session::session_proof_message`
     /// over the session id and the sender's own and remote DTLS certificate
     /// fingerprints, so a relay that terminated DTLS in the middle cannot
     /// forward it. Added in 2.2.
@@ -311,7 +311,7 @@ pub enum FileTransferMsg {
 
 /// A single video frame envelope sent on the video data channel.
 ///
-/// The `data` field is the codec-specific payload produced by `cleandesk-codec`.
+/// The `data` field is the codec-specific payload produced by `rotodesk-codec`.
 /// A keyframe is self-contained; a delta references the previous frame.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VideoFrame {

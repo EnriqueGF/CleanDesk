@@ -1,6 +1,6 @@
-//! cleandesk-gui
+//! rotodesk-gui
 //!
-//! Interfaz de usuario de CleanDesk sobre **eframe/egui**: la ventana principal
+//! Interfaz de usuario de RotoDesk sobre **eframe/egui**: la ventana principal
 //! (spec §4) y el visor de sesión (spec §7, §16, §17, §26, §27).
 //!
 //! El binario `app` llama a [`run`], que construye una ventana nativa de eframe y
@@ -23,10 +23,10 @@ mod viewer;
 
 use std::sync::Arc;
 
-use cleandesk_core::AppState;
-use cleandesk_proto::{id::CleanDeskId, session::DeviceInfo};
+use rotodesk_core::AppState;
+use rotodesk_proto::{id::RotoDeskId, session::DeviceInfo};
 
-use crate::app::CleanDeskApp;
+use crate::app::RotoDeskApp;
 
 /// Versión del crate, útil para diagnósticos.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -44,13 +44,13 @@ pub fn run(
     app_state: Arc<AppState>,
     device: DeviceInfo,
     signal_override: Option<String>,
-    initial_target: Option<CleanDeskId>,
+    initial_target: Option<RotoDeskId>,
 ) -> anyhow::Result<()> {
     // Control privilegiado sin servicio: nos relanzamos elevados (UAC) para
     // que el host pueda manejar ventanas de administrador. `--elevated`
     // evita bucles si la elevación "funciona" pero no se refleja en el token.
     {
-        use cleandesk_platform::{elevation, service};
+        use rotodesk_platform::{elevation, service};
         let settings = app_state.settings.read();
         let wants = settings.privileged_control;
         drop(settings);
@@ -76,13 +76,13 @@ pub fn run(
 
     // Una sola instancia por carpeta de datos: si ya hay otra, le pedimos que
     // se muestre (puede estar en la bandeja) y salimos sin abrir ventana.
-    use cleandesk_platform::single_instance::{self, Instance};
+    use rotodesk_platform::single_instance::{self, Instance};
     let instance_key = single_instance::instance_key(&app_state.data_dir(), "gui");
     let guard = match single_instance::acquire(&instance_key) {
         Ok(Instance::Primary(guard)) => Some(guard),
         Ok(Instance::AlreadyRunning) => {
             tracing::info!(
-                "CleanDesk is already running for this data directory; asked it to show its window"
+                "RotoDesk is already running for this data directory; asked it to show its window"
             );
             return Ok(());
         }
@@ -103,10 +103,10 @@ pub fn run(
 
     #[allow(unused_mut)]
     let mut initial_size = [960.0, 620.0];
-    let maximized = cfg!(debug_assertions) && std::env::var("CLEANDESK_PREVIEW_MAXIMIZED").is_ok_and(|v| v == "1");
+    let maximized = cfg!(debug_assertions) && rotodesk_proto::compat::env("ROTODESK_PREVIEW_MAXIMIZED").is_ok_and(|v| v == "1");
     #[cfg(debug_assertions)]
     {
-        if let Ok(size) = std::env::var("CLEANDESK_PREVIEW_SIZE") {
+        if let Ok(size) = rotodesk_proto::compat::env("ROTODESK_PREVIEW_SIZE") {
             let values: Vec<f32> = size.split(',').filter_map(|v| v.parse().ok()).collect();
             if values.len() == 2 { initial_size = [values[0], values[1]]; }
         }
@@ -114,7 +114,7 @@ pub fn run(
     }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("CleanDesk")
+            .with_title("RotoDesk")
             .with_icon(std::sync::Arc::new(tray::window_icon()))
             .with_inner_size(initial_size)
             .with_maximized(maximized)
@@ -124,7 +124,7 @@ pub fn run(
 
     // `run_native` toma un creador que construye el `App`. Movemos ahí el estado.
     let result = eframe::run_native(
-        "CleanDesk",
+        "RotoDesk",
         options,
         Box::new(move |cc| {
             if let Some(guard) = guard {
@@ -132,7 +132,7 @@ pub fn run(
                 let flag = show_requested.clone();
                 let hwnd = crate::tray::native_handle(cc);
                 std::thread::Builder::new()
-                    .name("cleandesk-single-instance".into())
+                    .name("rotodesk-single-instance".into())
                     .spawn(move || {
                         while guard.wait_show_request() {
                             tracing::info!(hwnd = ?hwnd, "show request from another launch");
@@ -149,7 +149,7 @@ pub fn run(
                     );
             }
             let mut app =
-                CleanDeskApp::new(cc, app_state, device, rt, signal_override, initial_target);
+                RotoDeskApp::new(cc, app_state, device, rt, signal_override, initial_target);
             app.show_requested = show_requested;
             Ok(Box::new(app))
         }),

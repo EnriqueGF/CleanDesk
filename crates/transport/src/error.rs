@@ -6,7 +6,7 @@
 //! a registration timeout from a hard rejection.
 
 use crate::Channel;
-use cleandesk_proto::message::ErrorCode;
+use rotodesk_proto::message::ErrorCode;
 use std::time::Duration;
 
 /// Errors produced by the signaling client and the WebRTC peer connection.
@@ -17,7 +17,7 @@ pub enum TransportError {
     SignalingClosed,
 
     /// Plaintext `ws://` towards a server outside the local network.
-    #[error("refusing plaintext signaling to {0}: use wss:// (or set CLEANDESK_ALLOW_INSECURE_SIGNALING=1 on a trusted network)")]
+    #[error("refusing plaintext signaling to {0}: use wss:// (or set ROTODESK_ALLOW_INSECURE_SIGNALING=1 on a trusted network)")]
     InsecureSignaling(String),
 
     /// The server did not confirm registration within the allotted time.

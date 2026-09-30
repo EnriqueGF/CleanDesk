@@ -1,12 +1,12 @@
 //! Estado del actualizador automático en la GUI (spec §25). La lógica de red
-//! y verificación vive en `cleandesk_platform::update`; aquí solo se lanza en
+//! y verificación vive en `rotodesk_platform::update`; aquí solo se lanza en
 //! hilos aparte y se refleja el progreso para el banner y los Ajustes.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use cleandesk_platform::update::{self, Release};
+use rotodesk_platform::update::{self, Release};
 use tracing::{info, warn};
 
 /// Cada cuánto se vuelve a consultar GitHub con la app abierta.
@@ -39,10 +39,10 @@ impl Default for Updater {
     }
 }
 
-/// Versión en ejecución. `CLEANDESK_FAKE_VERSION` permite probar el flujo
+/// Versión en ejecución. `ROTODESK_FAKE_VERSION` permite probar el flujo
 /// contra una release real sin publicar una nueva.
 pub fn current_version() -> String {
-    std::env::var("CLEANDESK_FAKE_VERSION").unwrap_or_else(|_| crate::VERSION.to_string())
+    rotodesk_proto::compat::env("ROTODESK_FAKE_VERSION").unwrap_or_else(|_| crate::VERSION.to_string())
 }
 
 impl Updater {
@@ -93,7 +93,7 @@ impl Updater {
         let phase = self.phase.clone();
         let ctx = ctx.clone();
         let current = current_version();
-        spawn("cleandesk-update-check", move || {
+        spawn("rotodesk-update-check", move || {
             let result = update::check(&current);
             let next = match result {
                 Ok(Some(release)) => {
@@ -117,7 +117,7 @@ impl Updater {
         Self::set(&self.phase, Phase::Downloading { release: release.clone(), done: 0, total: release.msi.size });
         let phase = self.phase.clone();
         let ctx = ctx.clone();
-        spawn("cleandesk-update-download", move || {
+        spawn("rotodesk-update-download", move || {
             let r = release.clone();
             let p = phase.clone();
             let c = ctx.clone();

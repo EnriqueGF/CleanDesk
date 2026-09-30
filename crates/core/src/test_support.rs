@@ -18,7 +18,7 @@ impl TempDir {
     /// actual uniqueness comes from the appended UUID.
     pub(crate) fn new(tag: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "cleandesk-core-test-{tag}-{}",
+            "rotodesk-core-test-{tag}-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&path).expect("create temp test dir");

@@ -1,42 +1,42 @@
-//! CleanDesk desktop application entry point.
+//! RotoDesk desktop application entry point.
 //!
 //! Modes:
 //! * (default)        — launch the GUI (also registers as a host in the
 //!   background, so the device is reachable while the window is open).
 //! * `--connect <ID>` — launch the GUI and immediately open a viewer session to
-//!   that CleanDesk ID.
+//!   that RotoDesk ID.
 //! * `--host`         — run headless as an *unattended* host (no GUI). Only
 //!   requests that authenticate with the configured unattended password are
 //!   accepted; everything else is refused. This is also what the Windows
 //!   service launches inside the console session.
-//! * `--service`      — run as the CleanDesk Windows service (started by the
+//! * `--service`      — run as the RotoDesk Windows service (started by the
 //!   Service Control Manager, never by hand).
 //! * `--install-service` / `--uninstall-service` — manage the service; need
 //!   administrator rights (the GUI launches these through the UAC prompt).
 //!
 //! Options (each also has an environment variable, the flag wins):
-//! * `--signal-url <ws://…>` / `CLEANDESK_SIGNAL_URL` — CleanDesk Server URL
+//! * `--signal-url <ws://…>` / `ROTODESK_SIGNAL_URL` — RotoDesk Server URL
 //!   (default `ws://127.0.0.1:7420`).
-//! * `--data-dir <path>` / `CLEANDESK_DATA_DIR` — where identity, settings and
+//! * `--data-dir <path>` / `ROTODESK_DATA_DIR` — where identity, settings and
 //!   history live; lets several independent instances (each with its own
-//!   CleanDesk ID) run on one machine, or a portable install.
-//! * `--log-file <path>` / `CLEANDESK_LOG_FILE` — append logs to a file
+//!   RotoDesk ID) run on one machine, or a portable install.
+//! * `--log-file <path>` / `ROTODESK_LOG_FILE` — append logs to a file
 //!   (the service and its helper use `service.log` / `host.log` in the data
 //!   directory automatically, since they have no console).
-//! * `CLEANDESK_STUN_URLS`, `CLEANDESK_TURN_URLS`, `CLEANDESK_TURN_USER`,
-//!   `CLEANDESK_TURN_PASS` — ICE servers (see `cleandesk-transport`).
-//! * `CLEANDESK_UNATTENDED_FULL=1` — headless host: let unattended callers
+//! * `ROTODESK_STUN_URLS`, `ROTODESK_TURN_URLS`, `ROTODESK_TURN_USER`,
+//!   `ROTODESK_TURN_PASS` — ICE servers (see `rotodesk-transport`).
+//! * `ROTODESK_UNATTENDED_FULL=1` — headless host: let unattended callers
 //!   request every permission (default: only the interactive set).
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
-use cleandesk_core::AppState;
-use cleandesk_host::{Approver, Decision, HostConfig, HostError};
-use cleandesk_platform::{presence, service};
-use cleandesk_proto::{
-    id::CleanDeskId,
+use rotodesk_core::AppState;
+use rotodesk_host::{Approver, Decision, HostConfig, HostError};
+use rotodesk_platform::{presence, service};
+use rotodesk_proto::{
+    id::RotoDeskId,
     message::{AuthKind, RejectReason},
     permissions::Permissions,
     session::DeviceInfo,
@@ -49,18 +49,19 @@ use std::time::Duration;
 #[derive(Debug, PartialEq, Eq)]
 enum Mode {
     Gui,
-    Connect(CleanDeskId),
+    Connect(RotoDeskId),
     Host,
     Service,
     InstallService,
     UninstallService,
+    MigrateService,
 }
 
 /// Parsed command line.
 #[derive(Debug, PartialEq, Eq)]
 struct Options {
     mode: Mode,
-    /// `--signal-url` / `CLEANDESK_SIGNAL_URL`: forces private-server mode.
+    /// `--signal-url` / `ROTODESK_SIGNAL_URL`: forces private-server mode.
     /// `None` means "whatever the settings say" (community by default).
     signal_url: Option<String>,
     data_dir: Option<PathBuf>,
@@ -74,9 +75,9 @@ struct Options {
 fn parse_args(args: impl IntoIterator<Item = String>, env: impl Fn(&str) -> Option<String>) -> Result<Options> {
     let mut opts = Options {
         mode: Mode::Gui,
-        signal_url: env("CLEANDESK_SIGNAL_URL"),
-        data_dir: env("CLEANDESK_DATA_DIR").map(PathBuf::from),
-        log_file: env("CLEANDESK_LOG_FILE").map(PathBuf::from),
+        signal_url: env("ROTODESK_SIGNAL_URL"),
+        data_dir: env("ROTODESK_DATA_DIR").map(PathBuf::from),
+        log_file: env("ROTODESK_LOG_FILE").map(PathBuf::from),
         help: false,
     };
     let mut args = args.into_iter();
@@ -89,9 +90,10 @@ fn parse_args(args: impl IntoIterator<Item = String>, env: impl Fn(&str) -> Opti
             // control); only prevents a relaunch loop.
             "--elevated" => {}
             "--uninstall-service" => opts.mode = Mode::UninstallService,
+            "--migrate-service" => opts.mode = Mode::MigrateService,
             "--connect" => {
-                let raw = args.next().context("--connect requires a CleanDesk ID")?;
-                let id = CleanDeskId::parse(&raw).context("invalid CleanDesk ID")?;
+                let raw = args.next().context("--connect requires a RotoDesk ID")?;
+                let id = RotoDeskId::parse(&raw).context("invalid RotoDesk ID")?;
                 opts.mode = Mode::Connect(id);
             }
             "--signal-url" => {
@@ -117,7 +119,7 @@ fn parse_args(args: impl IntoIterator<Item = String>, env: impl Fn(&str) -> Opti
 
 fn print_help() {
     println!(
-        "CleanDesk {}\n\nUsage:\n  cleandesk                       Open the graphical interface\n  cleandesk --connect <ID>        Open the GUI and connect to a CleanDesk ID\n  cleandesk --host                Run as an unattended host (no GUI)\n  cleandesk --install-service     Install and start the Windows service (admin)\n  cleandesk --uninstall-service   Stop and remove the service (admin)\n\nOptions:\n  --signal-url <ws://host:port>   Use a private CleanDesk Server (or CLEANDESK_SIGNAL_URL);\n                                  without it the settings decide (community mode by default)\n  --data-dir <path>               Identity/settings folder (or CLEANDESK_DATA_DIR)\n  --log-file <path>               Append logs to a file (or CLEANDESK_LOG_FILE)\n\nNetwork environment variables:\n  CLEANDESK_STUN_URLS, CLEANDESK_TURN_URLS, CLEANDESK_TURN_USER, CLEANDESK_TURN_PASS, CLEANDESK_NOSTR_RELAYS",
+        "RotoDesk {}\n\nUsage:\n  rotodesk                       Open the graphical interface\n  rotodesk --connect <ID>        Open the GUI and connect to a RotoDesk ID\n  rotodesk --host                Run as an unattended host (no GUI)\n  rotodesk --install-service     Install and start the Windows service (admin)\n  rotodesk --uninstall-service   Stop and remove the service (admin)\n\nOptions:\n  --signal-url <ws://host:port>   Use a private RotoDesk Server (or ROTODESK_SIGNAL_URL);\n                                  without it the settings decide (community mode by default)\n  --data-dir <path>               Identity/settings folder (or ROTODESK_DATA_DIR)\n  --log-file <path>               Append logs to a file (or ROTODESK_LOG_FILE)\n\nNetwork environment variables:\n  ROTODESK_STUN_URLS, ROTODESK_TURN_URLS, ROTODESK_TURN_USER, ROTODESK_TURN_PASS, ROTODESK_NOSTR_RELAYS",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -139,7 +141,7 @@ fn device_info(app: &AppState) -> DeviceInfo {
     let alias = app.settings.read().alias.clone();
     let hostname = std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
-        .unwrap_or_else(|_| "cleandesk".to_string());
+        .unwrap_or_else(|_| "rotodesk".to_string());
     DeviceInfo {
         id: app.identity.derive_id(),
         alias,
@@ -175,18 +177,18 @@ fn init_logging(log_file: Option<&PathBuf>) -> Result<()> {
 fn load_state(data_dir: &Option<PathBuf>) -> Result<Arc<AppState>> {
     Ok(Arc::new(match data_dir {
         Some(dir) => AppState::load_from_dir(dir.clone())
-            .with_context(|| format!("loading CleanDesk state from {}", dir.display()))?,
-        None => AppState::load().context("loading CleanDesk state")?,
+            .with_context(|| format!("loading RotoDesk state from {}", dir.display()))?,
+        None => AppState::load().context("loading RotoDesk state")?,
     }))
 }
 
 fn main() -> Result<()> {
     // Before anything touches the screen: physical pixels everywhere, or the
     // headless host clicks off-target on scaled displays.
-    if let Err(e) = cleandesk_platform::dpi::make_process_dpi_aware() {
+    if let Err(e) = rotodesk_platform::dpi::make_process_dpi_aware() {
         eprintln!("warning: could not set DPI awareness: {e}");
     }
-    let opts = parse_args(std::env::args().skip(1), |k| std::env::var(k).ok())?;
+    let opts = parse_args(std::env::args().skip(1), |k| rotodesk_proto::compat::env(k).ok())?;
     if opts.help {
         print_help();
         return Ok(());
@@ -199,15 +201,17 @@ fn main() -> Result<()> {
     // user-controlled path is a privilege escalation).
     let data_dir_for_logs = match &opts.data_dir {
         Some(d) => Some(d.clone()),
-        None => cleandesk_core::storage::Storage::locate().ok().map(|s| s.base_dir().to_path_buf()),
+        None => rotodesk_core::storage::Storage::locate().ok().map(|s| s.base_dir().to_path_buf()),
     };
-    let own_profile_dir = cleandesk_core::storage::Storage::locate().ok().map(|s| s.base_dir().to_path_buf());
+    let is_helper = std::env::var_os("ROTODESK_HELPER").is_some();
+    let own_profile_dir = if is_helper || matches!(opts.mode, Mode::Service | Mode::InstallService | Mode::UninstallService | Mode::MigrateService) {
+        rotodesk_core::storage::Storage::locate().ok().map(|s| s.base_dir().to_path_buf())
+    } else { None };
     let default_log = |name: &str| data_dir_for_logs.as_ref().map(|d| d.join(name));
     let own_log = |name: &str| own_profile_dir.as_ref().map(|d| d.join(name));
-    let is_helper = std::env::var_os("CLEANDESK_HELPER").is_some();
     let log_file = opts.log_file.clone().filter(|_| !is_helper).or_else(|| match opts.mode {
         Mode::Service => own_log("service.log"),
-        Mode::InstallService | Mode::UninstallService => own_log("service-install.log"),
+        Mode::InstallService | Mode::UninstallService | Mode::MigrateService => own_log("service-install.log"),
         Mode::Host if is_helper => own_log("host.log"),
         // The GUI has no console: keep a log next to the data for support.
         Mode::Gui | Mode::Connect(_) => default_log("gui.log"),
@@ -218,6 +222,17 @@ fn main() -> Result<()> {
     // Service management needs no app state, only paths.
     let exe = std::env::current_exe().context("resolving own executable path")?;
     match opts.mode {
+        Mode::MigrateService => {
+            if let Some(source) = service::legacy_data_dir()? {
+                service::stop_legacy()?;
+                let destination = rotodesk_core::storage::Storage::rebranded_service_dir(&source);
+                rotodesk_core::storage::Storage::migrate_legacy(&source, &destination)?;
+                service::install_here(&exe, &destination)?;
+                service::retire_legacy()?;
+                tracing::info!("service migration completed");
+            }
+            return Ok(());
+        }
         Mode::InstallService => {
             let data_dir = data_dir_for_logs.clone().context("no data directory for the service")?;
             tracing::info!(exe = %exe.display(), data_dir = %data_dir.display(), "installing service");
@@ -246,13 +261,13 @@ fn main() -> Result<()> {
 
     let app = load_state(&opts.data_dir)?;
     let device = device_info(&app);
-    tracing::info!(id = %device.id, mode = ?opts.mode, signal = ?opts.signal_url, version = env!("CARGO_PKG_VERSION"), "CleanDesk starting");
+    tracing::info!(id = %device.id, mode = ?opts.mode, signal = ?opts.signal_url, version = env!("CARGO_PKG_VERSION"), "RotoDesk starting");
 
     match opts.mode {
-        Mode::Gui => cleandesk_gui::run(app, device, opts.signal_url, None),
-        Mode::Connect(target) => cleandesk_gui::run(app, device, opts.signal_url, Some(target)),
+        Mode::Gui => rotodesk_gui::run(app, device, opts.signal_url, None),
+        Mode::Connect(target) => rotodesk_gui::run(app, device, opts.signal_url, Some(target)),
         Mode::Host => run_headless_host(app, device, opts.signal_url),
-        Mode::Service | Mode::InstallService | Mode::UninstallService => unreachable!("handled above"),
+        Mode::Service | Mode::InstallService | Mode::UninstallService | Mode::MigrateService => unreachable!("handled above"),
     }
 }
 
@@ -270,7 +285,7 @@ fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_override: Op
     let data_dir = app.data_dir();
     // One headless host per data directory (the GUI has its own key and
     // coordinates with us through the presence lock instead).
-    use cleandesk_platform::single_instance::{self, Instance};
+    use rotodesk_platform::single_instance::{self, Instance};
     let _guard = match single_instance::acquire(&single_instance::instance_key(&data_dir, "host")) {
         Ok(Instance::Primary(g)) => Some(g),
         Ok(Instance::AlreadyRunning) => {
@@ -320,7 +335,7 @@ fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_override: Op
             warned_config = false;
 
             let mode = match &signal_override {
-                Some(url) => cleandesk_core::config::NetworkMode::Server { url: url.clone() },
+                Some(url) => rotodesk_core::config::NetworkMode::Server { url: url.clone() },
                 None => app.settings.read().network.clone(),
             };
             let mut config = HostConfig::new(
@@ -348,9 +363,9 @@ fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_override: Op
             let outcome = tokio::select! {
                 r = async {
                     if mode.is_community() {
-                        cleandesk_host::serve_community(config, approver.clone()).await
+                        rotodesk_host::serve_community(config, approver.clone()).await
                     } else {
-                        cleandesk_host::serve(config, approver.clone()).await
+                        rotodesk_host::serve(config, approver.clone()).await
                     }
                 } => match r {
                     Ok(()) => "signaling connection closed",
@@ -385,14 +400,14 @@ fn run_headless_host(app: Arc<AppState>, device: DeviceInfo, signal_override: Op
 /// asked for. What it may ask for is bounded by `allowed`: the interactive
 /// set (screen, keyboard, mouse, clipboard) by default, everything (file
 /// transfer, remote restart, local input lock...) only when the owner opts in
-/// with `CLEANDESK_UNATTENDED_FULL=1`.
+/// with `ROTODESK_UNATTENDED_FULL=1`.
 struct HeadlessApprover {
     allowed: Permissions,
 }
 
 /// Environment variable: `1` lets unattended callers request every permission
 /// instead of only the interactive set.
-const ENV_UNATTENDED_FULL: &str = "CLEANDESK_UNATTENDED_FULL";
+const ENV_UNATTENDED_FULL: &str = "ROTODESK_UNATTENDED_FULL";
 
 impl HeadlessApprover {
     fn from_env() -> Self {
@@ -451,8 +466,8 @@ mod tests {
     #[test]
     fn flags_override_env() {
         let env = |k: &str| match k {
-            "CLEANDESK_SIGNAL_URL" => Some("ws://env:1".to_string()),
-            "CLEANDESK_DATA_DIR" => Some("C:/env".to_string()),
+            "ROTODESK_SIGNAL_URL" => Some("ws://env:1".to_string()),
+            "ROTODESK_DATA_DIR" => Some("C:/env".to_string()),
             _ => None,
         };
         let o = parse_args(args(&[]), env).unwrap();
@@ -476,7 +491,7 @@ mod tests {
     #[test]
     fn connect_parses_grouped_ids_and_rejects_bad_ones() {
         let o = parse_args(args(&["--connect", "548 291 743"]), no_env).unwrap();
-        assert_eq!(o.mode, Mode::Connect(CleanDeskId::new(548_291_743).unwrap()));
+        assert_eq!(o.mode, Mode::Connect(RotoDeskId::new(548_291_743).unwrap()));
         assert!(parse_args(args(&["--connect", "12"]), no_env).is_err());
         assert!(parse_args(args(&["--connect"]), no_env).is_err());
     }
@@ -484,7 +499,7 @@ mod tests {
     #[tokio::test]
     async fn headless_approver_narrows_to_interactive_unless_opted_in() {
         let dev = DeviceInfo {
-            id: CleanDeskId::new(548_291_743).unwrap(),
+            id: RotoDeskId::new(548_291_743).unwrap(),
             alias: None,
             hostname: "x".into(),
             os: "test".into(),

@@ -957,285 +957,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cleandesk-app"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "async-trait",
- "cleandesk-core",
- "cleandesk-gui",
- "cleandesk-host",
- "cleandesk-platform",
- "cleandesk-proto",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "cleandesk-capture"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "cleandesk-platform",
- "cleandesk-proto",
- "serde",
- "thiserror 2.0.21",
- "tracing",
- "windows 0.62.2",
-]
-
-[[package]]
-name = "cleandesk-client"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "arboard",
- "async-trait",
- "bytes",
- "cleandesk-codec",
- "cleandesk-core",
- "cleandesk-crypto",
- "cleandesk-discovery",
- "cleandesk-host",
- "cleandesk-proto",
- "cleandesk-transport",
- "directories",
- "futures",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "zeroize",
-]
-
-[[package]]
-name = "cleandesk-codec"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "cleandesk-proto",
- "image",
- "postcard",
- "serde",
- "thiserror 2.0.21",
- "tracing",
- "zstd",
-]
-
-[[package]]
-name = "cleandesk-core"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "cleandesk-crypto",
- "cleandesk-proto",
- "directories",
- "parking_lot",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tracing",
- "uuid",
- "windows 0.62.2",
-]
-
-[[package]]
-name = "cleandesk-crypto"
-version = "0.1.14"
-dependencies = [
- "argon2",
- "base64 0.22.1",
- "cleandesk-proto",
- "ed25519-dalek 2.2.0",
- "hmac",
- "rand 0.8.8",
- "rand_core 0.6.4",
- "serde",
- "sha2 0.10.9",
- "subtle",
- "thiserror 2.0.21",
- "zeroize",
-]
-
-[[package]]
-name = "cleandesk-discovery"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "cleandesk-crypto",
- "cleandesk-proto",
- "ed25519-dalek 2.2.0",
- "futures-util",
- "igd-next",
- "mac_address",
- "mainline",
- "mdns-sd",
- "nostr",
- "rustls",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.21",
- "tokio",
- "tokio-tungstenite",
- "tracing",
-]
-
-[[package]]
-name = "cleandesk-gui"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "async-trait",
- "cleandesk-client",
- "cleandesk-codec",
- "cleandesk-core",
- "cleandesk-crypto",
- "cleandesk-discovery",
- "cleandesk-host",
- "cleandesk-platform",
- "cleandesk-proto",
- "cleandesk-transport",
- "eframe",
- "egui",
- "image",
- "raw-window-handle",
- "rfd",
- "sys-locale",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "tray-icon",
- "windows 0.62.2",
-]
-
-[[package]]
-name = "cleandesk-host"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "arboard",
- "async-trait",
- "bytes",
- "cleandesk-capture",
- "cleandesk-codec",
- "cleandesk-core",
- "cleandesk-crypto",
- "cleandesk-discovery",
- "cleandesk-input",
- "cleandesk-proto",
- "cleandesk-transport",
- "directories",
- "futures",
- "parking_lot",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "cleandesk-input"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "cleandesk-platform",
- "cleandesk-proto",
- "thiserror 2.0.21",
- "tracing",
- "windows 0.62.2",
-]
-
-[[package]]
-name = "cleandesk-platform"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.21",
- "tracing",
- "ureq",
- "windows 0.62.2",
- "windows-service",
-]
-
-[[package]]
-name = "cleandesk-proto"
-version = "0.1.14"
-dependencies = [
- "bitflags 2.13.2",
- "bytes",
- "postcard",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "uuid",
-]
-
-[[package]]
-name = "cleandesk-relay-server"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "async-trait",
- "cleandesk-crypto",
- "cleandesk-discovery",
- "cleandesk-proto",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "turn",
- "webrtc-util",
-]
-
-[[package]]
-name = "cleandesk-signal-server"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "cleandesk-client",
- "cleandesk-crypto",
- "cleandesk-host",
- "cleandesk-proto",
- "dashmap",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "cleandesk-transport"
-version = "0.1.14"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "bytes",
- "cleandesk-proto",
- "futures",
- "futures-util",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.21",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "uuid",
- "webrtc",
-]
-
-[[package]]
 name = "clipboard-win"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4361,6 +4082,286 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
+]
+
+[[package]]
+name = "rotodesk-app"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "rotodesk-core",
+ "rotodesk-gui",
+ "rotodesk-host",
+ "rotodesk-platform",
+ "rotodesk-proto",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rotodesk-capture"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "rotodesk-platform",
+ "rotodesk-proto",
+ "serde",
+ "thiserror 2.0.21",
+ "tracing",
+ "windows 0.62.2",
+]
+
+[[package]]
+name = "rotodesk-client"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "async-trait",
+ "bytes",
+ "directories",
+ "futures",
+ "rotodesk-codec",
+ "rotodesk-core",
+ "rotodesk-crypto",
+ "rotodesk-discovery",
+ "rotodesk-host",
+ "rotodesk-proto",
+ "rotodesk-transport",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zeroize",
+]
+
+[[package]]
+name = "rotodesk-codec"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "image",
+ "postcard",
+ "rotodesk-proto",
+ "serde",
+ "thiserror 2.0.21",
+ "tracing",
+ "zstd",
+]
+
+[[package]]
+name = "rotodesk-core"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "directories",
+ "parking_lot",
+ "rotodesk-crypto",
+ "rotodesk-proto",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+ "uuid",
+ "windows 0.62.2",
+]
+
+[[package]]
+name = "rotodesk-crypto"
+version = "0.2.0"
+dependencies = [
+ "argon2",
+ "base64 0.22.1",
+ "ed25519-dalek 2.2.0",
+ "hmac",
+ "rand 0.8.8",
+ "rand_core 0.6.4",
+ "rotodesk-proto",
+ "serde",
+ "sha2 0.10.9",
+ "subtle",
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
+name = "rotodesk-discovery"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "ed25519-dalek 2.2.0",
+ "futures-util",
+ "igd-next",
+ "mac_address",
+ "mainline",
+ "mdns-sd",
+ "nostr",
+ "rotodesk-crypto",
+ "rotodesk-proto",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+]
+
+[[package]]
+name = "rotodesk-gui"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "eframe",
+ "egui",
+ "image",
+ "raw-window-handle",
+ "rfd",
+ "rotodesk-client",
+ "rotodesk-codec",
+ "rotodesk-core",
+ "rotodesk-crypto",
+ "rotodesk-discovery",
+ "rotodesk-host",
+ "rotodesk-platform",
+ "rotodesk-proto",
+ "rotodesk-transport",
+ "sys-locale",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tray-icon",
+ "windows 0.62.2",
+]
+
+[[package]]
+name = "rotodesk-host"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "async-trait",
+ "bytes",
+ "directories",
+ "futures",
+ "parking_lot",
+ "rotodesk-capture",
+ "rotodesk-codec",
+ "rotodesk-core",
+ "rotodesk-crypto",
+ "rotodesk-discovery",
+ "rotodesk-input",
+ "rotodesk-proto",
+ "rotodesk-transport",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rotodesk-input"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "rotodesk-platform",
+ "rotodesk-proto",
+ "thiserror 2.0.21",
+ "tracing",
+ "windows 0.62.2",
+]
+
+[[package]]
+name = "rotodesk-platform"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "rotodesk-proto",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "tracing",
+ "ureq",
+ "windows 0.62.2",
+ "windows-service",
+]
+
+[[package]]
+name = "rotodesk-proto"
+version = "0.2.0"
+dependencies = [
+ "bitflags 2.13.2",
+ "bytes",
+ "postcard",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
+name = "rotodesk-relay-server"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "rotodesk-crypto",
+ "rotodesk-discovery",
+ "rotodesk-proto",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "turn",
+ "webrtc-util",
+]
+
+[[package]]
+name = "rotodesk-signal-server"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "dashmap",
+ "futures-util",
+ "rotodesk-client",
+ "rotodesk-crypto",
+ "rotodesk-host",
+ "rotodesk-proto",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "rotodesk-transport"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "futures",
+ "futures-util",
+ "rotodesk-proto",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "uuid",
+ "webrtc",
 ]
 
 [[package]]

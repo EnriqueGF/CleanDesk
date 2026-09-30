@@ -39,7 +39,7 @@
 use crate::error::TransportError;
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
-use cleandesk_proto::message::SignalPayload;
+use rotodesk_proto::message::SignalPayload;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use sha2::{Digest, Sha256};
@@ -64,7 +64,7 @@ const INCOMING_CAPACITY: usize = 512;
 /// before giving up.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The four logical data channels of a CleanDesk session.
+/// The four logical data channels of a RotoDesk session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Channel {
     /// Reliable, ordered: session control (permissions, chat, clipboard, file
@@ -167,19 +167,19 @@ impl Default for IceConfig {
 pub const DEFAULT_STUN_URL: &str = "stun:stun.l.google.com:19302";
 
 /// Environment variable: comma-separated STUN URLs (`stun:host:port`).
-pub const ENV_STUN_URLS: &str = "CLEANDESK_STUN_URLS";
+pub const ENV_STUN_URLS: &str = "ROTODESK_STUN_URLS";
 /// Environment variable: comma-separated TURN URLs (`turn:host:port?transport=udp`).
-pub const ENV_TURN_URLS: &str = "CLEANDESK_TURN_URLS";
+pub const ENV_TURN_URLS: &str = "ROTODESK_TURN_URLS";
 /// Environment variable: TURN long-term username.
-pub const ENV_TURN_USER: &str = "CLEANDESK_TURN_USER";
+pub const ENV_TURN_USER: &str = "ROTODESK_TURN_USER";
 /// Environment variable: TURN long-term password.
-pub const ENV_TURN_PASS: &str = "CLEANDESK_TURN_PASS";
+pub const ENV_TURN_PASS: &str = "ROTODESK_TURN_PASS";
 
 impl IceConfig {
     /// Build the ICE configuration from the process environment
     /// ([`ENV_STUN_URLS`], [`ENV_TURN_URLS`], [`ENV_TURN_USER`],
     /// [`ENV_TURN_PASS`]), falling back to [`IceConfig::default`] for anything
-    /// unset. This is how a deployment points clients at the CleanDesk Relay.
+    /// unset. This is how a deployment points clients at the RotoDesk Relay.
     pub fn from_env() -> Self {
         Self::from_vars(|k| std::env::var(k).ok())
     }
@@ -353,7 +353,7 @@ fn spawn_reader(
 }
 
 /// A WebRTC peer connection wrapping [`webrtc`]'s `RTCPeerConnection` with the
-/// four CleanDesk data channels.
+/// four RotoDesk data channels.
 pub struct PeerConnection {
     pc: Arc<dyn RtcPeerConnection>,
     channels: ChannelMap,

@@ -1,7 +1,7 @@
-//! End-to-end smoke test of the CleanDesk stack:
+//! End-to-end smoke test of the RotoDesk stack:
 //!
-//! signal server (this crate) + a real host (`cleandesk-host`) + a real viewer
-//! (`cleandesk-client`), all in-process, establishing an actual WebRTC session
+//! signal server (this crate) + a real host (`rotodesk-host`) + a real viewer
+//! (`rotodesk-client`), all in-process, establishing an actual WebRTC session
 //! over loopback and exchanging control-plane messages.
 //!
 //! This exercises: WebSocket signaling, device registration & ID resolution,
@@ -11,16 +11,16 @@
 //! streams video, but the assertion only requires the control-plane handshake so
 //! the test is robust on headless CI.
 
-use cleandesk_client::{connect, ClientConfig, ClientEvent};
-use cleandesk_crypto::identity::Identity;
-use cleandesk_host::{serve, AutoAccept, HostConfig};
-use cleandesk_proto::{
-    id::CleanDeskId, permissions::Permissions, quality::QualityProfile, session::DeviceInfo,
+use rotodesk_client::{connect, ClientConfig, ClientEvent};
+use rotodesk_crypto::identity::Identity;
+use rotodesk_host::{serve, AutoAccept, HostConfig};
+use rotodesk_proto::{
+    id::RotoDeskId, permissions::Permissions, quality::QualityProfile, session::DeviceInfo,
 };
 use std::sync::Arc;
 use std::time::Duration;
 
-fn dev_info(id: CleanDeskId, hostname: &str) -> DeviceInfo {
+fn dev_info(id: RotoDeskId, hostname: &str) -> DeviceInfo {
     DeviceInfo {
         id,
         alias: None,
@@ -42,7 +42,7 @@ async fn end_to_end_connect_and_control_handshake() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
-        let _ = cleandesk_signal_server::run(listener).await;
+        let _ = rotodesk_signal_server::run(listener).await;
     });
     let url = format!("ws://{addr}");
 
@@ -58,7 +58,7 @@ async fn end_to_end_connect_and_control_handshake() {
     // Give the host a moment to register with the server.
     tokio::time::sleep(Duration::from_millis(600)).await;
 
-    // 3. Viewer connects to the host's CleanDesk ID.
+    // 3. Viewer connects to the host's RotoDesk ID.
     let cli_ident = Identity::generate();
     let mut cli_cfg =
         ClientConfig::new(url, dev_info(cli_ident.derive_id(), "viewer"), cli_ident, host_id);

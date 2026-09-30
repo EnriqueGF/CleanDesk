@@ -1,5 +1,5 @@
 //! Device identity: an Ed25519 keypair that uniquely and verifiably identifies
-//! a CleanDesk installation, plus derivation of the human CleanDesk ID.
+//! a RotoDesk installation, plus derivation of the human RotoDesk ID.
 
 use crate::CryptoError;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
@@ -52,11 +52,11 @@ impl Identity {
         hash[..16].iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join("")
     }
 
-    /// Derive a deterministic 9-digit CleanDesk ID from the public key.
+    /// Derive a deterministic 9-digit RotoDesk ID from the public key.
     ///
     /// Deterministic derivation means the same identity always maps to the same
     /// ID; collisions are resolved by the server at registration time.
-    pub fn derive_id(&self) -> cleandesk_proto::CleanDeskId {
+    pub fn derive_id(&self) -> rotodesk_proto::RotoDeskId {
         derive_id_from_public_key(&self.public_key().to_bytes())
     }
 
@@ -84,25 +84,25 @@ impl Identity {
     }
 }
 
-/// The CleanDesk ID that belongs to a raw 32-byte Ed25519 public key.
+/// The RotoDesk ID that belongs to a raw 32-byte Ed25519 public key.
 ///
 /// This is the *only* legitimate way an ID comes into existence: the server
 /// recomputes it at registration and refuses a client whose claimed ID does
 /// not match its key, which is what stops ID hijacking.
-pub fn derive_id_from_public_key(public_key: &[u8; 32]) -> cleandesk_proto::CleanDeskId {
+pub fn derive_id_from_public_key(public_key: &[u8; 32]) -> rotodesk_proto::RotoDeskId {
     let hash = Sha256::digest(public_key);
     let mut n = 0u64;
     for b in &hash[..8] {
         n = (n << 8) | *b as u64;
     }
-    cleandesk_proto::CleanDeskId::generate(|| n)
+    rotodesk_proto::RotoDeskId::generate(|| n)
 }
 
 /// Same as [`derive_id_from_public_key`], starting from the base64 form that
 /// travels in signaling. Fails on malformed base64 or a wrong-length key.
 pub fn derive_id_from_public_key_b64(
     public_key_b64: &str,
-) -> Result<cleandesk_proto::CleanDeskId, CryptoError> {
+) -> Result<rotodesk_proto::RotoDeskId, CryptoError> {
     Ok(derive_id_from_public_key(&decode_public_key(public_key_b64)?))
 }
 
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn sign_and_verify() {
         let id = Identity::generate();
-        let msg = b"cleandesk-session-42";
+        let msg = b"rotodesk-session-42";
         let sig = id.sign(msg);
         assert!(verify_b64(&id.public_key_b64(), msg, &sig).is_ok());
         assert!(verify_b64(&id.public_key_b64(), b"tampered", &sig).is_err());
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn b64_signature_roundtrip_and_tamper_detection() {
         let id = Identity::generate();
-        let msg = cleandesk_proto::message::register_proof_message(b"nonce-bytes");
+        let msg = rotodesk_proto::message::register_proof_message(b"nonce-bytes");
         let sig = id.sign_b64(&msg);
         assert!(verify_b64_sig(&id.public_key_b64(), &msg, &sig).is_ok());
         assert!(verify_b64_sig(&id.public_key_b64(), b"other", &sig).is_err());

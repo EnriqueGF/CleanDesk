@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use cleandesk_proto::{session::DeviceState, CleanDeskId};
+use rotodesk_proto::{session::DeviceState, RotoDeskId};
 use serde::{Deserialize, Serialize};
 
 /// One saved device entry.
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// still load.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceEntry {
-    pub id: CleanDeskId,
+    pub id: RotoDeskId,
     pub name: String,
     #[serde(default)]
     pub alias: Option<String>,
@@ -33,7 +33,7 @@ pub struct DeviceEntry {
     pub unattended_key: Option<Vec<u8>>,
     /// The device's Ed25519 public key (base64) as seen in the last
     /// successful session. In community mode this is what protects against
-    /// someone else appearing under the same ID (see `cleandesk-discovery`).
+    /// someone else appearing under the same ID (see `rotodesk-discovery`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinned_key: Option<String>,
     /// MAC address (`AA:BB:CC:DD:EE:FF`) of the device's primary adapter, as
@@ -51,7 +51,7 @@ fn offline() -> DeviceState {
 impl DeviceEntry {
     /// A freshly saved entry: no alias/description/group/history yet, and
     /// reported offline until the address book hears otherwise.
-    pub fn new(id: CleanDeskId, name: impl Into<String>) -> Self {
+    pub fn new(id: RotoDeskId, name: impl Into<String>) -> Self {
         Self {
             id,
             name: name.into(),
@@ -80,7 +80,7 @@ pub struct AddressBook {
 }
 
 impl AddressBook {
-    /// Add a new entry, or replace the existing one with the same [`CleanDeskId`].
+    /// Add a new entry, or replace the existing one with the same [`RotoDeskId`].
     pub fn add(&mut self, entry: DeviceEntry) {
         match self.entries.iter_mut().find(|e| e.id == entry.id) {
             Some(existing) => *existing = entry,
@@ -89,14 +89,14 @@ impl AddressBook {
     }
 
     /// Remove the entry with `id`, returning it if it was present.
-    pub fn remove(&mut self, id: CleanDeskId) -> Option<DeviceEntry> {
+    pub fn remove(&mut self, id: RotoDeskId) -> Option<DeviceEntry> {
         let idx = self.entries.iter().position(|e| e.id == id)?;
         Some(self.entries.remove(idx))
     }
 
     /// Apply `f` to the entry with `id` in place. Returns `true` if an entry
     /// was found and updated.
-    pub fn update(&mut self, id: CleanDeskId, f: impl FnOnce(&mut DeviceEntry)) -> bool {
+    pub fn update(&mut self, id: RotoDeskId, f: impl FnOnce(&mut DeviceEntry)) -> bool {
         match self.find_by_id_mut(id) {
             Some(entry) => {
                 f(entry);
@@ -106,11 +106,11 @@ impl AddressBook {
         }
     }
 
-    pub fn find_by_id(&self, id: CleanDeskId) -> Option<&DeviceEntry> {
+    pub fn find_by_id(&self, id: RotoDeskId) -> Option<&DeviceEntry> {
         self.entries.iter().find(|e| e.id == id)
     }
 
-    pub fn find_by_id_mut(&mut self, id: CleanDeskId) -> Option<&mut DeviceEntry> {
+    pub fn find_by_id_mut(&mut self, id: RotoDeskId) -> Option<&mut DeviceEntry> {
         self.entries.iter_mut().find(|e| e.id == id)
     }
 
@@ -130,8 +130,8 @@ impl AddressBook {
 mod tests {
     use super::*;
 
-    fn id(n: u64) -> CleanDeskId {
-        CleanDeskId::new(n).unwrap()
+    fn id(n: u64) -> RotoDeskId {
+        RotoDeskId::new(n).unwrap()
     }
 
     #[test]
@@ -157,10 +157,10 @@ mod tests {
         book.add(DeviceEntry::new(id(548_291_743), "Oficina"));
 
         assert!(book.update(id(548_291_743), |e| e.alias =
-            Some("pc-oficina.clean".into())));
+            Some("pc-oficina.roto".into())));
         assert_eq!(
             book.find_by_id(id(548_291_743)).unwrap().alias.as_deref(),
-            Some("pc-oficina.clean")
+            Some("pc-oficina.roto")
         );
         assert!(!book.update(id(999_999_999), |_| {}));
     }

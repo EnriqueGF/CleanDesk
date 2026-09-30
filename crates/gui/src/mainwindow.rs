@@ -3,9 +3,9 @@
 //! conexión, tarjetas de acción, sesiones recientes con miniaturas, pie de
 //! estado y las ventanas flotantes de Ajustes, Seguridad y equipos cercanos.
 
-use cleandesk_proto::{id::CleanDeskId, quality::QualityProfile};
+use rotodesk_proto::{id::RotoDeskId, quality::QualityProfile};
 
-use crate::app::{CleanDeskApp, HostStatus, Page};
+use crate::app::{RotoDeskApp, HostStatus, Page};
 use crate::i18n::{self, tr, trf, Lang};
 use crate::theme;
 
@@ -34,7 +34,7 @@ const THUMB_H: f32 = 130.0;
 
 /// Una tarjeta de la rejilla de sesiones recientes / contactos.
 struct DeviceCard {
-    id: CleanDeskId,
+    id: RotoDeskId,
     name: String,
     subtitle: String,
     favorite: bool,
@@ -47,14 +47,14 @@ struct DeviceCard {
 /// Acciones diferidas de una tarjeta (se aplican tras soltar los préstamos).
 #[derive(Default)]
 struct CardActions {
-    connect: Option<CleanDeskId>,
-    toggle_fav: Option<(CleanDeskId, String, bool)>,
-    forget_key: Option<CleanDeskId>,
+    connect: Option<RotoDeskId>,
+    toggle_fav: Option<(RotoDeskId, String, bool)>,
+    forget_key: Option<RotoDeskId>,
     wake: Option<String>,
 }
 
 /// Dibuja la ventana principal completa.
-pub fn show(app: &mut CleanDeskApp, ctx: &egui::Context) {
+pub fn show(app: &mut RotoDeskApp, ctx: &egui::Context) {
     // Rastreo automático de la red local al arrancar y cada minuto: alimenta
     // el punto verde de "en línea" de las tarjetas.
     let due = app
@@ -125,7 +125,7 @@ pub fn show(app: &mut CleanDeskApp, ctx: &egui::Context) {
 
 /// Avisos (errores de conexión, confirmaciones) con cierre y, si procede, el
 /// botón para confiar en una identidad cambiada.
-fn notices(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+fn notices(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
     let Some(notice) = app.notice.clone() else {
         return;
     };
@@ -169,7 +169,7 @@ fn notices(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 // ---------------------------------------------------------------------------
 
 /// Cabecera: logo, navegación por páginas y acciones (ajustes, identidad).
-fn header(app: &mut CleanDeskApp, ctx: &egui::Context) {
+fn header(app: &mut RotoDeskApp, ctx: &egui::Context) {
     egui::TopBottomPanel::top("cd-header")
         .frame(
             egui::Frame::new()
@@ -178,13 +178,9 @@ fn header(app: &mut CleanDeskApp, ctx: &egui::Context) {
         )
         .show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                theme::brand(ui, 32.0);
-                ui.label(
-                    egui::RichText::new("CleanDesk")
-                        .strong()
-                        .size(21.0)
-                        .color(theme::ACCENT_STRONG),
-                );
+                theme::brand(ui, 42.0);
+                theme::wordmark(ui, 32.0);
+                ui.add_space(10.0);
                 for (page, label) in [
                     (Page::Home, tr("Home")),
                     (Page::Sessions, tr("Sessions")),
@@ -204,7 +200,7 @@ fn header(app: &mut CleanDeskApp, ctx: &egui::Context) {
 }
 
 /// Una pestaña de navegación con subrayado verde cuando está activa.
-fn nav_tab(app: &mut CleanDeskApp, ui: &mut egui::Ui, page: Page, icon: &str, label: &str) {
+fn nav_tab(app: &mut RotoDeskApp, ui: &mut egui::Ui, page: Page, icon: &str, label: &str) {
     let selected = app.page == page;
     let color = if selected {
         theme::ACCENT_STRONG
@@ -230,7 +226,7 @@ fn nav_tab(app: &mut CleanDeskApp, ui: &mut egui::Ui, page: Page, icon: &str, la
 }
 
 /// Barra de estado inferior.
-fn footer(app: &CleanDeskApp, ctx: &egui::Context) {
+fn footer(app: &RotoDeskApp, ctx: &egui::Context) {
     egui::TopBottomPanel::bottom("cd-footer")
         .frame(
             egui::Frame::new()
@@ -278,7 +274,7 @@ fn footer(app: &CleanDeskApp, ctx: &egui::Context) {
 }
 
 /// Aviso de sesión entrante activa (spec §18) con botón para finalizarla.
-fn active_session_banner(app: &CleanDeskApp, ui: &mut egui::Ui, session: &crate::app::HostSession) {
+fn active_session_banner(app: &RotoDeskApp, ui: &mut egui::Ui, session: &crate::app::HostSession) {
     egui::Frame::new()
         .fill(egui::Color32::from_rgb(255, 244, 229))
         .stroke(egui::Stroke::new(1.0_f32, theme::WARN))
@@ -322,7 +318,7 @@ fn active_session_banner(app: &CleanDeskApp, ui: &mut egui::Ui, session: &crate:
 // Página de inicio
 // ---------------------------------------------------------------------------
 
-fn home_page(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
+fn home_page(app: &mut RotoDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     hero(app, ui);
     ui.add_space(14.0);
     connect_bar(app, ui, ctx);
@@ -351,7 +347,7 @@ fn home_page(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
 }
 
 /// Banner: título, dirección propia con copiar / bloquear / invitar, y hojas.
-fn hero(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+fn hero(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
     theme::card_tinted().show(ui, |ui| {
         ui.set_width(ui.available_width());
         if ui.available_width() >= 800.0 {
@@ -370,16 +366,12 @@ fn hero(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 fn hero_intro(ui: &mut egui::Ui) {
     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
         ui.horizontal(|ui| {
-            theme::brand(ui, 48.0);
-            ui.label(
-                egui::RichText::new(tr("Your desktop,\nanywhere"))
-                    .size(24.0)
-                    .strong(),
-            );
+            theme::brand(ui, 76.0);
+            ui.label(theme::display_text(tr("Your desktop,\nanywhere"), 32.0));
         });
         ui.add(
             egui::Label::new(
-                egui::RichText::new(tr("Connect securely, quickly and simply with CleanDesk."))
+                egui::RichText::new(tr("Connect securely, quickly and simply with RotoDesk."))
                     .color(theme::TEXT_DIM),
             )
             .wrap(),
@@ -387,9 +379,9 @@ fn hero_intro(ui: &mut egui::Ui) {
     });
 }
 
-fn hero_address(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+fn hero_address(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-        ui.label(egui::RichText::new(tr("Your CleanDesk address")).strong());
+        ui.label(egui::RichText::new(tr("Your RotoDesk address")).strong());
         theme::big_id(ui, app.id);
         ui.horizontal_wrapped(|ui| {
             if ui.button(tr("Copy")).clicked() {
@@ -408,7 +400,7 @@ fn hero_address(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 }
 
 /// Barra "Conectar a escritorio remoto".
-fn connect_bar(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
+fn connect_bar(app: &mut RotoDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     theme::card().inner_margin(egui::Margin::symmetric(18, 12)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         let connecting = app.is_connecting();
@@ -421,7 +413,7 @@ fn connect_bar(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
             ui.add_enabled_ui(!connecting, |ui| {
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut app.connect_input)
-                        .hint_text(tr("Enter a CleanDesk address or device alias"))
+                        .hint_text(tr("Enter a RotoDesk address or device alias"))
                         .desired_width((ui.available_width() - 150.0).max(120.0)),
                 );
                 if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -462,9 +454,9 @@ fn connect_bar(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
 
 /// Interpreta el campo de conexión: un ID numérico o un alias/nombre de la
 /// agenda o de la red local.
-fn start_from_input(app: &mut CleanDeskApp, ctx: &egui::Context) {
+fn start_from_input(app: &mut RotoDeskApp, ctx: &egui::Context) {
     let text = app.connect_input.trim().to_string();
-    if let Ok(id) = CleanDeskId::parse(&text) {
+    if let Ok(id) = RotoDeskId::parse(&text) {
         app.start_connection(id, ctx);
         return;
     }
@@ -495,12 +487,12 @@ fn start_from_input(app: &mut CleanDeskApp, ctx: &egui::Context) {
         });
     match by_alias {
         Some(id) => app.start_connection(id, ctx),
-        None => app.notice = Some(tr("Invalid CleanDesk ID. Check the number.").into()),
+        None => app.notice = Some(tr("Invalid RotoDesk ID. Check the number.").into()),
     }
 }
 
 /// Las cuatro tarjetas de acción del inicio.
-fn action_cards(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
+fn action_cards(app: &mut RotoDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     let mut open_settings = false;
     let mut discover = false;
     let mut page: Option<Page> = None;
@@ -513,11 +505,11 @@ fn action_cards(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) 
                     &mut cols[0],
                     true,
                     "news",
-                    tr("What's new in CleanDesk?"),
+                    tr("What's new in RotoDesk?"),
                     tr("Discover the latest features and improvements."),
                     tr("See what's new"),
                     || {
-                        url = Some("https://github.com/EnriqueGF/CleanDesk/releases");
+                        url = Some("https://github.com/EnriqueGF/RotoDesk/releases");
                     },
                 );
             }
@@ -628,7 +620,7 @@ fn action_card(
 // ---------------------------------------------------------------------------
 
 /// Tarjetas de las sesiones recientes (una por equipo, la más nueva primero).
-fn recent_cards(app: &CleanDeskApp, max: usize) -> Vec<DeviceCard> {
+fn recent_cards(app: &RotoDeskApp, max: usize) -> Vec<DeviceCard> {
     let book = app.state.addressbook.read();
     let history = app.state.history.read();
     let mut seen = std::collections::HashSet::new();
@@ -654,7 +646,7 @@ fn recent_cards(app: &CleanDeskApp, max: usize) -> Vec<DeviceCard> {
 }
 
 /// Tarjetas de la agenda (contactos / favoritos).
-fn contact_cards(app: &CleanDeskApp) -> Vec<DeviceCard> {
+fn contact_cards(app: &RotoDeskApp) -> Vec<DeviceCard> {
     let book = app.state.addressbook.read();
     book.entries
         .iter()
@@ -675,7 +667,7 @@ fn contact_cards(app: &CleanDeskApp) -> Vec<DeviceCard> {
 /// Rejilla de tarjetas con miniatura; `with_new_card` añade la tarjeta
 /// punteada "Conectar a un nuevo dispositivo" al final.
 fn device_grid(
-    app: &mut CleanDeskApp,
+    app: &mut RotoDeskApp,
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     cards: &[DeviceCard],
@@ -722,7 +714,7 @@ fn device_grid(
         app.notice = Some(tr("Password forgotten.").into());
     }
     if let Some(mac) = actions.wake {
-        match cleandesk_discovery::wol::send_magic_packet(&mac, None) {
+        match rotodesk_discovery::wol::send_magic_packet(&mac, None) {
             Ok(()) => app.notice = Some(tr("Wake-up packet sent.").into()),
             Err(e) => {
                 app.notice = Some(trf(
@@ -740,7 +732,7 @@ fn device_grid(
 /// Una tarjeta de equipo: miniatura (última sesión), estado, estrella y pie
 /// con nombre, "conectado hace…" y menú de acciones.
 fn device_card(
-    app: &mut CleanDeskApp,
+    app: &mut RotoDeskApp,
     ui: &mut egui::Ui,
     ctx: &egui::Context,
     card: &DeviceCard,
@@ -922,7 +914,7 @@ fn device_card(
 }
 
 /// Tarjeta punteada "Conectar a un nuevo dispositivo".
-fn new_device_card(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+fn new_device_card(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(CARD_W, THUMB_H + 64.0), egui::Sense::click());
     let color = if resp.hovered() {
@@ -997,7 +989,7 @@ fn dashed_rect(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) 
 // Páginas: Sesiones, Contactos, Invitaciones
 // ---------------------------------------------------------------------------
 
-fn sessions_page(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
+fn sessions_page(app: &mut RotoDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.label(egui::RichText::new(tr("Sessions")).size(20.0).strong());
     ui.label(
         egui::RichText::new(tr("Every connection made from or to this device."))
@@ -1028,7 +1020,7 @@ fn sessions_page(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context)
         .iter()
         .map(|e| (e.id.value(), e.name.clone()))
         .collect();
-    let mut connect: Option<CleanDeskId> = None;
+    let mut connect: Option<RotoDeskId> = None;
     theme::card()
         .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
@@ -1102,7 +1094,7 @@ fn format_duration(secs: u64) -> String {
     }
 }
 
-fn contacts_page(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
+fn contacts_page(app: &mut RotoDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.horizontal_wrapped(|ui| {
         ui.vertical(|ui| {
             ui.label(egui::RichText::new(tr("Contacts")).size(20.0).strong());
@@ -1130,7 +1122,7 @@ fn contacts_page(app: &mut CleanDeskApp, ui: &mut egui::Ui, ctx: &egui::Context)
     device_grid(app, ui, ctx, &cards, false);
 }
 
-fn invitations_page(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+fn invitations_page(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
     ui.label(egui::RichText::new(tr("Invitations")).size(20.0).strong());
     ui.label(egui::RichText::new(tr("Invite someone to connect to this device, or check requests waiting for your approval.")).color(theme::TEXT_DIM));
     ui.add_space(12.0);
@@ -1195,12 +1187,12 @@ fn invitations_page(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 // ---------------------------------------------------------------------------
 
 /// Ventana "Equipos cercanos" (resultado del rastreo mDNS).
-fn nearby_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
+fn nearby_window(app: &mut RotoDeskApp, ctx: &egui::Context) {
     if !app.show_nearby {
         return;
     }
     let mut open = true;
-    let mut connect: Option<CleanDeskId> = None;
+    let mut connect: Option<RotoDeskId> = None;
     let mut rescan = false;
     egui::Window::new(tr("Nearby devices"))
         .id(egui::Id::new("cd-nearby-window"))
@@ -1221,7 +1213,7 @@ fn nearby_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
             let list = app.nearby.lock().map(|n| n.clone()).unwrap_or_default();
             if list.is_empty() && !scanning {
                 ui.label(
-                    egui::RichText::new(tr("No CleanDesk devices found on this network."))
+                    egui::RichText::new(tr("No RotoDesk devices found on this network."))
                         .color(theme::TEXT_MUTED),
                 );
             }
@@ -1262,7 +1254,7 @@ fn nearby_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
 }
 
 /// Ventana flotante "Añadir dispositivo".
-fn add_device_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
+fn add_device_window(app: &mut RotoDeskApp, ctx: &egui::Context) {
     if !app.show_add_device {
         return;
     }
@@ -1280,7 +1272,7 @@ fn add_device_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
             );
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
-                ui.label(tr("CleanDesk ID:"));
+                ui.label(tr("RotoDesk ID:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut app.add_device_id)
                         .font(egui::TextStyle::Monospace)
@@ -1297,23 +1289,23 @@ fn add_device_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
                 if ui.add(theme::primary_button(tr("Save"))).clicked() {
-                    match CleanDeskId::parse(&app.add_device_id) {
+                    match RotoDeskId::parse(&app.add_device_id) {
                         Ok(id) => {
                             app.add_favorite(id, app.add_device_name.trim().to_string());
                             app.page = Page::Contacts;
                             done = true;
                         }
-                        Err(_) => app.notice = Some(tr("Invalid CleanDesk ID.").into()),
+                        Err(_) => app.notice = Some(tr("Invalid RotoDesk ID.").into()),
                     }
                 }
                 if ui.add(theme::ghost_button(tr("Connect"))).clicked() {
-                    match CleanDeskId::parse(&app.add_device_id) {
+                    match RotoDeskId::parse(&app.add_device_id) {
                         Ok(id) => {
                             app.connect_input = id.to_string();
                             app.start_connection(id, ctx);
                             done = true;
                         }
-                        Err(_) => app.notice = Some(tr("Invalid CleanDesk ID.").into()),
+                        Err(_) => app.notice = Some(tr("Invalid RotoDesk ID.").into()),
                     }
                 }
             });
@@ -1326,7 +1318,7 @@ fn add_device_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
 }
 
 /// Ventana flotante de seguridad: huella e identidad.
-fn security_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
+fn security_window(app: &mut RotoDeskApp, ctx: &egui::Context) {
     if !app.show_security {
         return;
     }
@@ -1338,7 +1330,7 @@ fn security_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
         .resizable(false)
         .show(ctx, |ui| {
             ui.label(
-                egui::RichText::new(tr("This device's identity is an Ed25519 key pair. Your CleanDesk ID is derived from the public key and the server requires a signature to register it: nobody can impersonate your ID without the private key."))
+                egui::RichText::new(tr("This device's identity is an Ed25519 key pair. Your RotoDesk ID is derived from the public key and the server requires a signature to register it: nobody can impersonate your ID without the private key."))
                     .color(theme::TEXT_DIM),
             );
             ui.add_space(8.0);
@@ -1359,7 +1351,7 @@ fn security_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
 }
 
 /// Ventana flotante de ajustes (spec §8, §9, §24).
-fn settings_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
+fn settings_window(app: &mut RotoDeskApp, ctx: &egui::Context) {
     if !app.show_settings {
         return;
     }
@@ -1411,6 +1403,8 @@ fn settings_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
                                         alias_settings(app, ui);
                                         ui.separator();
                                         tray_settings(app, ui);
+                                        ui.add_space(12.0);
+                                        ui.hyperlink_to(tr("Logo credits"), "https://commons.wikimedia.org/wiki/File:Roto2.png");
                                     }
                                     1 => network_settings(app, ui),
                                     2 => unattended_settings(app, ui),
@@ -1442,7 +1436,7 @@ fn settings_window(app: &mut CleanDeskApp, ctx: &egui::Context) {
 }
 
 /// Alias del dispositivo (antes vivía en la tarjeta "Tu dirección").
-fn alias_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+fn alias_settings(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
     theme::section_label(ui, tr("Device alias"), true);
     ui.horizontal_wrapped(|ui| {
         let resp = ui.add(
@@ -1466,7 +1460,7 @@ fn alias_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 }
 
 /// Sub-sección "Bandeja": cerrar la ventana la oculta en la bandeja.
-fn tray_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+fn tray_settings(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
     theme::section_label(ui, tr("Tray"), true);
     let mut to_tray = app.state.settings.read().minimize_to_tray;
     if ui
@@ -1482,7 +1476,7 @@ fn tray_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 }
 
 /// Banner de actualización disponible / en curso (página principal).
-fn update_banner(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+fn update_banner(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
     use crate::updater::Phase;
     if !app.updater.banner_visible() {
         return;
@@ -1497,7 +1491,7 @@ fn update_banner(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
             ui.label(egui::RichText::new("⬆").size(18.0).color(theme::ACCENT));
             match &phase {
                 Phase::Available(r) => {
-                    ui.label(egui::RichText::new(trf("CleanDesk {v} is available.", &[("v", &r.version_string())])).strong());
+                    ui.label(egui::RichText::new(trf("RotoDesk {v} is available.", &[("v", &r.version_string())])).strong());
                     if ui.add(theme::primary_button(tr("Update now"))).clicked() {
                         download = true;
                     }
@@ -1523,7 +1517,7 @@ fn update_banner(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
                 Phase::Ready { release, .. } => {
                     ui.label(
                         egui::RichText::new(trf(
-                            "Update downloaded and verified. CleanDesk will close, install {v} and reopen.",
+                            "Update downloaded and verified. RotoDesk will close, install {v} and reopen.",
                             &[("v", &release.version_string())],
                         ))
                         .strong(),
@@ -1562,7 +1556,7 @@ fn update_banner(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 }
 
 /// Sub-sección "Actualizaciones" de Ajustes.
-fn update_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+fn update_settings(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
     use crate::updater::Phase;
     theme::section_label(ui, tr("Updates"), true);
     ui.label(
@@ -1614,7 +1608,7 @@ fn update_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
             Phase::Available(r) => {
                 ui.label(
                     egui::RichText::new(trf(
-                        "CleanDesk {v} is available.",
+                        "RotoDesk {v} is available.",
                         &[("v", &r.version_string())],
                     ))
                     .size(12.0)
@@ -1654,7 +1648,7 @@ fn update_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 
 /// Sub-sección "Idioma": sistema, inglés o español. El cambio se aplica en el
 /// acto y se persiste (`None` = seguir al sistema).
-fn language_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+fn language_settings(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
     theme::section_label(ui, tr("Language"), true);
 
     let current: Option<Lang> = app
@@ -1685,7 +1679,7 @@ fn language_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 }
 
 /// Sub-sección de acceso desatendido.
-fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
+fn unattended_settings(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
     theme::section_label(ui, tr("Unattended access"), true);
 
     let (mut enabled, has_password) = {
@@ -1734,7 +1728,7 @@ fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
         if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             save = true;
         }
-        let valid = app.unattended_pw.trim().chars().count() >= cleandesk_core::config::MIN_UNATTENDED_PASSWORD_LEN;
+        let valid = app.unattended_pw.trim().chars().count() >= rotodesk_core::config::MIN_UNATTENDED_PASSWORD_LEN;
         if ui
             .add_enabled(valid, theme::primary_button(tr("Save password")))
             .clicked()
@@ -1744,7 +1738,7 @@ fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     });
     if save {
         let pw = app.unattended_pw.trim().to_string();
-        if pw.chars().count() < cleandesk_core::config::MIN_UNATTENDED_PASSWORD_LEN {
+        if pw.chars().count() < rotodesk_core::config::MIN_UNATTENDED_PASSWORD_LEN {
             app.unattended_msg = Some((
                 tr("The unattended-access password must be at least 10 characters long.").into(),
                 true,
@@ -1786,7 +1780,7 @@ fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 }
 
 /// Guarda el alias en los ajustes (o lo borra si queda vacío) y persiste.
-fn persist_alias(app: &mut CleanDeskApp) {
+fn persist_alias(app: &mut RotoDeskApp) {
     let trimmed = app.alias_edit.trim();
     let new_alias = if trimmed.is_empty() {
         None
@@ -1819,9 +1813,9 @@ pub fn format_when(unix: u64) -> String {
 }
 
 /// Sub-sección "Sistema" (spec §24): arranque con la sesión y servicio de Windows.
-fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
-    use cleandesk_platform::service::ServiceStatus;
-    use cleandesk_platform::{service, startup};
+fn system_settings(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
+    use rotodesk_platform::service::ServiceStatus;
+    use rotodesk_platform::{service, startup};
 
     theme::section_label(ui, tr("System"), true);
 
@@ -1845,9 +1839,9 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
                 app.state.settings.write().start_with_windows = run_at_login;
                 app.save_settings();
                 app.notice = Some(if run_at_login {
-                    tr("CleanDesk will open when you sign in.").into()
+                    tr("RotoDesk will open when you sign in.").into()
                 } else {
-                    tr("CleanDesk will no longer open when you sign in.").into()
+                    tr("RotoDesk will no longer open when you sign in.").into()
                 });
             }
             Some(Err(e)) => {
@@ -1865,12 +1859,12 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     let mut privileged = app.state.settings.read().privileged_control;
     if ui
         .checkbox(&mut privileged, tr("Privileged control: drive administrator windows and UAC prompts"))
-        .on_hover_text(tr("With the service installed, the service (LocalSystem) hosts and can show the UAC secure desktop; only unattended (password) connections are accepted then. Without the service, CleanDesk asks for elevation when it starts."))
+        .on_hover_text(tr("With the service installed, the service (LocalSystem) hosts and can show the UAC secure desktop; only unattended (password) connections are accepted then. Without the service, RotoDesk asks for elevation when it starts."))
         .changed()
     {
         app.state.settings.write().privileged_control = privileged;
         app.save_settings();
-        app.notice = Some(tr("Restart CleanDesk to apply privileged control.").into());
+        app.notice = Some(tr("Restart RotoDesk to apply privileged control.").into());
     }
     let priv_state = if app.hosted_by_service {
         tr("Active: the service hosts as LocalSystem")
@@ -1892,7 +1886,7 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     let mut want_service = installed;
     let changed = ui
         .checkbox(&mut want_service, tr("Install as a service (unattended access before sign-in)"))
-        .on_hover_text(tr("Requires administrator rights. The service keeps the unattended host running even when nobody is signed in; when you open CleanDesk, the GUI takes over."))
+        .on_hover_text(tr("Requires administrator rights. The service keeps the unattended host running even when nobody is signed in; when you open RotoDesk, the GUI takes over."))
         .changed();
     let (status_text, status_color) = match app.service_status {
         ServiceStatus::Running => (tr("Service installed and running"), theme::ONLINE),
@@ -1914,7 +1908,7 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
         let result = match (want_service, exe.as_deref()) {
             (true, Some(e)) => service::request_install(e, &app.state.data_dir()),
             (false, Some(e)) => service::request_uninstall(e),
-            (_, None) => Err(cleandesk_platform::PlatformError::Other(
+            (_, None) => Err(rotodesk_platform::PlatformError::Other(
                 tr("Could not locate the executable.").into(),
             )),
         };
@@ -1923,12 +1917,12 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
                 app.state.settings.write().install_service = want_service;
                 app.save_settings();
                 app.notice = Some(if want_service {
-                    tr("CleanDesk service installed and started.").into()
+                    tr("RotoDesk service installed and started.").into()
                 } else {
-                    tr("CleanDesk service removed.").into()
+                    tr("RotoDesk service removed.").into()
                 });
             }
-            Err(cleandesk_platform::PlatformError::ElevationDeclined) => {
+            Err(rotodesk_platform::PlatformError::ElevationDeclined) => {
                 app.notice =
                     Some(tr("Operation cancelled: administrator rights are required.").into());
             }
@@ -1944,8 +1938,8 @@ fn system_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
 }
 
 /// Sub-sección "Red": modo comunitario (sin servidor) o servidor privado.
-fn network_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
-    use cleandesk_core::config::NetworkMode;
+fn network_settings(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
+    use rotodesk_core::config::NetworkMode;
 
     theme::section_label(ui, tr("Network"), true);
     if let Some(url) = &app.signal_override {
@@ -1973,7 +1967,7 @@ fn network_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
         )
         .changed();
     changed |= ui
-        .radio_value(&mut community, false, tr("Private CleanDesk server"))
+        .radio_value(&mut community, false, tr("Private RotoDesk server"))
         .changed();
     if !community {
         ui.horizontal_wrapped(|ui| {

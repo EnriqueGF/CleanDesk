@@ -5,7 +5,7 @@
 //! [`FrameChunk`]s, sends each chunk as one channel message, and the viewer
 //! reassembles them with a [`Reassembler`].
 //!
-//! The video channel is *unreliable and unordered* (see `cleandesk-transport`),
+//! The video channel is *unreliable and unordered* (see `rotodesk-transport`),
 //! so chunks may be lost or arrive out of order. The reassembler therefore keys
 //! everything by frame sequence: a fresher frame supersedes an incomplete older
 //! one (drop it and wait for the next keyframe) — exactly the right behavior for

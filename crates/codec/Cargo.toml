@@ -1,5 +1,5 @@
 [package]
-name = "cleandesk-codec"
+name = "rotodesk-codec"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 description = "Video encode/decode: tile+zstd+JPEG MVP behind a codec trait."
 
 [dependencies]
-cleandesk-proto.workspace = true
+rotodesk-proto.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

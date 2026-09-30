@@ -1,4 +1,4 @@
-//! Per-session permissions, matching section 6 of the CleanDesk spec.
+//! Per-session permissions, matching section 6 of the RotoDesk spec.
 //!
 //! Permissions are a bitset so they can be negotiated compactly and modified
 //! mid-session (the spec requires live changes). The *host* is always the
@@ -26,8 +26,10 @@ bitflags! {
         const AUDIO              = 1 << 5;
         /// Restart the remote machine.
         const RESTART_MACHINE    = 1 << 6;
-        /// Restart the CleanDesk client on the remote machine.
-        const RESTART_CLEANDESK  = 1 << 7;
+        // This name is serialized by bitflags in JSON. Keep it stable for
+        // previous signaling clients; code uses the branded alias below.
+        #[doc(hidden)]
+        const RESTART_CLEANDESK = 1 << 7;
         /// Run privileged / administrative actions (UAC elevation).
         const ADMIN_ACTIONS      = 1 << 8;
         /// Blank / lock the local keyboard and mouse on the host.
@@ -36,6 +38,9 @@ bitflags! {
 }
 
 impl Permissions {
+    /// Restart the RotoDesk client on the remote machine.
+    pub const RESTART_ROTODESK: Permissions = Permissions::RESTART_CLEANDESK;
+
     /// A safe view-only default: screen only, no control.
     pub const VIEW_ONLY: Permissions = Permissions::VIEW_SCREEN;
 
@@ -67,6 +72,13 @@ impl Default for Permissions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restart_permission_keeps_its_previous_json_name() {
+        let previous = format!("\"RESTART_{}\"", crate::compat::LEGACY_PRODUCT.to_uppercase());
+        assert_eq!(serde_json::to_string(&Permissions::RESTART_ROTODESK).unwrap(), previous);
+        assert_eq!(serde_json::from_str::<Permissions>(&previous).unwrap(), Permissions::RESTART_ROTODESK);
+    }
 
     #[test]
     fn view_only_denies_control() {

@@ -1,12 +1,12 @@
 //! Internal wire format carried inside `VideoFrame.data`, *before* zstd
-//! compression. Private to this crate — nothing outside `cleandesk-codec`
+//! compression. Private to this crate — nothing outside `rotodesk-codec`
 //! ever needs to parse it, so it's free to evolve independently of
 //! `PROTOCOL_VERSION` (which only gates the outer message set).
 //!
 //! We describe the payload as a small Rust struct and serialize it with
 //! `postcard` — the same compact, non-self-describing binary format the rest
-//! of CleanDesk already uses for its peer-to-peer wire messages (see
-//! `cleandesk_proto::frame`) — then hand the resulting bytes to zstd. So the
+//! of RotoDesk already uses for its peer-to-peer wire messages (see
+//! `rotodesk_proto::frame`) — then hand the resulting bytes to zstd. So the
 //! full pipeline for `VideoFrame.data` is:
 //!
 //! ```text

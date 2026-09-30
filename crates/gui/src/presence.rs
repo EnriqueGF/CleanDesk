@@ -5,16 +5,16 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use cleandesk_core::{config::NetworkMode, AppState};
-use cleandesk_crypto::identity::Identity;
-use cleandesk_discovery::{
+use rotodesk_core::{config::NetworkMode, AppState};
+use rotodesk_crypto::identity::Identity;
+use rotodesk_discovery::{
     dht::DhtNode,
     direct,
     nostr_link::{self, NostrLink, NostrPublicKey},
     Resolved, Resolver,
 };
-use cleandesk_proto::{message::SignalMessage, session::DeviceInfo, CleanDeskId};
-use cleandesk_transport::SignalingClient;
+use rotodesk_proto::{message::SignalMessage, session::DeviceInfo, RotoDeskId};
+use rotodesk_transport::SignalingClient;
 
 use crate::notifications::{Notification, Notifications};
 
@@ -23,7 +23,7 @@ const RECORD_TTL: Duration = Duration::from_secs(600);
 
 pub struct Presence {
     task: tokio::task::JoinHandle<()>,
-    pub online: Arc<Mutex<HashSet<CleanDeskId>>>,
+    pub online: Arc<Mutex<HashSet<RotoDeskId>>>,
 }
 
 impl Drop for Presence {
@@ -34,13 +34,13 @@ impl Drop for Presence {
 
 #[derive(Default)]
 struct Tracker {
-    states: HashMap<CleanDeskId, (bool, u8)>,
+    states: HashMap<RotoDeskId, (bool, u8)>,
 }
 
 impl Tracker {
     /// First observation is a quiet baseline. Require two failed probes for
     /// offline; unknown infrastructure failures neither count nor change it.
-    fn observe(&mut self, id: CleanDeskId, online: Option<bool>) -> Option<bool> {
+    fn observe(&mut self, id: RotoDeskId, online: Option<bool>) -> Option<bool> {
         let Some(online) = online else {
             self.states.entry(id).or_insert((false, 0));
             return None;
@@ -63,7 +63,7 @@ impl Tracker {
     }
 }
 
-fn known_devices(state: &AppState) -> HashMap<CleanDeskId, (String, Option<String>)> {
+fn known_devices(state: &AppState) -> HashMap<RotoDeskId, (String, Option<String>)> {
     collect_known(
         &state.history.read(),
         &state.addressbook.read(),
@@ -72,10 +72,10 @@ fn known_devices(state: &AppState) -> HashMap<CleanDeskId, (String, Option<Strin
 }
 
 fn collect_known(
-    history: &cleandesk_core::history::History,
-    book: &cleandesk_core::addressbook::AddressBook,
-    me: CleanDeskId,
-) -> HashMap<CleanDeskId, (String, Option<String>)> {
+    history: &rotodesk_core::history::History,
+    book: &rotodesk_core::addressbook::AddressBook,
+    me: RotoDeskId,
+) -> HashMap<RotoDeskId, (String, Option<String>)> {
     let mut known = HashMap::new();
     for record in history.recent(usize::MAX) {
         known
@@ -87,7 +87,7 @@ fn collect_known(
     }
     known.remove(&me);
     for (id, (name, _)) in &mut known {
-        *name = cleandesk_proto::text::sanitize(name, 64);
+        *name = rotodesk_proto::text::sanitize(name, 64);
         if name.is_empty() {
             *name = id.to_string();
         }
@@ -114,7 +114,7 @@ impl Presence {
             let mut probe_device = device;
             probe_device.id = identity.derive_id();
             let mut tracker = Tracker::default();
-            let mut cache: HashMap<CleanDeskId, (Resolved, Instant)> = HashMap::new();
+            let mut cache: HashMap<RotoDeskId, (Resolved, Instant)> = HashMap::new();
             let mut dht = None;
             let mut server: Option<(
                 String,
@@ -206,7 +206,7 @@ impl Presence {
                             let mut jobs = tokio::task::JoinSet::new();
                             let mut devices = known.iter();
                             let nonce = u64::from_le_bytes(
-                                cleandesk_crypto::identity::random_bytes(8)
+                                rotodesk_crypto::identity::random_bytes(8)
                                     .try_into()
                                     .unwrap(),
                             );
@@ -242,9 +242,9 @@ impl Presence {
                                         if let Some(r) = &resolved {
                                             for ep in r.endpoints.iter().take(4) {
                                                 let allowed = if r.via == "LAN" {
-                                                    cleandesk_discovery::addr::is_lan(ep.ip())
+                                                    rotodesk_discovery::addr::is_lan(ep.ip())
                                                 } else {
-                                                    cleandesk_discovery::addr::is_dialable(ep.ip())
+                                                    rotodesk_discovery::addr::is_dialable(ep.ip())
                                                 };
                                                 if allowed
                                                     && tokio::time::timeout(
@@ -360,8 +360,8 @@ impl Presence {
 
 async fn receive_pongs(
     link: &mut NostrLink,
-    pending: &mut HashMap<CleanDeskId, String>,
-    results: &mut HashMap<CleanDeskId, Option<bool>>,
+    pending: &mut HashMap<RotoDeskId, String>,
+    results: &mut HashMap<RotoDeskId, Option<bool>>,
     nonce: u64,
     budget: Duration,
 ) {
@@ -404,13 +404,13 @@ mod tests {
     use super::*;
     #[test]
     fn recent_devices_need_no_contact_and_contact_name_takes_priority() {
-        use cleandesk_core::{
+        use rotodesk_core::{
             addressbook::{AddressBook, DeviceEntry},
             history::{History, SessionRecord},
         };
-        let recent = CleanDeskId::new(123456789).unwrap();
-        let contact = CleanDeskId::new(234567891).unwrap();
-        let me = CleanDeskId::new(345678912).unwrap();
+        let recent = RotoDeskId::new(123456789).unwrap();
+        let contact = RotoDeskId::new(234567891).unwrap();
+        let me = RotoDeskId::new(345678912).unwrap();
         let mut history = History::default();
         for (id, name) in [
             (recent, "Older"),
@@ -432,7 +432,7 @@ mod tests {
     }
     #[test]
     fn baseline_transitions_debounce_and_unknown_failures() {
-        let id = CleanDeskId::new(123456789).unwrap();
+        let id = RotoDeskId::new(123456789).unwrap();
         let mut tracker = Tracker::default();
         assert_eq!(tracker.observe(id, Some(false)), None);
         assert_eq!(tracker.observe(id, Some(true)), Some(true));

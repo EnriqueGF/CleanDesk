@@ -1,11 +1,11 @@
-//! CleanDesk's own desktop toasts. A separate native message loop keeps them
+//! RotoDesk's own desktop toasts. A separate native message loop keeps them
 //! working while the main egui window is hidden, without stealing focus.
-use cleandesk_proto::CleanDeskId;
+use rotodesk_proto::RotoDeskId;
 
 #[derive(Clone)]
 pub struct Notification {
     pub name: String,
-    pub id: CleanDeskId,
+    pub id: RotoDeskId,
     pub online: bool,
 }
 
@@ -17,21 +17,21 @@ impl Notifications {
     pub fn new(hwnd: Option<isize>) -> Self {
         let (sender, receiver) = std::sync::mpsc::sync_channel(8);
         if let Err(e) = std::thread::Builder::new()
-            .name("cleandesk-notifications".into())
+            .name("rotodesk-notifications".into())
             .spawn(move || native::run(receiver, hwnd))
         {
             tracing::warn!(error = %e, "notification thread unavailable");
         }
         #[cfg(debug_assertions)]
-        if std::env::var_os("CLEANDESK_NOTIFICATION_PREVIEW").is_some() {
+        if std::env::var_os("ROTODESK_NOTIFICATION_PREVIEW").is_some() {
             let _ = sender.try_send(Notification {
                 name: "PC de ejemplo".into(),
-                id: CleanDeskId::new(123456789).unwrap(),
+                id: RotoDeskId::new(123456789).unwrap(),
                 online: true,
             });
             let _ = sender.try_send(Notification {
                 name: "Portátil de ejemplo".into(),
-                id: CleanDeskId::new(987654321).unwrap(),
+                id: RotoDeskId::new(987654321).unwrap(),
                 online: false,
             });
         }
@@ -171,11 +171,11 @@ mod native {
                 right: px(x + w, s),
                 bottom: px(y + h, s),
             };
-            let background = CreateSolidBrush(color(247, 250, 248));
+            let background = CreateSolidBrush(color(244, 249, 247));
             FillRect(hdc, &rect(0, 0, 360, 124), background);
             let _ = DeleteObject(background.into());
             let accent = if toast.notification.online {
-                color(23, 147, 91)
+                color(0, 125, 96)
             } else {
                 color(119, 131, 127)
             };
@@ -191,7 +191,7 @@ mod native {
             let _ = DeleteObject(brush.into());
             text(
                 hdc,
-                "CleanDesk",
+                "RotoDesk",
                 rect(22, 12, 290, 23),
                 13,
                 true,
@@ -241,7 +241,7 @@ mod native {
             let Ok(module) = GetModuleHandleW(None) else {
                 return;
             };
-            let class = w!("CleanDeskPresenceToast");
+            let class = w!("RotoDeskPresenceToast");
             let wc = WNDCLASSW {
                 style: CS_DROPSHADOW,
                 lpfnWndProc: Some(window_proc),
@@ -358,7 +358,7 @@ mod native {
     /// Debug-only captures of this popup's own paint output; no desktop pixels.
     #[cfg(debug_assertions)]
     unsafe fn capture_preview(hwnd: HWND, online: bool, width: i32, height: i32) {
-        let Some(folder) = std::env::var_os("CLEANDESK_NOTIFICATION_PREVIEW") else {
+        let Some(folder) = std::env::var_os("ROTODESK_NOTIFICATION_PREVIEW") else {
             return;
         };
         unsafe {

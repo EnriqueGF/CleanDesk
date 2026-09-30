@@ -1,5 +1,5 @@
 [package]
-name = "cleandesk-client"
+name = "rotodesk-client"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,18 +8,18 @@ description = "Viewer role runtime: receive & decode video; capture & send input
 
 [dependencies]
 zeroize.workspace = true
-cleandesk-proto.workspace = true
+rotodesk-proto.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 futures.workspace = true
-cleandesk-core.workspace = true
-cleandesk-codec.workspace = true
-cleandesk-transport.workspace = true
-cleandesk-crypto.workspace = true
-cleandesk-discovery.workspace = true
+rotodesk-core.workspace = true
+rotodesk-codec.workspace = true
+rotodesk-transport.workspace = true
+rotodesk-crypto.workspace = true
+rotodesk-discovery.workspace = true
 bytes.workspace = true
 directories.workspace = true
 # Clipboard access (text only). Default features pull image support and heavier
@@ -27,5 +27,5 @@ directories.workspace = true
 arboard = { version = "3.6", default-features = false }
 
 [dev-dependencies]
-cleandesk-host.workspace = true
+rotodesk-host.workspace = true
 tracing-subscriber.workspace = true

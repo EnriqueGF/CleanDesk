@@ -22,14 +22,14 @@
 //! frame to be a keyframe.
 
 use bytes::Bytes;
-use cleandesk_codec::{RawFrame, TileEncoder, VideoEncoder};
-use cleandesk_proto::{
+use rotodesk_codec::{RawFrame, TileEncoder, VideoEncoder};
+use rotodesk_proto::{
     frame,
     media::{chunk_frame, MAX_CHUNK_PAYLOAD},
     message::{MonitorInfo, VideoFrame},
     quality::{QualityParams, QualityProfile},
 };
-use cleandesk_transport::{Channel, PeerConnection};
+use rotodesk_transport::{Channel, PeerConnection};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -198,7 +198,7 @@ pub(crate) fn start_media(peer: Arc<PeerConnection>, control: MediaControl) {
     // COM/D3D11 resources that are not `Send`, so they must never cross threads.
     let thread_control = control.clone();
     std::thread::Builder::new()
-        .name("cleandesk-capture".into())
+        .name("rotodesk-capture".into())
         .spawn(move || capture_loop(thread_control, tx))
         .map(|_| ())
         .unwrap_or_else(|e| error!(error = %e, "failed to spawn capture thread"));
@@ -233,7 +233,7 @@ pub(crate) fn start_media(peer: Arc<PeerConnection>, control: MediaControl) {
 
 /// Body of the capture thread.
 fn capture_loop(control: MediaControl, tx: mpsc::Sender<VideoFrame>) {
-    let mut capturer = match cleandesk_capture::new_capturer() {
+    let mut capturer = match rotodesk_capture::new_capturer() {
         Ok(c) => c,
         Err(e) => {
             error!(error = %e, "failed to start screen capture");

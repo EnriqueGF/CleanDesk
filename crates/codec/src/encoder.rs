@@ -2,7 +2,7 @@
 //! JPEG-encodes only the ones that changed since the last frame, and
 //! zstd-compresses the batch into `VideoFrame.data`.
 
-use cleandesk_proto::{message::VideoFrame, quality::QualityParams};
+use rotodesk_proto::{message::VideoFrame, quality::QualityParams};
 use tracing::{debug, trace};
 
 use crate::{
@@ -184,7 +184,7 @@ impl VideoEncoder for TileEncoder {
             tiles = included,
             total_tiles = total,
             bytes = data.len(),
-            "cleandesk-codec: encoded frame"
+            "rotodesk-codec: encoded frame"
         );
         trace!(width = frame.width, height = frame.height, cols, rows, "tile grid");
 

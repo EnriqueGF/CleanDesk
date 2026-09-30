@@ -21,8 +21,8 @@
 
 use crate::record::{nostr_binding_message, nostr_keys};
 use crate::{DiscoveryError, Result};
-use cleandesk_crypto::identity::{derive_id_from_public_key_b64, verify_b64_sig, Identity};
-use cleandesk_proto::{message::SignalMessage, CleanDeskId};
+use rotodesk_crypto::identity::{derive_id_from_public_key_b64, verify_b64_sig, Identity};
+use rotodesk_proto::{message::SignalMessage, RotoDeskId};
 use futures_util::{SinkExt, StreamExt};
 use nostr::prelude::*;
 
@@ -35,7 +35,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, warn};
 
-/// Ephemeral event kind reserved for CleanDesk signaling (20000..30000).
+/// Ephemeral event kind reserved for RotoDesk signaling (20000..30000).
 pub const KIND: u16 = 27420;
 
 /// Public relays used when none are configured. Any NIP-01 relay works; these
@@ -49,7 +49,7 @@ pub const DEFAULT_RELAYS: &[&str] = &[
 ];
 
 /// Environment variable overriding the relay list (comma separated).
-pub const ENV_RELAYS: &str = "CLEANDESK_NOSTR_RELAYS";
+pub const ENV_RELAYS: &str = "ROTODESK_NOSTR_RELAYS";
 
 /// Relay connect timeout.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
@@ -102,7 +102,7 @@ impl SeenSet {
 
 /// The relay list from the environment or the defaults.
 pub fn relays_from_env() -> Vec<String> {
-    let custom: Vec<String> = std::env::var(ENV_RELAYS)
+    let custom: Vec<String> = rotodesk_proto::compat::env(ENV_RELAYS)
         .unwrap_or_default()
         .split(',')
         .map(str::trim)
@@ -130,7 +130,7 @@ struct Envelope {
 #[derive(Debug)]
 pub struct Inbound {
     pub from_public_key: String,
-    pub from_id: CleanDeskId,
+    pub from_id: RotoDeskId,
     pub from_nostr: PublicKey,
     pub msg: SignalMessage,
 }

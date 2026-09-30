@@ -6,7 +6,7 @@
 /// the DC coefficient, block boundaries) stays small relative to the pixel
 /// data it carries, small enough that a tiny local change (a blinking cursor,
 /// a spinner) doesn't force re-encoding a big chunk of the screen. It also
-/// matches the dirty-rect granularity `cleandesk-capture` computes on the
+/// matches the dirty-rect granularity `rotodesk-capture` computes on the
 /// DXGI side (see `docs/ARCHITECTURE.md`), so the two line up.
 pub const TILE_SIZE: u32 = 64;
 

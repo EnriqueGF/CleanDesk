@@ -1,5 +1,5 @@
 [package]
-name = "cleandesk-discovery"
+name = "rotodesk-discovery"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,8 +7,8 @@ license.workspace = true
 description = "Serverless rendezvous: LAN mDNS, BitTorrent DHT (BEP 44), Nostr signaling, UPnP port mapping, community relay discovery."
 
 [dependencies]
-cleandesk-proto.workspace = true
-cleandesk-crypto.workspace = true
+rotodesk-proto.workspace = true
+rotodesk-crypto.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

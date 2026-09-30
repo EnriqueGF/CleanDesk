@@ -3,8 +3,8 @@
 /// Shortest unattended-access password accepted (characters).
 pub const MIN_UNATTENDED_PASSWORD_LEN: usize = 10;
 
-use cleandesk_crypto::password;
-use cleandesk_proto::QualityProfile;
+use rotodesk_crypto::password;
+use rotodesk_proto::QualityProfile;
 use serde::{Deserialize, Serialize};
 
 use crate::Result;
@@ -32,20 +32,20 @@ pub struct Settings {
     /// the plaintext. `None` until configured. 32 bytes.
     #[serde(default)]
     pub unattended_key_bytes: Option<Vec<u8>>,
-    /// Launch CleanDesk when Windows starts (spec §24).
+    /// Launch RotoDesk when Windows starts (spec §24).
     pub start_with_windows: bool,
     /// Install/run as a background Windows service, enabling pre-login and
     /// post-logout unattended access (spec §24).
     pub install_service: bool,
     /// Optional human-friendly alias for this device (spec §3), e.g.
-    /// `pc-oficina.clean`.
+    /// `pc-oficina.roto`.
     pub alias: Option<String>,
     /// How this device finds and is found by peers.
     #[serde(default)]
     pub network: NetworkMode,
-    /// Trust-on-first-use pins: CleanDesk ID (numeric) → Ed25519 public key
+    /// Trust-on-first-use pins: RotoDesk ID (numeric) → Ed25519 public key
     /// (base64) seen in the first successful session. In community mode a
-    /// different key under the same ID is refused (see `cleandesk-discovery`).
+    /// different key under the same ID is refused (see `rotodesk-discovery`).
     #[serde(default)]
     pub pinned_keys: std::collections::BTreeMap<u64, String>,
     /// UI language as a BCP-47-ish tag (`"en"`, `"es"`). `None` follows the
@@ -62,7 +62,7 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub check_updates: bool,
     /// Privileged control (spec §24): let viewers drive administrator windows
-    /// and UAC prompts. With the CleanDesk service installed the service hosts
+    /// and UAC prompts. With the RotoDesk service installed the service hosts
     /// as LocalSystem; otherwise the app relaunches itself elevated. Off by
     /// default because it prompts for elevation at startup.
     #[serde(default)]
@@ -76,7 +76,7 @@ pub enum NetworkMode {
     /// No server: LAN mDNS, the BitTorrent DHT and public Nostr relays.
     #[default]
     Community,
-    /// A private CleanDesk Server (companies, closed networks).
+    /// A private RotoDesk Server (companies, closed networks).
     Server { url: String },
 }
 
@@ -121,17 +121,17 @@ impl NetworkMode {
 
 impl Settings {
     /// The pinned key for `id`, if any.
-    pub fn pinned_key(&self, id: cleandesk_proto::CleanDeskId) -> Option<&str> {
+    pub fn pinned_key(&self, id: rotodesk_proto::RotoDeskId) -> Option<&str> {
         self.pinned_keys.get(&id.value()).map(String::as_str)
     }
 
     /// Remember `key` for `id`. Returns `true` if it was new or changed.
-    pub fn pin_key(&mut self, id: cleandesk_proto::CleanDeskId, key: &str) -> bool {
+    pub fn pin_key(&mut self, id: rotodesk_proto::RotoDeskId, key: &str) -> bool {
         self.pinned_keys.insert(id.value(), key.to_string()).as_deref() != Some(key)
     }
 
     /// Forget the pin for `id` (the user verified a legitimate identity change).
-    pub fn unpin_key(&mut self, id: cleandesk_proto::CleanDeskId) -> bool {
+    pub fn unpin_key(&mut self, id: rotodesk_proto::RotoDeskId) -> bool {
         self.pinned_keys.remove(&id.value()).is_some()
     }
 
@@ -163,7 +163,7 @@ impl Settings {
     }
 
     /// Enable unattended access with `password`, binding the derived key to this
-    /// device's numeric CleanDesk ID. Stores the Argon2id hash (for local
+    /// device's numeric RotoDesk ID. Stores the Argon2id hash (for local
     /// checks) and the derived HMAC key (for the challenge/response) — never the
     /// plaintext (spec §18).
     pub fn enable_unattended(&mut self, password: &str, host_id: u64) -> Result<()> {

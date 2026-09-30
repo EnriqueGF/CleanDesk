@@ -10,7 +10,7 @@
 //! ```
 //!
 //! `<data_dir>` is resolved via [`directories::ProjectDirs`]
-//! (`ProjectDirs::from("clean", "CleanDesk", "CleanDesk").data_dir()`), i.e.
+//! (`ProjectDirs::from("roto", "RotoDesk", "RotoDesk").data_dir()`), i.e.
 //! the OS-standard per-user application data location — never a path inside
 //! this repository. [`Storage::at`] lets callers (tests, or a future portable
 //! install mode) root the same logic at an arbitrary directory instead.
@@ -20,7 +20,7 @@
 //! go to a sibling temp file, are flushed to disk, and only then is the temp
 //! file renamed over the destination. A crash or power loss mid-write leaves
 //! either the previous complete file or the new complete file — never a
-//! truncated `identity.pem` (which would change the device's CleanDesk ID on
+//! truncated `identity.pem` (which would change the device's RotoDesk ID on
 //! the next start) or a half-written `appdata.json`.
 //!
 //! Should `appdata.json` nevertheless turn out unparseable (disk corruption,
@@ -33,7 +33,7 @@
 //! ## Secrets at rest
 //! `identity.pem` holds the device's private key; `appdata.json` embeds the
 //! Argon2id unattended-password hash and trusted-device session tokens (never
-//! a plaintext password — see `cleandesk_crypto::password`). Both files are
+//! a plaintext password — see `rotodesk_crypto::password`). Both files are
 //! written through [`write_restricted`]:
 //! * **Unix**: mode is set to `0600` (owner read/write only) on the temp
 //!   file before it is renamed into place, so the final path is never
@@ -54,7 +54,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use cleandesk_crypto::identity::Identity;
+use rotodesk_crypto::identity::Identity;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
@@ -115,11 +115,66 @@ pub struct Storage {
 }
 
 impl Storage {
-    /// Resolve the real per-user CleanDesk data directory.
+    /// Resolve the real per-user RotoDesk data directory.
     pub fn locate() -> Result<Self> {
         let dirs =
-            ProjectDirs::from("clean", "CleanDesk", "CleanDesk").ok_or(CoreError::NoDataDir)?;
+            ProjectDirs::from("roto", "RotoDesk", "RotoDesk").ok_or(CoreError::NoDataDir)?;
+        if let Some(legacy) = ProjectDirs::from("clean", rotodesk_proto::compat::LEGACY_PRODUCT, rotodesk_proto::compat::LEGACY_PRODUCT) {
+            Self::migrate_legacy(legacy.data_dir(), dirs.data_dir())?;
+        }
         Ok(Self::at(dirs.data_dir().to_path_buf()))
+    }
+
+    /// Copy a previous installation's data into the new product directory.
+    /// Keep the original as a backup; never replace an existing identity.
+    pub fn migrate_legacy(source: &Path, destination: &Path) -> Result<()> {
+        if destination.join("identity.pem").exists() || !source.join("identity.pem").exists() || source == destination {
+            return Ok(());
+        }
+        // Fail on a corrupt identity before creating anything. Regenerating it
+        // would silently change this device's ID and break trusted access.
+        let source_identity = crate::dpapi::unprotect(&fs::read(source.join("identity.pem"))?)?;
+        Identity::from_pem(std::str::from_utf8(&source_identity).map_err(|e| CoreError::Other(e.to_string()))?)?;
+        if destination.exists() {
+            return Err(CoreError::Other("the new data directory exists without an identity; migration refused to overwrite it".into()));
+        }
+        let parent = destination.parent().ok_or(CoreError::NoDataDir)?;
+        fs::create_dir_all(parent)?;
+        let stage = parent.join(format!(".rotodesk-migration-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&stage)?;
+        let copy = (|| -> Result<()> {
+            for name in ["identity.pem", "appdata.json"] {
+                let file = source.join(name);
+                if file.exists() { write_restricted(&stage.join(name), &fs::read(file)?)?; }
+            }
+            let thumbs = source.join("thumbs");
+            if thumbs.is_dir() && !fs::symlink_metadata(&thumbs)?.file_type().is_symlink() {
+                fs::create_dir(stage.join("thumbs"))?;
+                for entry in fs::read_dir(thumbs)? {
+                    let entry = entry?;
+                    if entry.file_type()?.is_file() && entry.path().extension().is_some_and(|e| e == "png") {
+                        write_restricted(&stage.join("thumbs").join(entry.file_name()), &fs::read(entry.path())?)?;
+                    }
+                }
+            }
+            fs::rename(&stage, destination)?;
+            Ok(())
+        })();
+        if copy.is_err() { let _ = fs::remove_dir_all(&stage); }
+        copy
+    }
+
+    /// For a service using the standard Windows profile, migrate to the
+    /// sibling RotoDesk location. Explicit custom data paths stay as configured.
+    pub fn rebranded_service_dir(source: &Path) -> PathBuf {
+        let old = rotodesk_proto::compat::LEGACY_PRODUCT;
+        let suffix = PathBuf::from(old).join(old).join("data");
+        if source.ends_with(&suffix) {
+            if let Some(root) = source.parent().and_then(Path::parent).and_then(Path::parent) {
+                return root.join("RotoDesk").join("RotoDesk").join("data");
+            }
+        }
+        source.to_path_buf()
     }
 
     /// Root storage at an arbitrary directory. Intended for tests (and a
@@ -309,7 +364,41 @@ fn write_and_sync(tmp: &Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
     use crate::{addressbook::DeviceEntry, test_support::TempDir};
-    use cleandesk_proto::CleanDeskId;
+    use rotodesk_proto::RotoDeskId;
+
+    #[test]
+    fn rebranding_preserves_identity_settings_history_and_thumbnails() {
+        let temp = TempDir::new("rebranding");
+        let old = temp.path().join("previous");
+        let new = temp.path().join("RotoDesk");
+        let previous = Storage::at(old.clone());
+        let identity = previous.load_or_create_identity().unwrap();
+        let mut data = AppData::default();
+        data.settings.alias = Some("My original PC".into());
+        data.addressbook.add(DeviceEntry::new(RotoDeskId::new(123456789).unwrap(), "Favourite PC"));
+        data.history.push(crate::history::SessionRecord::start(Default::default(), RotoDeskId::new(234567891).unwrap(), "Recent PC", "p2p"));
+        previous.save_app_data(&data).unwrap();
+        fs::create_dir(old.join("thumbs")).unwrap();
+        fs::write(old.join("thumbs/123456789.png"), b"thumbnail fixture").unwrap();
+        Storage::migrate_legacy(&old, &new).unwrap();
+        let migrated = Storage::at(new.clone());
+        assert_eq!(migrated.load_or_create_identity().unwrap().derive_id(), identity.derive_id());
+        assert_eq!(migrated.load_app_data().unwrap().unwrap(), data);
+        assert_eq!(fs::read(new.join("thumbs/123456789.png")).unwrap(), b"thumbnail fixture");
+        assert!(old.join("identity.pem").exists(), "original is retained as a backup");
+        let replacement = Identity::generate();
+        migrated.save_identity(&replacement).unwrap();
+        Storage::migrate_legacy(&old, &new).unwrap();
+        assert_eq!(migrated.load_or_create_identity().unwrap().derive_id(), replacement.derive_id(), "existing data must never be overwritten");
+    }
+
+    #[test]
+    fn service_migration_only_renames_the_standard_profile_path() {
+        let root = PathBuf::from("C:/Users/example/AppData/Roaming");
+        let old = rotodesk_proto::compat::LEGACY_PRODUCT;
+        assert_eq!(Storage::rebranded_service_dir(&root.join(old).join(old).join("data")), root.join("RotoDesk/RotoDesk/data"));
+        assert_eq!(Storage::rebranded_service_dir(Path::new("D:/custom-profile")), Path::new("D:/custom-profile"));
+    }
 
     fn temp_files_in(dir: &Path) -> Vec<String> {
         fs::read_dir(dir)
@@ -329,9 +418,9 @@ mod tests {
         assert_eq!(storage.load_app_data_or_recover().unwrap(), Loaded::Fresh);
 
         let mut data = AppData::default();
-        data.settings.alias = Some("pc-oficina.clean".into());
+        data.settings.alias = Some("pc-oficina.roto".into());
         data.addressbook.add(DeviceEntry::new(
-            CleanDeskId::new(548_291_743).unwrap(),
+            RotoDeskId::new(548_291_743).unwrap(),
             "Oficina",
         ));
 

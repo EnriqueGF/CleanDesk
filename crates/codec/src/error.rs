@@ -1,12 +1,12 @@
 //! Codec-specific error type.
 //!
-//! Kept separate from [`cleandesk_proto::ProtoError`]: failures here are about
+//! Kept separate from [`rotodesk_proto::ProtoError`]: failures here are about
 //! pixels, tiling and compression, not about the wire envelope those bytes
 //! eventually travel in.
 
 use thiserror::Error;
 
-/// Errors produced while encoding or decoding CleanDesk video frames.
+/// Errors produced while encoding or decoding RotoDesk video frames.
 #[derive(Debug, Error)]
 pub enum CodecError {
     #[error("cannot encode/decode a frame with zero width or height")]

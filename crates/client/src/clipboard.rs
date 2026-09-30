@@ -22,7 +22,7 @@ impl ClipboardSync {
     pub(crate) fn start(on_change: mpsc::UnboundedSender<String>) -> Self {
         let (to_thread, from_session) = std_mpsc::channel();
         if let Err(e) = std::thread::Builder::new()
-            .name("cleandesk-clipboard".into())
+            .name("rotodesk-clipboard".into())
             .spawn(move || sync_loop(from_session, on_change))
         {
             warn!(error = %e, "failed to spawn clipboard thread");

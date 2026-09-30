@@ -1,4 +1,4 @@
-//! cleandesk-core: persistent state and session orchestration.
+//! rotodesk-core: persistent state and session orchestration.
 //!
 //! This crate owns everything that outlives a single connection:
 //! * [`storage`] — where things live on disk, and how the device identity and
@@ -31,11 +31,11 @@ pub use error::{CoreError, Result};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cleandesk_crypto::identity::Identity;
+use rotodesk_crypto::identity::Identity;
 use parking_lot::RwLock;
 
 use addressbook::AddressBook;
-use cleandesk_proto::session::SessionId;
+use rotodesk_proto::session::SessionId;
 use config::Settings;
 use history::{History, SessionRecord};
 use storage::{AppData, Loaded, Storage};
@@ -106,7 +106,7 @@ impl AppState {
     /// A corrupt `appdata.json` is set aside and replaced with defaults (the
     /// storage layer already logs where the backup went); a corrupt
     /// `identity.pem` remains a hard error because regenerating it would
-    /// silently change this device's CleanDesk ID.
+    /// silently change this device's RotoDesk ID.
     fn load_from(storage: Storage) -> Result<Self> {
         let identity = storage.load_or_create_identity()?;
         let data = match storage.load_app_data_or_recover()? {
@@ -192,7 +192,7 @@ impl AppState {
 mod tests {
     use super::*;
     use addressbook::DeviceEntry;
-    use cleandesk_proto::CleanDeskId;
+    use rotodesk_proto::RotoDeskId;
 
     #[test]
     fn app_state_round_trips_through_temp_dir() {
@@ -200,9 +200,9 @@ mod tests {
 
         {
             let state = AppState::load_from_dir(dir.path()).unwrap();
-            state.settings.write().alias = Some("pc-oficina.clean".into());
+            state.settings.write().alias = Some("pc-oficina.roto".into());
             state.addressbook.write().add(DeviceEntry::new(
-                CleanDeskId::new(548_291_743).unwrap(),
+                RotoDeskId::new(548_291_743).unwrap(),
                 "Oficina",
             ));
             state.save().unwrap();
@@ -211,7 +211,7 @@ mod tests {
         let reloaded = AppState::load_from_dir(dir.path()).unwrap();
         assert_eq!(
             reloaded.settings.read().alias.as_deref(),
-            Some("pc-oficina.clean")
+            Some("pc-oficina.roto")
         );
         assert_eq!(reloaded.addressbook.read().entries.len(), 1);
     }
@@ -279,7 +279,7 @@ mod tests {
     fn record_session_start_and_end_persist_history() {
         let dir = test_support::TempDir::new("appstate-history");
         let id = SessionId::new_v4();
-        let device = CleanDeskId::new(548_291_743).unwrap();
+        let device = RotoDeskId::new(548_291_743).unwrap();
 
         {
             let state = AppState::load_from_dir(dir.path()).unwrap();

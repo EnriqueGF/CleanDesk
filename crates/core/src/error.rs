@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-/// Errors produced by `cleandesk-core`: storage I/O, (de)serialization, and
+/// Errors produced by `rotodesk-core`: storage I/O, (de)serialization, and
 /// illegal session state usage. Network/protocol errors belong to their own
 /// crates and are wrapped here only when this crate's own operations can
 /// produce them (e.g. loading an identity file written in a corrupt format).
@@ -15,7 +15,7 @@ pub enum CoreError {
     Json(#[from] serde_json::Error),
 
     #[error("crypto error: {0}")]
-    Crypto(#[from] cleandesk_crypto::CryptoError),
+    Crypto(#[from] rotodesk_crypto::CryptoError),
 
     #[error("could not determine the application data directory for this platform")]
     NoDataDir,
@@ -37,5 +37,5 @@ pub enum CoreError {
 }
 
 /// This crate's `Result` alias. Exported from the crate root as
-/// `cleandesk_core::Result`.
+/// `rotodesk_core::Result`.
 pub type Result<T> = std::result::Result<T, CoreError>;

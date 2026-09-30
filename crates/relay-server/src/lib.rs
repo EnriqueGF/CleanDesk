@@ -1,7 +1,7 @@
-//! CleanDesk Relay — the fallback media path (spec sections 19–20), as a library.
+//! RotoDesk Relay — the fallback media path (spec sections 19–20), as a library.
 //!
 //! When two peers cannot establish a direct P2P link (symmetric NAT, strict
-//! firewalls) the ICE agent in `cleandesk-transport` falls back to a relayed
+//! firewalls) the ICE agent in `rotodesk-transport` falls back to a relayed
 //! candidate. This crate runs a standards-compliant **TURN server (RFC 5766,
 //! UDP)** so any WebRTC stack can use it natively via `turn:` URLs plus
 //! long-term credentials (RFC 5389 §10.2). The relay is intentionally dumb: it
@@ -12,20 +12,20 @@
 //!
 //! | Variable | Default | Meaning |
 //! |---|---|---|
-//! | `CLEANDESK_RELAY_PORT` | `7421` | UDP port TURN clients connect to. |
-//! | `CLEANDESK_RELAY_BIND` | `0.0.0.0` | Local IP to bind the listening socket and relay sockets to. |
-//! | `CLEANDESK_RELAY_PUBLIC_IP` | `127.0.0.1` | IP advertised inside relayed candidates. **Required** for real deployments: the default only works on loopback. |
-//! | `CLEANDESK_RELAY_REALM` | `cleandesk` | Authentication realm; part of the long-term credential hash. |
-//! | `CLEANDESK_RELAY_USERS` | *(none)* | Comma-separated `user:password` list. **At least one entry is mandatory** — the server refuses to start as an open relay. |
-//! | `CLEANDESK_RELAY_MIN_PORT` / `CLEANDESK_RELAY_MAX_PORT` | *(any port)* | Optional inclusive range for relay allocations (useful to open a single firewall range). Both must be set together. |
-//! | `CLEANDESK_RELAY_COMMUNITY` | `0` | `1` accepts the public community credential and announces the relay on the DHT. |
-//! | `CLEANDESK_RELAY_ALLOW_PRIVATE_PEERS` | `0` | `1` relays towards loopback / link-local / private / multicast peers too (only for a relay that serves one private network). See [`guard`]. |
-//! | `CLEANDESK_RELAY_ALLOCATION_MAX_SECS` | `86400` | Lifetime cap per allocation; `0` = unlimited. |
-//! | `CLEANDESK_RELAY_ALLOCATION_MAX_BYTES` | `0` (private) / `17179869184` (community) | Bytes relayed per allocation, both directions; `0` = unlimited. |
-//! | `CLEANDESK_RELAY_ALLOCATION_MAX_KBPS` | `0` (private) / `25000` (community) | Sustained throughput per allocation in kbit/s; `0` = unlimited. |
-//! | `CLEANDESK_RELAY_MAX_ALLOCATIONS` | `1000` | Live allocations across all clients; `0` = unlimited. |
-//! | `CLEANDESK_RELAY_MAX_ALLOCATIONS_PER_IP` | `8` | Live allocations per source address; `0` = unlimited. |
-//! | `CLEANDESK_RELAY_IDENTITY` | `cleandesk-relay-identity.pem` | Ed25519 key the community relay signs its DHT record with (created if missing). |
+//! | `ROTODESK_RELAY_PORT` | `7421` | UDP port TURN clients connect to. |
+//! | `ROTODESK_RELAY_BIND` | `0.0.0.0` | Local IP to bind the listening socket and relay sockets to. |
+//! | `ROTODESK_RELAY_PUBLIC_IP` | `127.0.0.1` | IP advertised inside relayed candidates. **Required** for real deployments: the default only works on loopback. |
+//! | `ROTODESK_RELAY_REALM` | `rotodesk` | Authentication realm; part of the long-term credential hash. |
+//! | `ROTODESK_RELAY_USERS` | *(none)* | Comma-separated `user:password` list. **At least one entry is mandatory** — the server refuses to start as an open relay. |
+//! | `ROTODESK_RELAY_MIN_PORT` / `ROTODESK_RELAY_MAX_PORT` | *(any port)* | Optional inclusive range for relay allocations (useful to open a single firewall range). Both must be set together. |
+//! | `ROTODESK_RELAY_COMMUNITY` | `0` | `1` accepts the public community credential and announces the relay on the DHT. |
+//! | `ROTODESK_RELAY_ALLOW_PRIVATE_PEERS` | `0` | `1` relays towards loopback / link-local / private / multicast peers too (only for a relay that serves one private network). See [`guard`]. |
+//! | `ROTODESK_RELAY_ALLOCATION_MAX_SECS` | `86400` | Lifetime cap per allocation; `0` = unlimited. |
+//! | `ROTODESK_RELAY_ALLOCATION_MAX_BYTES` | `0` (private) / `17179869184` (community) | Bytes relayed per allocation, both directions; `0` = unlimited. |
+//! | `ROTODESK_RELAY_ALLOCATION_MAX_KBPS` | `0` (private) / `25000` (community) | Sustained throughput per allocation in kbit/s; `0` = unlimited. |
+//! | `ROTODESK_RELAY_MAX_ALLOCATIONS` | `1000` | Live allocations across all clients; `0` = unlimited. |
+//! | `ROTODESK_RELAY_MAX_ALLOCATIONS_PER_IP` | `8` | Live allocations per source address; `0` = unlimited. |
+//! | `ROTODESK_RELAY_IDENTITY` | `rotodesk-relay-identity.pem` | Ed25519 key the community relay signs its DHT record with (created if missing). |
 //!
 //! [`RelayConfig::from_env`] reads the real process environment;
 //! [`RelayConfig::from_vars`] takes any iterator of `(key, value)` pairs so the
@@ -61,32 +61,32 @@ use turn::{
 };
 use webrtc_util::vnet::net::Net;
 
-/// Realm used when `CLEANDESK_RELAY_REALM` is unset.
-pub const DEFAULT_REALM: &str = "cleandesk";
+/// Realm used when `ROTODESK_RELAY_REALM` is unset.
+pub const DEFAULT_REALM: &str = "rotodesk";
 
-pub const ENV_PORT: &str = "CLEANDESK_RELAY_PORT";
-pub const ENV_BIND: &str = "CLEANDESK_RELAY_BIND";
-pub const ENV_PUBLIC_IP: &str = "CLEANDESK_RELAY_PUBLIC_IP";
-pub const ENV_REALM: &str = "CLEANDESK_RELAY_REALM";
-pub const ENV_USERS: &str = "CLEANDESK_RELAY_USERS";
+pub const ENV_PORT: &str = "ROTODESK_RELAY_PORT";
+pub const ENV_BIND: &str = "ROTODESK_RELAY_BIND";
+pub const ENV_PUBLIC_IP: &str = "ROTODESK_RELAY_PUBLIC_IP";
+pub const ENV_REALM: &str = "ROTODESK_RELAY_REALM";
+pub const ENV_USERS: &str = "ROTODESK_RELAY_USERS";
 /// `1` enables community mode (public credentials + DHT announcement).
-pub const ENV_COMMUNITY: &str = "CLEANDESK_RELAY_COMMUNITY";
-pub const ENV_MIN_PORT: &str = "CLEANDESK_RELAY_MIN_PORT";
-pub const ENV_MAX_PORT: &str = "CLEANDESK_RELAY_MAX_PORT";
+pub const ENV_COMMUNITY: &str = "ROTODESK_RELAY_COMMUNITY";
+pub const ENV_MIN_PORT: &str = "ROTODESK_RELAY_MIN_PORT";
+pub const ENV_MAX_PORT: &str = "ROTODESK_RELAY_MAX_PORT";
 /// `1` relays to loopback/link-local/private/multicast peers (default: refused).
-pub const ENV_ALLOW_PRIVATE_PEERS: &str = "CLEANDESK_RELAY_ALLOW_PRIVATE_PEERS";
+pub const ENV_ALLOW_PRIVATE_PEERS: &str = "ROTODESK_RELAY_ALLOW_PRIVATE_PEERS";
 /// Per-allocation lifetime cap in seconds (`0` = unlimited).
-pub const ENV_ALLOCATION_MAX_SECS: &str = "CLEANDESK_RELAY_ALLOCATION_MAX_SECS";
+pub const ENV_ALLOCATION_MAX_SECS: &str = "ROTODESK_RELAY_ALLOCATION_MAX_SECS";
 /// Per-allocation byte cap, both directions (`0` = unlimited).
-pub const ENV_ALLOCATION_MAX_BYTES: &str = "CLEANDESK_RELAY_ALLOCATION_MAX_BYTES";
+pub const ENV_ALLOCATION_MAX_BYTES: &str = "ROTODESK_RELAY_ALLOCATION_MAX_BYTES";
 /// Per-allocation sustained rate in kbit/s (`0` = unlimited).
-pub const ENV_ALLOCATION_MAX_KBPS: &str = "CLEANDESK_RELAY_ALLOCATION_MAX_KBPS";
+pub const ENV_ALLOCATION_MAX_KBPS: &str = "ROTODESK_RELAY_ALLOCATION_MAX_KBPS";
 /// Live allocations across all clients (`0` = unlimited).
-pub const ENV_MAX_ALLOCATIONS: &str = "CLEANDESK_RELAY_MAX_ALLOCATIONS";
+pub const ENV_MAX_ALLOCATIONS: &str = "ROTODESK_RELAY_MAX_ALLOCATIONS";
 /// Live allocations per source IP (`0` = unlimited).
-pub const ENV_MAX_ALLOCATIONS_PER_IP: &str = "CLEANDESK_RELAY_MAX_ALLOCATIONS_PER_IP";
+pub const ENV_MAX_ALLOCATIONS_PER_IP: &str = "ROTODESK_RELAY_MAX_ALLOCATIONS_PER_IP";
 /// Path of the relay's Ed25519 identity (PEM) used to sign its DHT record.
-pub const ENV_IDENTITY: &str = "CLEANDESK_RELAY_IDENTITY";
+pub const ENV_IDENTITY: &str = "ROTODESK_RELAY_IDENTITY";
 
 /// Default allocation lifetime cap: one day.
 pub const DEFAULT_ALLOCATION_MAX_SECS: u64 = 24 * 60 * 60;
@@ -100,7 +100,7 @@ pub const DEFAULT_COMMUNITY_ALLOCATION_MAX_KBPS: u64 = 25_000;
 pub const DEFAULT_MAX_ALLOCATIONS: usize = 1000;
 pub const DEFAULT_MAX_ALLOCATIONS_PER_IP: usize = 8;
 /// Default identity file, relative to the working directory.
-pub const DEFAULT_IDENTITY_PATH: &str = "cleandesk-relay-identity.pem";
+pub const DEFAULT_IDENTITY_PATH: &str = "rotodesk-relay-identity.pem";
 
 /// Errors produced while turning environment variables into a [`RelayConfig`].
 #[derive(Debug, thiserror::Error)]
@@ -174,7 +174,7 @@ pub struct RelayConfig {
     pub realm: String,
     pub users: Vec<RelayUser>,
     pub port_range: Option<PortRange>,
-    /// Community mode: accept the public CleanDesk community credentials and
+    /// Community mode: accept the public RotoDesk community credentials and
     /// announce this relay on the BitTorrent DHT so any client can find it.
     pub community: bool,
     /// Relay to loopback / link-local / private / multicast peers.
@@ -215,7 +215,7 @@ impl RelayConfig {
 
         let port = match get(ENV_PORT) {
             Some(v) => parse(ENV_PORT, v)?,
-            None => cleandesk_proto::DEFAULT_RELAY_PORT,
+            None => rotodesk_proto::DEFAULT_RELAY_PORT,
         };
         let bind = match get(ENV_BIND) {
             Some(v) => parse(ENV_BIND, v)?,
@@ -235,11 +235,11 @@ impl RelayConfig {
         if community
             && !users
                 .iter()
-                .any(|u| u.username == cleandesk_discovery::COMMUNITY_TURN_USER)
+                .any(|u| u.username == rotodesk_discovery::COMMUNITY_TURN_USER)
         {
             users.push(RelayUser {
-                username: cleandesk_discovery::COMMUNITY_TURN_USER.to_string(),
-                password: cleandesk_discovery::COMMUNITY_TURN_PASS.to_string(),
+                username: rotodesk_discovery::COMMUNITY_TURN_USER.to_string(),
+                password: rotodesk_discovery::COMMUNITY_TURN_PASS.to_string(),
             });
         }
 
@@ -502,7 +502,7 @@ pub async fn run(config: RelayConfig) -> Result<RelayHandle, RelayError> {
         allow_private_peers = config.allow_private_peers,
         quotas = ?config.quotas,
         caps = ?config.caps,
-        "CleanDesk Relay (TURN/UDP) listening"
+        "RotoDesk Relay (TURN/UDP) listening"
     );
 
     Ok(RelayHandle { server, local_addr })
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn defaults_apply_when_only_users_given() {
         let cfg = RelayConfig::from_vars(vars(&[(ENV_USERS, "alice:s3cret")])).unwrap();
-        assert_eq!(cfg.port, cleandesk_proto::DEFAULT_RELAY_PORT);
+        assert_eq!(cfg.port, rotodesk_proto::DEFAULT_RELAY_PORT);
         assert_eq!(cfg.bind, IpAddr::V4(Ipv4Addr::UNSPECIFIED));
         assert_eq!(cfg.public_ip, IpAddr::V4(Ipv4Addr::LOCALHOST));
         assert!(cfg.advertises_loopback());
@@ -635,7 +635,7 @@ mod tests {
         assert!(!cfg.allow_private_peers, "community mode never implies private peers");
         assert_eq!(cfg.quotas.max_bytes, DEFAULT_COMMUNITY_ALLOCATION_MAX_BYTES);
         assert_eq!(cfg.quotas.max_kbps, DEFAULT_COMMUNITY_ALLOCATION_MAX_KBPS);
-        assert!(cfg.users.iter().any(|u| u.username == cleandesk_discovery::COMMUNITY_TURN_USER));
+        assert!(cfg.users.iter().any(|u| u.username == rotodesk_discovery::COMMUNITY_TURN_USER));
         let cfg = RelayConfig::from_vars(vars(&[
             (ENV_USERS, "a:1"),
             (ENV_ALLOW_PRIVATE_PEERS, "yes"),
@@ -671,12 +671,12 @@ mod tests {
             username: "alice".into(),
             password: "pw".into(),
         }];
-        let auth = StaticUserAuth::new("cleandesk", &users);
+        let auth = StaticUserAuth::new("rotodesk", &users);
         let src: SocketAddr = "127.0.0.1:1".parse().unwrap();
         assert_eq!(
-            auth.auth_handle("alice", "cleandesk", src).unwrap(),
-            generate_auth_key("alice", "cleandesk", "pw")
+            auth.auth_handle("alice", "rotodesk", src).unwrap(),
+            generate_auth_key("alice", "rotodesk", "pw")
         );
-        assert!(auth.auth_handle("mallory", "cleandesk", src).is_err());
+        assert!(auth.auth_handle("mallory", "rotodesk", src).is_err());
     }
 }

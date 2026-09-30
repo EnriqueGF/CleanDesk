@@ -5,14 +5,14 @@
 //!
 //! DHT, UPnP and Nostr are disabled so the test needs no Internet.
 
-use cleandesk_client::{connect_community, ClientConfig, ClientError, ClientEvent};
-use cleandesk_crypto::identity::Identity;
-use cleandesk_host::{serve_community, AutoAccept, CommunityOptions, HostConfig};
-use cleandesk_proto::{id::CleanDeskId, permissions::Permissions, quality::QualityProfile, session::DeviceInfo};
+use rotodesk_client::{connect_community, ClientConfig, ClientError, ClientEvent};
+use rotodesk_crypto::identity::Identity;
+use rotodesk_host::{serve_community, AutoAccept, CommunityOptions, HostConfig};
+use rotodesk_proto::{id::RotoDeskId, permissions::Permissions, quality::QualityProfile, session::DeviceInfo};
 use std::sync::Arc;
 use std::time::Duration;
 
-fn dev_info(id: CleanDeskId, hostname: &str) -> DeviceInfo {
+fn dev_info(id: RotoDeskId, hostname: &str) -> DeviceInfo {
     DeviceInfo { id, alias: None, hostname: hostname.to_string(), os: "test".into(), app_version: "0".into() }
 }
 

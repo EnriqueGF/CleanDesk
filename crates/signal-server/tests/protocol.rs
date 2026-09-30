@@ -9,16 +9,16 @@
 //! * a device reconnecting with the same key keeps its ID.
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
-use cleandesk_crypto::identity::Identity;
-use cleandesk_proto::{
-    id::CleanDeskId,
+use rotodesk_crypto::identity::Identity;
+use rotodesk_proto::{
+    id::RotoDeskId,
     message::{register_proof_message, ErrorCode, RejectReason, SignalMessage, SignalPayload},
     permissions::Permissions,
     quality::QualityProfile,
     session::DeviceInfo,
     Version, PROTOCOL_VERSION,
 };
-use cleandesk_signal_server::state::{IpLimits, ServerState};
+use rotodesk_signal_server::state::{IpLimits, ServerState};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,12 +37,12 @@ async fn start_server_with(state: ServerState) -> (String, Arc<ServerState>) {
     let state = Arc::new(state);
     let st = state.clone();
     tokio::spawn(async move {
-        let _ = cleandesk_signal_server::run_with_state(listener, st).await;
+        let _ = rotodesk_signal_server::run_with_state(listener, st).await;
     });
     (format!("ws://{addr}"), state)
 }
 
-fn dev(id: CleanDeskId, name: &str) -> DeviceInfo {
+fn dev(id: RotoDeskId, name: &str) -> DeviceInfo {
     DeviceInfo {
         id,
         alias: None,
@@ -83,7 +83,7 @@ async fn expect_closed(ws: &mut Ws) {
 }
 
 /// Full, valid registration. Returns the confirmed ID.
-async fn register(ws: &mut Ws, ident: &Identity, name: &str) -> CleanDeskId {
+async fn register(ws: &mut Ws, ident: &Identity, name: &str) -> RotoDeskId {
     send(
         ws,
         &SignalMessage::Register {
@@ -105,7 +105,7 @@ async fn register(ws: &mut Ws, ident: &Identity, name: &str) -> CleanDeskId {
     }
 }
 
-fn connect_request(target: CleanDeskId, from: DeviceInfo) -> SignalMessage {
+fn connect_request(target: RotoDeskId, from: DeviceInfo) -> SignalMessage {
     SignalMessage::ConnectRequest {
         target,
         from,
@@ -262,7 +262,7 @@ async fn caller_id_is_overwritten_and_self_or_offline_targets_refused() {
     assert!(matches!(recv(&mut wa).await, SignalMessage::Error { code: ErrorCode::TargetOffline, .. }));
 
     // Spoofed `from.id`: B must see A's real ID.
-    let spoofed = CleanDeskId::new(123_456_789).unwrap();
+    let spoofed = RotoDeskId::new(123_456_789).unwrap();
     send(&mut wa, &connect_request(idb, dev(spoofed, "a"))).await;
     match recv(&mut wb).await {
         SignalMessage::IncomingRequest { from, .. } => assert_eq!(from.id, ida),

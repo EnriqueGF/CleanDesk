@@ -1,6 +1,6 @@
-//! CleanDesk host role.
+//! RotoDesk host role.
 //!
-//! A host registers with the CleanDesk Server, waits for connection requests,
+//! A host registers with the RotoDesk Server, waits for connection requests,
 //! and — once a request is approved — establishes a P2P session as the WebRTC
 //! *offerer*, then:
 //! * captures the screen, encodes it and streams it on the video channel,
@@ -13,7 +13,7 @@
 //! Safety properties this module guarantees:
 //! * Nothing is sent or honoured on a session until the viewer proved, with
 //!   its Ed25519 key, that it sits at the far end of *this* DTLS session
-//!   (`IdentityProof`, see `cleandesk_crypto::session`), so a rendezvous
+//!   (`IdentityProof`, see `rotodesk_crypto::session`), so a rendezvous
 //!   cannot sit in the middle even though it relayed the SDP fingerprints.
 //! * No input is injected before the session is authenticated and never
 //!   beyond the granted [`Permissions`].
@@ -36,11 +36,11 @@ pub use throttle::AuthThrottle;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
-use cleandesk_crypto::{
+use rotodesk_crypto::{
     identity::{derive_id_from_public_key_b64, Identity},
     session::{sign_session_proof, verify_peer_session_proof, SessionRole},
 };
-use cleandesk_proto::{
+use rotodesk_proto::{
     frame,
     files::FileChunk,
     message::{
@@ -52,7 +52,7 @@ use cleandesk_proto::{
     session::{DeviceInfo, SessionId, SessionStats},
     PROTOCOL_VERSION,
 };
-use cleandesk_transport::{Channel, IceConfig, PeerConnection, SignalOut, SignalingClient};
+use rotodesk_transport::{Channel, IceConfig, PeerConnection, SignalOut, SignalingClient};
 use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -108,7 +108,7 @@ pub struct HostConfig {
     /// Options for [`serve_community`] (ignored by [`serve`]).
     pub community: CommunityOptions,
     /// Where files sent by the viewer are stored. `None` means
-    /// [`default_downloads_dir`] (`<Downloads>/CleanDesk`).
+    /// [`default_downloads_dir`] (`<Downloads>/RotoDesk`).
     pub downloads_dir: Option<PathBuf>,
     /// Largest single file a viewer may send, in bytes
     /// ([`DEFAULT_MAX_FILE_SIZE`] = 8 GiB). Larger offers are refused.
@@ -138,7 +138,7 @@ impl HostConfig {
 #[derive(Debug, Clone)]
 pub enum HostEvent {
     /// Registered with the server under this ID.
-    Registered(cleandesk_proto::CleanDeskId),
+    Registered(rotodesk_proto::RotoDeskId),
     /// A viewer session is live (post-authentication).
     SessionStarted { session: SessionId, peer: DeviceInfo, granted: Permissions },
     /// The session ended; `reason` is human-readable.
@@ -211,7 +211,7 @@ pub(crate) enum SessionOutcome {
 pub async fn serve(config: HostConfig, approver: Arc<dyn Approver>) -> Result<()> {
     let mut signal = SignalingClient::connect(&config.signal_url)
         .await
-        .context("connecting to CleanDesk Server")?;
+        .context("connecting to RotoDesk Server")?;
     let identity = config.identity.clone();
     let signer = move |msg: &[u8]| identity.sign_b64(msg);
     let id = signal
@@ -230,7 +230,7 @@ pub async fn serve(config: HostConfig, approver: Arc<dyn Approver>) -> Result<()
         tokio::select! {
             msg = events.recv() => {
                 let Some(msg) = msg else { break };
-                if let SignalMessage::Error { code: cleandesk_proto::message::ErrorCode::IdConflict, detail } = &msg {
+                if let SignalMessage::Error { code: rotodesk_proto::message::ErrorCode::IdConflict, detail } = &msg {
                     // Another instance of this same identity registered (the GUI
                     // while we are the service helper, or vice versa). Stand down.
                     warn!(%detail, "registration replaced; stopping host loop");
@@ -331,7 +331,7 @@ async fn handle_signal(
             }
             // Everything in `from` but the id is the caller's own claim and
             // goes straight into a dialog and the history.
-            cleandesk_proto::text::sanitize_device_info(&mut from);
+            rotodesk_proto::text::sanitize_device_info(&mut from);
             // `auth` is only what the rendezvous relayed. There is no trusted
             // device store yet, so a "trusted" request gets exactly the
             // treatment of an interactive one: a human decides.
@@ -560,7 +560,7 @@ async fn run_session_inner(
 
     // Enumerate monitors once (throwaway capturer; dropped before the capture
     // thread starts so Desktop Duplication is never held twice).
-    let monitors = cleandesk_capture::new_capturer()
+    let monitors = rotodesk_capture::new_capturer()
         .map(|c| c.monitors())
         .unwrap_or_default();
     let monitor = monitors
@@ -574,7 +574,7 @@ async fn run_session_inner(
     // Accept; unattended sessions must pass the challenge/response first, and
     // until then learn nothing about this machine (not even Hello/Monitors).
     let mut authed = !unattended;
-    let challenge = cleandesk_crypto::proof::Challenge::issue();
+    let challenge = rotodesk_crypto::proof::Challenge::issue();
     let media = MediaControl::new(ctx.quality, monitor.clone());
     let mut media_started = false;
     let auth_deadline = Instant::now() + AUTH_TIMEOUT;
@@ -589,7 +589,7 @@ async fn run_session_inner(
     // the session task can be aborted at any `.await` (local "End session",
     // a rejection from the rendezvous), and only a destructor is guaranteed
     // to run on that path.
-    let mut guard = SessionCleanup::new(cleandesk_input::new_injector(), media.clone());
+    let mut guard = SessionCleanup::new(rotodesk_input::new_injector(), media.clone());
     let granted = ctx.granted;
 
     // Clipboard sync runs only once the viewer is authenticated *and* the
@@ -758,7 +758,7 @@ async fn run_session_inner(
                         debug!("chat message not yet surfaced");
                     }
                     SessionMessage::Disconnect { reason } => {
-                        let reason = cleandesk_proto::text::sanitize_text(&reason);
+                        let reason = rotodesk_proto::text::sanitize_text(&reason);
                         info!(%reason, "viewer disconnected");
                         break format!("the viewer ended the session ({reason})");
                     }
@@ -785,13 +785,13 @@ async fn run_session_inner(
 
 /// Everything a session must undo on the host, however it ends.
 struct SessionCleanup {
-    injector: Box<dyn cleandesk_input::InputInjector>,
+    injector: Box<dyn rotodesk_input::InputInjector>,
     pressed: PressedState,
     media: MediaControl,
 }
 
 impl SessionCleanup {
-    fn new(injector: Box<dyn cleandesk_input::InputInjector>, media: MediaControl) -> Self {
+    fn new(injector: Box<dyn rotodesk_input::InputInjector>, media: MediaControl) -> Self {
         Self { injector, pressed: PressedState::default(), media }
     }
 
@@ -913,10 +913,10 @@ pub fn remote_action_allowed(action: RemoteAction, granted: Permissions) -> bool
 fn perform_remote_action(action: RemoteAction) -> Result<()> {
     match action {
         RemoteAction::RestartMachine => restart_machine(),
-        RemoteAction::LockWorkstation => cleandesk_input::lock_workstation(),
+        RemoteAction::LockWorkstation => rotodesk_input::lock_workstation(),
         // Handled by the session through its injector (thread affinity).
         RemoteAction::LockLocalInput { .. } => Ok(()),
-        RemoteAction::SecureAttention => cleandesk_input::send_secure_attention(),
+        RemoteAction::SecureAttention => rotodesk_input::send_secure_attention(),
     }
 }
 
@@ -925,7 +925,7 @@ fn perform_remote_action(action: RemoteAction) -> Result<()> {
 #[cfg(windows)]
 fn restart_machine() -> Result<()> {
     let status = std::process::Command::new("shutdown")
-        .args(["/r", "/t", "5", "/c", "CleanDesk remote restart"])
+        .args(["/r", "/t", "5", "/c", "RotoDesk remote restart"])
         .status()
         .context("running shutdown")?;
     if status.success() {
@@ -1000,7 +1000,7 @@ pub fn input_allowed(ev: InputEvent, granted: Permissions) -> bool {
         // Codes above the virtual-key range are not keys; `SendInput` would
         // truncate them into one and the held-key tracker would not match.
         InputEvent::Key { code, .. } => {
-            code <= cleandesk_input::MAX_VIRTUAL_KEY && granted.contains(Permissions::CONTROL_KEYBOARD)
+            code <= rotodesk_input::MAX_VIRTUAL_KEY && granted.contains(Permissions::CONTROL_KEYBOARD)
         }
     }
 }
@@ -1080,11 +1080,11 @@ impl PressedState {
 /// Verify an unattended auth response against the configured derived key.
 fn verify_unattended(
     response_b64: &str,
-    challenge: &cleandesk_crypto::proof::Challenge,
+    challenge: &rotodesk_crypto::proof::Challenge,
     key: Option<[u8; 32]>,
 ) -> bool {
     let Some(key) = key else { return false };
-    cleandesk_crypto::proof::verify(&key, challenge, response_b64)
+    rotodesk_crypto::proof::verify(&key, challenge, response_b64)
 }
 
 async fn send_ctrl(peer: &PeerConnection, msg: &SessionMessage) -> bool {

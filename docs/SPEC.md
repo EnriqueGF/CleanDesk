@@ -1,4 +1,4 @@
-# CleanDesk — Software Definition Sheet
+# RotoDesk — Software Definition Sheet
 
 > Source of truth for the product (definition provided by the project owner).
 > The code in `crates/proto` implements these concepts.
@@ -15,12 +15,12 @@ Suitable for technical support and personal access. Download, run and receive
 a connection within seconds.
 
 ## 3. Identification
-Each installation has a unique **CleanDesk ID** (e.g. `548 291 743`) and,
-optionally, an alias (e.g. `pc-oficina.clean`).
+Each installation has a unique **RotoDesk ID** (e.g. `548 291 743`) and,
+optionally, an alias (e.g. `pc-oficina.roto`).
 
 ## 4. Main screen
 - *This device:* ID, alias, connection status, copy-ID button, service status.
-- *Connect to device:* "Enter CleanDesk ID" field + "Connect" button; list of
+- *Connect to device:* "Enter RotoDesk ID" field + "Connect" button; list of
   recent connections and saved devices.
 
 ## 5. Connection request
@@ -29,7 +29,7 @@ permissions. Options: **Accept** / **Reject**.
 
 ## 6. Session permissions (changeable live)
 View screen · control keyboard · control mouse · clipboard · transfer files ·
-remote audio · reboot machine · restart CleanDesk · administrative actions ·
+remote audio · reboot machine · restart RotoDesk · administrative actions ·
 lock local keyboard/mouse.
 
 ## 7. Remote control
@@ -81,10 +81,10 @@ Brute-force protection is per verified caller key and global (a rotating
 attacker locks unattended access for everyone for a doubling window).
 
 ## 19. Connection architecture
-- **CleanDesk Client:** capture, inputs, encoding, sessions, files.
-- **CleanDesk Server:** authentication, registration, ID resolution, users,
+- **RotoDesk Client:** capture, inputs, encoding, sessions, files.
+- **RotoDesk Server:** authentication, registration, ID resolution, users,
   coordination, signaling.
-- **CleanDesk Relay:** intermediary when there is no direct connection.
+- **RotoDesk Relay:** intermediary when there is no direct connection.
 Flow: `A → P2P → B`; if not possible, `A → Relay → B`.
 
 ## 20. NAT Traversal

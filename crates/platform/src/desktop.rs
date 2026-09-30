@@ -6,7 +6,7 @@
 //! desktop the *calling thread* is attached to, so a host that wants to show
 //! and drive a UAC prompt must re-attach its capture and input threads to
 //! whatever desktop currently receives input. Only a process running as
-//! LocalSystem (the CleanDesk service) is allowed to open the secure desktop;
+//! LocalSystem (the RotoDesk service) is allowed to open the secure desktop;
 //! for everybody else [`attach_input_desktop`] simply reports `Ok(false)`.
 
 use crate::Result;

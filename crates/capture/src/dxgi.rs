@@ -17,7 +17,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use cleandesk_proto::message::MonitorInfo;
+use rotodesk_proto::message::MonitorInfo;
 use windows::core::Interface as _;
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
@@ -105,7 +105,7 @@ impl DxgiCapturer {
         // to. After a UAC switch the old duplication dies with ACCESS_LOST; a
         // LocalSystem host re-attaches here and keeps showing the secure
         // desktop. For ordinary processes this is a harmless no-op.
-        match cleandesk_platform::desktop::attach_input_desktop() {
+        match rotodesk_platform::desktop::attach_input_desktop() {
             Ok(true) => tracing::info!("capture thread followed the input desktop"),
             Ok(false) => {}
             Err(e) => tracing::debug!(error = %e, "could not follow the input desktop"),
