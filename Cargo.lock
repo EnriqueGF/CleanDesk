@@ -1006,6 +1006,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
 ]
 
 [[package]]
@@ -1036,6 +1037,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "uuid",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -1051,6 +1053,7 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "sha2 0.10.9",
+ "subtle",
  "thiserror 2.0.21",
  "zeroize",
 ]
@@ -1200,6 +1203,7 @@ dependencies = [
  "cleandesk-proto",
  "dashmap",
  "futures-util",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite",

@@ -342,6 +342,7 @@ pub async fn serve_community(config: HostConfig, approver: Arc<dyn Approver>) ->
     // the main loop.
     {
         let identity = identity.clone();
+        let mut listener = listener;
         tokio::spawn(async move {
             loop {
                 match listener.accept(&identity).await {

@@ -243,9 +243,9 @@ fn spanish(en: &str) -> Option<&'static str> {
         "Installing…" => "Instalando…",
         "Update failed: {err}" => "Error al actualizar: {err}",
         "See the banner on the Home page." => "Mira el aviso de la página de Inicio.",
-        "Set a password below first (at least 6 characters)." => "Primero define una contraseña abajo (mínimo 6 caracteres).",
+        "Set a password below first (at least 10 characters)." => "Primero define una contraseña abajo (mínimo 10 caracteres).",
         "(set; type a new one to replace it)" => "(definida; escribe otra para sustituirla)",
-        "at least 6 characters" => "mínimo 6 caracteres",
+        "at least 10 characters" => "mínimo 10 caracteres",
         "Save password" => "Guardar contraseña",
         "Password saved; unattended access enabled." => "Contraseña guardada; acceso desatendido activado.",
         "Anyone connecting with this password gets in without your approval. Only an Argon2id hash and a derived key are stored, never the password." => "Quien se conecte con esta contraseña entra sin tu aprobación. Solo se guarda un hash Argon2id y una clave derivada, nunca la contraseña.",
@@ -376,8 +376,8 @@ Descarga: https://github.com/EnriqueGF/CleanDesk/releases",
         "Anyone connecting with this password gets in without your approval. Restart the app after changing it so the host picks it up." => {
             "Quien conecte con esta contraseña entra sin que tengas que aceptar. Reinicia la app tras cambiarla para que el host la use."
         }
-        "The unattended-access password must be at least 6 characters long." => {
-            "La contraseña de acceso desatendido debe tener al menos 6 caracteres."
+        "The unattended-access password must be at least 10 characters long." => {
+            "La contraseña de acceso desatendido debe tener al menos 10 caracteres."
         }
         "Unattended access enabled." => "Acceso desatendido activado.",
         "Could not enable it: {err}" => "No se pudo activar: {err}",
@@ -507,7 +507,7 @@ mod tests {
         "Language", "System default", "Default quality", "Automatic", "Best quality", "Balanced", "Best performance",
         "Unattended access", "Allow unattended connections",
         "Anyone connecting with this password gets in without your approval. Restart the app after changing it so the host picks it up.",
-        "The unattended-access password must be at least 6 characters long.", "Unattended access enabled.",
+        "The unattended-access password must be at least 10 characters long.", "Unattended access enabled.",
         "Could not enable it: {err}", "Unattended access disabled.", "System", "Start with Windows (at sign-in)",
         "CleanDesk will open when you sign in.", "CleanDesk will no longer open when you sign in.",
         "Could not change startup: {err}", "Could not locate the executable.",

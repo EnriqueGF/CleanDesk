@@ -26,12 +26,22 @@ use cleandesk_proto::message::{InputEvent, MonitorInfo};
 /// Crate version string, handy for diagnostics.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Largest virtual-key code `SendInput` accepts (`VK_OEM_CLEAR`); anything
+/// above it is not a key and would be truncated into one.
+pub const MAX_VIRTUAL_KEY: u32 = 0xFE;
+
 /// Injects viewer input events onto the local desktop.
 pub trait InputInjector: Send {
     /// Inject one event. `monitor` gives the target monitor geometry so that
     /// normalized (0..=1) mouse coordinates map to absolute virtual-desktop
     /// pixels.
     fn inject(&mut self, ev: InputEvent, monitor: &MonitorInfo) -> anyhow::Result<()>;
+
+    /// Block (`true`) or unblock (`false`) the *local* keyboard and mouse so
+    /// only injected input reaches the desktop. Windows only lets the thread
+    /// that blocked input unblock it, so this rides the injector's own
+    /// thread; the block is always released when the injector is dropped.
+    fn set_local_input_blocked(&mut self, blocked: bool) -> anyhow::Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +106,10 @@ impl InputInjector for WinInputInjector {
     fn inject(&mut self, _ev: InputEvent, _monitor: &MonitorInfo) -> anyhow::Result<()> {
         anyhow::bail!("cleandesk-input: SendInput is only available on Windows")
     }
+
+    fn set_local_input_blocked(&mut self, _blocked: bool) -> anyhow::Result<()> {
+        anyhow::bail!("cleandesk-input: BlockInput is only available on Windows")
+    }
 }
 
 /// Construct the platform input injector.
@@ -121,11 +135,10 @@ pub fn lock_workstation() -> anyhow::Result<()> {
     win::lock_workstation()
 }
 
-/// Block (`true`) or unblock (`false`) the *local* keyboard and mouse so only
-/// injected input reaches the desktop. Requires the process to run at an
-/// integrity level at least as high as the foreground application; the OS
-/// silently releases the block if the process exits, but callers must still
-/// unblock explicitly when the session ends.
+/// Block (`true`) or unblock (`false`) the *local* keyboard and mouse on the
+/// **calling thread**. Prefer [`InputInjector::set_local_input_blocked`]:
+/// only the thread that called `BlockInput(TRUE)` can undo it, and an async
+/// task may resume on another thread.
 #[cfg(windows)]
 pub fn block_local_input(blocked: bool) -> anyhow::Result<()> {
     win::block_local_input(blocked)

@@ -6,7 +6,7 @@ use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use cleandesk_relay_server::{
     RelayConfig, RelayError, RelayHandle, DEFAULT_REALM, ENV_ALLOW_PRIVATE_PEERS, ENV_BIND,
-    ENV_PORT, ENV_PUBLIC_IP, ENV_USERS,
+    ENV_MAX_ALLOCATIONS_PER_IP, ENV_PORT, ENV_PUBLIC_IP, ENV_USERS,
 };
 use tokio::net::UdpSocket;
 use turn::client::{Client, ClientConfig};
@@ -169,4 +169,43 @@ async fn bind_failure_is_reported_not_panicked() {
         .expect("second bind fails");
     assert!(matches!(err, RelayError::Bind { .. }));
     first.shutdown().await.expect("relay shutdown");
+}
+
+#[tokio::test]
+async fn allocations_per_source_are_capped_and_released() {
+    let relay = start_relay_with(&[(ENV_MAX_ALLOCATIONS_PER_IP, "1")]).await;
+    let server = relay.local_addr().to_string();
+
+    let first = client(&server, "alice", "correct-horse").await;
+    let relayed = tokio::time::timeout(Duration::from_secs(10), first.allocate())
+        .await
+        .expect("allocate did not time out")
+        .expect("first allocation succeeds");
+
+    // A second allocation from the same address is dropped before the
+    // engine sees it: the client only observes a timeout.
+    let second = client(&server, "alice", "correct-horse").await;
+    let res = tokio::time::timeout(Duration::from_secs(4), second.allocate()).await;
+    assert!(
+        matches!(res, Err(_) | Ok(Err(_))),
+        "second allocation from the same source must not succeed"
+    );
+    second.close().await.expect("client close");
+
+    // Releasing the first frees the slot.
+    relayed.close().await.expect("relayed close");
+    first.close().await.expect("client close");
+    let mut freed = false;
+    for _ in 0..20 {
+        let third = client(&server, "alice", "correct-horse").await;
+        if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_secs(3), third.allocate()).await {
+            freed = true;
+            third.close().await.expect("client close");
+            break;
+        }
+        third.close().await.expect("client close");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert!(freed, "closing the allocation must free the per-source slot");
+    relay.shutdown().await.expect("relay shutdown");
 }

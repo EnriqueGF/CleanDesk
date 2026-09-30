@@ -34,11 +34,21 @@ use crate::{DiscoveryError, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use cleandesk_crypto::identity::{derive_id_from_public_key_b64, random_bytes, verify_b64_sig, Identity};
 use cleandesk_proto::{frame::FrameCodec, message::SignalMessage, session::DeviceInfo, CleanDeskId, PROTOCOL_VERSION};
-use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{mpsc, Semaphore};
 use tracing::{debug, warn};
+
+/// Handshakes in flight at once on the listener. Each one is bounded in time
+/// and memory; this bounds their number so an attacker holding sockets open
+/// cannot keep honest viewers from ever being served.
+const MAX_INFLIGHT_HANDSHAKES: usize = 32;
+/// Handshakes in flight from one source address.
+const MAX_INFLIGHT_PER_IP: usize = 4;
 
 /// Largest accepted frame (an SDP is a few KiB).
 const MAX_FRAME: usize = 64 * 1024;
@@ -135,7 +145,9 @@ impl DirectLink {
             if n == 0 {
                 return Ok(None);
             }
-            self.codec.feed(&chunk[..n]);
+            // The length prefix is checked before the payload is buffered,
+            // so an unauthenticated peer cannot make us hold megabytes.
+            self.codec.feed_checked(&chunk[..n]).map_err(|e| DiscoveryError::Protocol(e.to_string()))?;
         }
     }
 
@@ -160,31 +172,97 @@ impl std::fmt::Debug for DirectLink {
 }
 
 /// Listening side (host).
+///
+/// Handshakes run concurrently in their own tasks: a peer that connects and
+/// sends nothing costs one of [`MAX_INFLIGHT_HANDSHAKES`] slots for at most
+/// three step timeouts, never the listener's attention.
 pub struct DirectListener {
     listener: TcpListener,
+    inflight: Arc<Semaphore>,
+    per_ip: Arc<Mutex<HashMap<IpAddr, usize>>>,
+    done_tx: mpsc::Sender<DirectLink>,
+    done_rx: mpsc::Receiver<DirectLink>,
+}
+
+/// Releases a per-IP handshake slot however the handshake ends.
+struct IpSlot {
+    per_ip: Arc<Mutex<HashMap<IpAddr, usize>>>,
+    ip: IpAddr,
+}
+
+impl IpSlot {
+    fn acquire(per_ip: &Arc<Mutex<HashMap<IpAddr, usize>>>, ip: IpAddr) -> Option<Self> {
+        let mut map = per_ip.lock().unwrap_or_else(|e| e.into_inner());
+        let n = map.entry(ip).or_insert(0);
+        if *n >= MAX_INFLIGHT_PER_IP {
+            return None;
+        }
+        *n += 1;
+        Some(Self { per_ip: per_ip.clone(), ip })
+    }
+}
+
+impl Drop for IpSlot {
+    fn drop(&mut self) {
+        let mut map = self.per_ip.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = map.get_mut(&self.ip) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                map.remove(&self.ip);
+            }
+        }
+    }
 }
 
 impl DirectListener {
     /// Bind on all interfaces; `port` 0 picks one.
     pub async fn bind(port: u16) -> Result<Self> {
         let listener = TcpListener::bind(("0.0.0.0", port)).await?;
-        Ok(Self { listener })
+        let (done_tx, done_rx) = mpsc::channel(MAX_INFLIGHT_HANDSHAKES);
+        Ok(Self {
+            listener,
+            inflight: Arc::new(Semaphore::new(MAX_INFLIGHT_HANDSHAKES)),
+            per_ip: Arc::new(Mutex::new(HashMap::new())),
+            done_tx,
+            done_rx,
+        })
     }
 
     pub fn port(&self) -> u16 {
         self.listener.local_addr().map(|a| a.port()).unwrap_or(0)
     }
 
-    /// Accept one TCP connection and run the host side of the handshake.
-    /// Failed handshakes are logged and skipped; this only returns links
-    /// whose peer proved its identity.
-    pub async fn accept(&self, identity: &Identity) -> Result<DirectLink> {
+    /// Accept TCP connections, running the host side of each handshake in
+    /// its own task, and return the next link whose peer proved its
+    /// identity. Failed handshakes are logged and skipped.
+    pub async fn accept(&mut self, identity: &Identity) -> Result<DirectLink> {
         loop {
-            let (stream, addr) = self.listener.accept().await?;
-            match tokio::time::timeout(STEP_TIMEOUT * 3, host_handshake(stream, identity)).await {
-                Ok(Ok(link)) => return Ok(link),
-                Ok(Err(e)) => warn!(%addr, error = %e, "direct link handshake failed"),
-                Err(_) => warn!(%addr, "direct link handshake timed out"),
+            tokio::select! {
+                Some(link) = self.done_rx.recv() => return Ok(link),
+                accepted = self.listener.accept() => {
+                    let (stream, addr) = accepted?;
+                    let Ok(permit) = self.inflight.clone().try_acquire_owned() else {
+                        debug!(%addr, "too many handshakes in flight; dropping connection");
+                        continue;
+                    };
+                    let Some(slot) = IpSlot::acquire(&self.per_ip, addr.ip()) else {
+                        debug!(%addr, "too many handshakes from this address; dropping connection");
+                        continue;
+                    };
+                    let identity = identity.clone();
+                    let done = self.done_tx.clone();
+                    tokio::spawn(async move {
+                        let _permit = permit;
+                        let _slot = slot;
+                        match tokio::time::timeout(STEP_TIMEOUT * 3, host_handshake(stream, &identity)).await {
+                            Ok(Ok(link)) => {
+                                let _ = done.send(link).await;
+                            }
+                            Ok(Err(e)) => warn!(%addr, error = %e, "direct link handshake failed"),
+                            Err(_) => warn!(%addr, "direct link handshake timed out"),
+                        }
+                    });
+                }
             }
         }
     }
@@ -193,7 +271,7 @@ impl DirectListener {
 async fn host_handshake(stream: TcpStream, identity: &Identity) -> Result<DirectLink> {
     let mut link = DirectLink {
         stream,
-        codec: FrameCodec::new(),
+        codec: FrameCodec::with_max(MAX_FRAME),
         peer_public_key: String::new(),
         peer_id: identity.derive_id(),
         peer_device: None,
@@ -255,7 +333,7 @@ pub async fn dial(
     let _ = stream.set_nodelay(true);
     let mut link = DirectLink {
         stream,
-        codec: FrameCodec::new(),
+        codec: FrameCodec::with_max(MAX_FRAME),
         peer_public_key: host_public_key.to_string(),
         peer_id: host_id,
         peer_device: None,
@@ -355,7 +433,7 @@ mod tests {
     async fn legacy_handshake_is_refused() {
         let host = Identity::generate();
         let viewer = Identity::generate();
-        let listener = DirectListener::bind(0).await.unwrap();
+        let mut listener = DirectListener::bind(0).await.unwrap();
         let ep: SocketAddr = format!("127.0.0.1:{}", listener.port()).parse().unwrap();
         let host_pk = host.public_key_b64();
         let host_id = host.derive_id();
@@ -389,11 +467,45 @@ mod tests {
         assert!(accept.await.unwrap().is_err(), "no link for a legacy viewer");
     }
 
+    /// Idle connections (a slowloris) must not keep an honest viewer from
+    /// completing its handshake, and an oversized frame announced before
+    /// authentication is refused from its length prefix.
+    #[tokio::test]
+    async fn idle_connections_do_not_block_honest_viewers() {
+        let host = Identity::generate();
+        let viewer = Identity::generate();
+        let mut listener = DirectListener::bind(0).await.unwrap();
+        let ep: SocketAddr = format!("127.0.0.1:{}", listener.port()).parse().unwrap();
+        let host_pk = host.public_key_b64();
+        let host_id = host.derive_id();
+        // Three sockets that never speak (the per-IP cap is four, so an
+        // honest one still fits).
+        let mut idle = Vec::new();
+        for _ in 0..3 {
+            idle.push(TcpStream::connect(ep).await.unwrap());
+        }
+        // One that announces a 16 MiB frame: refused without buffering it.
+        let mut big = TcpStream::connect(ep).await.unwrap();
+        big.write_all(&(16u32 * 1024 * 1024).to_le_bytes()).await.unwrap();
+        let accept = tokio::spawn(async move {
+            tokio::time::timeout(Duration::from_secs(5), listener.accept(&host)).await
+        });
+        // The oversized announcer is dropped at once, freeing its slot.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let started = std::time::Instant::now();
+        let link = dial(ep, &viewer, dev(viewer.derive_id()), &host_pk, host_id).await.unwrap();
+        assert!(started.elapsed() < STEP_TIMEOUT, "handshake waited behind idle sockets");
+        assert_eq!(link.peer_id, host_id);
+        let accepted = accept.await.unwrap().expect("listener returned in time").unwrap();
+        assert_eq!(accepted.peer_id, viewer.derive_id());
+        drop(idle);
+    }
+
     #[tokio::test]
     async fn mutual_handshake_then_messages_flow() {
         let host = Identity::generate();
         let viewer = Identity::generate();
-        let listener = DirectListener::bind(0).await.unwrap();
+        let mut listener = DirectListener::bind(0).await.unwrap();
         let ep: SocketAddr = format!("127.0.0.1:{}", listener.port()).parse().unwrap();
         let host_pk = host.public_key_b64();
         let host_id = host.derive_id();
@@ -427,7 +539,7 @@ mod tests {
         let impostor = Identity::generate();
         let impostor_id = impostor.derive_id();
         let viewer = Identity::generate();
-        let listener = DirectListener::bind(0).await.unwrap();
+        let mut listener = DirectListener::bind(0).await.unwrap();
         let ep: SocketAddr = format!("127.0.0.1:{}", listener.port()).parse().unwrap();
         let accept = tokio::spawn(async move {
             // The impostor answers with its own key; the viewer expects `real`.
@@ -452,7 +564,7 @@ mod tests {
     async fn viewer_with_mismatched_id_is_rejected_by_host() {
         let host = Identity::generate();
         let viewer = Identity::generate();
-        let listener = DirectListener::bind(0).await.unwrap();
+        let mut listener = DirectListener::bind(0).await.unwrap();
         let ep: SocketAddr = format!("127.0.0.1:{}", listener.port()).parse().unwrap();
         let host_pk = host.public_key_b64();
         let host_id = host.derive_id();

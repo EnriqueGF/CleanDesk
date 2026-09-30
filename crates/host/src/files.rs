@@ -140,6 +140,7 @@ impl FileReceiver {
             }
             FileTransferMsg::Refused { transfer_id, reason } => {
                 if self.table.remove(transfer_id).is_some() {
+                    let reason = cleandesk_proto::text::sanitize_text(&reason);
                     info!(transfer_id, %reason, "file transfer refused by the viewer");
                 }
                 self.discard(transfer_id, None).await;
@@ -205,12 +206,32 @@ impl FileReceiver {
         }
     }
 
+    /// Is any transfer receiving bytes? Chunks for nothing are not decoded.
+    pub(crate) fn has_active(&self) -> bool {
+        !self.writers.is_empty()
+    }
+
     /// Session over: delete every partial file.
     pub(crate) async fn abort_all(&mut self) {
         let ids: Vec<u64> = self.writers.keys().copied().collect();
         for id in ids {
             self.table.remove(id);
             self.discard(id, None).await;
+        }
+    }
+}
+
+/// The session task can be aborted at any `.await` (the local user ends the
+/// session, the rendezvous rejects it); destructors still run, so partial
+/// files never outlive the session even on that path.
+impl Drop for FileReceiver {
+    fn drop(&mut self) {
+        for (id, w) in self.writers.drain() {
+            drop(w.file);
+            match std::fs::remove_file(&w.path) {
+                Ok(()) => info!(transfer_id = id, path = %w.path.display(), "partial file removed at session end"),
+                Err(e) => debug!(path = %w.path.display(), error = %e, "could not delete partial file"),
+            }
         }
     }
 }

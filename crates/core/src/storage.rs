@@ -154,8 +154,18 @@ impl Storage {
     pub fn load_or_create_identity(&self) -> Result<Identity> {
         let path = self.identity_path();
         if path.exists() {
-            let pem = fs::read_to_string(&path)?;
-            Ok(Identity::from_pem(&pem)?)
+            let stored = fs::read(&path)?;
+            let plain = crate::dpapi::unprotect(&stored)?;
+            let pem = String::from_utf8(plain).map_err(|e| CoreError::Other(format!("identity.pem: {e}")))?;
+            let identity = Identity::from_pem(&pem)?;
+            // A file from before at-rest protection existed: rewrite it
+            // protected, but never at the cost of the identity itself.
+            if !crate::dpapi::is_protected(&stored) {
+                if let Err(e) = self.save_identity(&identity) {
+                    tracing::warn!(error = %e, "could not rewrite identity.pem protected");
+                }
+            }
+            Ok(identity)
         } else {
             let identity = Identity::generate();
             self.save_identity(&identity)?;
@@ -168,7 +178,7 @@ impl Storage {
     pub fn save_identity(&self, identity: &Identity) -> Result<()> {
         self.ensure_dir()?;
         let pem = identity.to_pem()?;
-        write_restricted(&self.identity_path(), pem.as_bytes())
+        write_restricted(&self.identity_path(), &crate::dpapi::protect(pem.as_bytes())?)
     }
 
     /// Load the JSON app-data blob, or `None` if it hasn't been created yet
@@ -180,7 +190,7 @@ impl Storage {
         if !path.exists() {
             return Ok(None);
         }
-        let bytes = fs::read(&path)?;
+        let bytes = crate::dpapi::unprotect(&fs::read(&path)?)?;
         Ok(Some(serde_json::from_slice(&bytes)?))
     }
 
@@ -199,8 +209,13 @@ impl Storage {
         // Raw bytes, not `read_to_string`: invalid UTF-8 is just another
         // form of corruption and must take the recovery path rather than
         // surface as an I/O error.
-        let bytes = fs::read(&path)?;
-        match serde_json::from_slice::<AppData>(&bytes) {
+        let stored = fs::read(&path)?;
+        // A blob this machine cannot unwrap is corruption for our purposes
+        // (a profile copied from elsewhere): set it aside like bad JSON.
+        let parsed = crate::dpapi::unprotect(&stored)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| serde_json::from_slice::<AppData>(&bytes).map_err(|e| e.to_string()));
+        match parsed {
             Ok(data) => Ok(Loaded::Data(data)),
             Err(err) => {
                 let backup = set_aside_corrupt(&path)?;
@@ -212,7 +227,7 @@ impl Storage {
                 );
                 Ok(Loaded::Recovered {
                     backup,
-                    error: err.to_string(),
+                    error: err,
                 })
             }
         }
@@ -222,7 +237,7 @@ impl Storage {
     pub fn save_app_data(&self, data: &AppData) -> Result<()> {
         self.ensure_dir()?;
         let text = serde_json::to_string_pretty(data)?;
-        write_restricted(&self.app_data_path(), text.as_bytes())
+        write_restricted(&self.app_data_path(), &crate::dpapi::protect(text.as_bytes())?)
     }
 }
 

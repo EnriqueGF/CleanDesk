@@ -22,6 +22,9 @@
 //! | `CLEANDESK_RELAY_ALLOW_PRIVATE_PEERS` | `0` | `1` relays towards loopback / link-local / private / multicast peers too (only for a relay that serves one private network). See [`guard`]. |
 //! | `CLEANDESK_RELAY_ALLOCATION_MAX_SECS` | `86400` | Lifetime cap per allocation; `0` = unlimited. |
 //! | `CLEANDESK_RELAY_ALLOCATION_MAX_BYTES` | `0` (private) / `17179869184` (community) | Bytes relayed per allocation, both directions; `0` = unlimited. |
+//! | `CLEANDESK_RELAY_ALLOCATION_MAX_KBPS` | `0` (private) / `25000` (community) | Sustained throughput per allocation in kbit/s; `0` = unlimited. |
+//! | `CLEANDESK_RELAY_MAX_ALLOCATIONS` | `1000` | Live allocations across all clients; `0` = unlimited. |
+//! | `CLEANDESK_RELAY_MAX_ALLOCATIONS_PER_IP` | `8` | Live allocations per source address; `0` = unlimited. |
 //! | `CLEANDESK_RELAY_IDENTITY` | `cleandesk-relay-identity.pem` | Ed25519 key the community relay signs its DHT record with (created if missing). |
 //!
 //! [`RelayConfig::from_env`] reads the real process environment;
@@ -41,7 +44,7 @@ use std::{
     time::Duration,
 };
 
-use guard::{GuardedRelayGenerator, PeerPolicy, Quotas};
+use guard::{AllocationCaps, GuardedRelayGenerator, Ledger, ListenerGuard, PeerPolicy, Quotas};
 
 use tokio::net::UdpSocket;
 use tracing::{debug, info, warn};
@@ -76,6 +79,12 @@ pub const ENV_ALLOW_PRIVATE_PEERS: &str = "CLEANDESK_RELAY_ALLOW_PRIVATE_PEERS";
 pub const ENV_ALLOCATION_MAX_SECS: &str = "CLEANDESK_RELAY_ALLOCATION_MAX_SECS";
 /// Per-allocation byte cap, both directions (`0` = unlimited).
 pub const ENV_ALLOCATION_MAX_BYTES: &str = "CLEANDESK_RELAY_ALLOCATION_MAX_BYTES";
+/// Per-allocation sustained rate in kbit/s (`0` = unlimited).
+pub const ENV_ALLOCATION_MAX_KBPS: &str = "CLEANDESK_RELAY_ALLOCATION_MAX_KBPS";
+/// Live allocations across all clients (`0` = unlimited).
+pub const ENV_MAX_ALLOCATIONS: &str = "CLEANDESK_RELAY_MAX_ALLOCATIONS";
+/// Live allocations per source IP (`0` = unlimited).
+pub const ENV_MAX_ALLOCATIONS_PER_IP: &str = "CLEANDESK_RELAY_MAX_ALLOCATIONS_PER_IP";
 /// Path of the relay's Ed25519 identity (PEM) used to sign its DHT record.
 pub const ENV_IDENTITY: &str = "CLEANDESK_RELAY_IDENTITY";
 
@@ -84,6 +93,12 @@ pub const DEFAULT_ALLOCATION_MAX_SECS: u64 = 24 * 60 * 60;
 /// Default per-allocation byte cap in community mode (16 GiB): generous for
 /// a long desktop session, bounded for an open relay.
 pub const DEFAULT_COMMUNITY_ALLOCATION_MAX_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+/// Default per-allocation rate in community mode: enough for a high-quality
+/// desktop stream, not enough to turn the relay into a flood source.
+pub const DEFAULT_COMMUNITY_ALLOCATION_MAX_KBPS: u64 = 25_000;
+/// Default live-allocation caps.
+pub const DEFAULT_MAX_ALLOCATIONS: usize = 1000;
+pub const DEFAULT_MAX_ALLOCATIONS_PER_IP: usize = 8;
 /// Default identity file, relative to the working directory.
 pub const DEFAULT_IDENTITY_PATH: &str = "cleandesk-relay-identity.pem";
 
@@ -166,6 +181,8 @@ pub struct RelayConfig {
     pub allow_private_peers: bool,
     /// Per-allocation limits (`0` = unlimited).
     pub quotas: Quotas,
+    /// Live allocation caps (`0` = unlimited).
+    pub caps: AllocationCaps,
     /// Where the relay's signing identity lives (community mode).
     pub identity_path: PathBuf,
 }
@@ -250,6 +267,21 @@ impl RelayConfig {
             None if community => DEFAULT_COMMUNITY_ALLOCATION_MAX_BYTES,
             None => 0,
         };
+        let max_kbps = match get(ENV_ALLOCATION_MAX_KBPS) {
+            Some(v) => parse(ENV_ALLOCATION_MAX_KBPS, v)?,
+            None if community => DEFAULT_COMMUNITY_ALLOCATION_MAX_KBPS,
+            None => 0,
+        };
+        let caps = AllocationCaps {
+            total: match get(ENV_MAX_ALLOCATIONS) {
+                Some(v) => parse(ENV_MAX_ALLOCATIONS, v)?,
+                None => DEFAULT_MAX_ALLOCATIONS,
+            },
+            per_ip: match get(ENV_MAX_ALLOCATIONS_PER_IP) {
+                Some(v) => parse(ENV_MAX_ALLOCATIONS_PER_IP, v)?,
+                None => DEFAULT_MAX_ALLOCATIONS_PER_IP,
+            },
+        };
         let identity_path = PathBuf::from(get(ENV_IDENTITY).unwrap_or(DEFAULT_IDENTITY_PATH).trim());
 
         Ok(Self {
@@ -261,7 +293,8 @@ impl RelayConfig {
             port_range,
             community,
             allow_private_peers,
-            quotas: Quotas { max_secs, max_bytes },
+            quotas: Quotas { max_secs, max_bytes, max_kbps },
+            caps,
             identity_path,
         })
     }
@@ -439,13 +472,17 @@ pub async fn run(config: RelayConfig) -> Result<RelayHandle, RelayError> {
             net,
         }),
     };
-    // Every relay socket goes through the peer filter and the quotas.
+    // Every relay socket goes through the peer filter and the quotas, and
+    // every allocation is counted against the caps.
+    let ledger = Arc::new(Ledger::new(config.caps));
     let relay_addr_generator: Box<dyn RelayAddressGenerator + Send + Sync> =
-        Box::new(GuardedRelayGenerator::new(inner_generator, config.peer_policy()));
+        Box::new(GuardedRelayGenerator::new(inner_generator, config.peer_policy(), ledger.clone()));
+    let listener: Arc<dyn webrtc_util::Conn + Send + Sync> =
+        Arc::new(ListenerGuard::new(Arc::new(socket), ledger));
 
     let server = Server::new(ServerConfig {
         conn_configs: vec![ConnConfig {
-            conn: Arc::new(socket),
+            conn: listener,
             relay_addr_generator,
         }],
         realm: config.realm.clone(),
@@ -464,6 +501,7 @@ pub async fn run(config: RelayConfig) -> Result<RelayHandle, RelayError> {
         port_range = ?config.port_range,
         allow_private_peers = config.allow_private_peers,
         quotas = ?config.quotas,
+        caps = ?config.caps,
         "CleanDesk Relay (TURN/UDP) listening"
     );
 
@@ -590,22 +628,28 @@ mod tests {
     fn peer_filter_and_quota_defaults() {
         let cfg = RelayConfig::from_vars(vars(&[(ENV_USERS, "a:1")])).unwrap();
         assert!(!cfg.allow_private_peers, "private peers refused unless opted in");
-        assert_eq!(cfg.quotas, Quotas { max_secs: DEFAULT_ALLOCATION_MAX_SECS, max_bytes: 0 });
+        assert_eq!(cfg.quotas, Quotas { max_secs: DEFAULT_ALLOCATION_MAX_SECS, max_bytes: 0, max_kbps: 0 });
+        assert_eq!(cfg.caps, AllocationCaps { per_ip: DEFAULT_MAX_ALLOCATIONS_PER_IP, total: DEFAULT_MAX_ALLOCATIONS });
         assert_eq!(cfg.identity_path, PathBuf::from(DEFAULT_IDENTITY_PATH));
         let cfg = RelayConfig::from_vars(vars(&[(ENV_COMMUNITY, "1")])).unwrap();
         assert!(!cfg.allow_private_peers, "community mode never implies private peers");
         assert_eq!(cfg.quotas.max_bytes, DEFAULT_COMMUNITY_ALLOCATION_MAX_BYTES);
+        assert_eq!(cfg.quotas.max_kbps, DEFAULT_COMMUNITY_ALLOCATION_MAX_KBPS);
         assert!(cfg.users.iter().any(|u| u.username == cleandesk_discovery::COMMUNITY_TURN_USER));
         let cfg = RelayConfig::from_vars(vars(&[
             (ENV_USERS, "a:1"),
             (ENV_ALLOW_PRIVATE_PEERS, "yes"),
             (ENV_ALLOCATION_MAX_SECS, "0"),
             (ENV_ALLOCATION_MAX_BYTES, "1024"),
+            (ENV_ALLOCATION_MAX_KBPS, "500"),
+            (ENV_MAX_ALLOCATIONS, "0"),
+            (ENV_MAX_ALLOCATIONS_PER_IP, "3"),
             (ENV_IDENTITY, "/srv/relay.pem"),
         ]))
         .unwrap();
         assert!(cfg.allow_private_peers);
-        assert_eq!(cfg.quotas, Quotas { max_secs: 0, max_bytes: 1024 });
+        assert_eq!(cfg.quotas, Quotas { max_secs: 0, max_bytes: 1024, max_kbps: 500 });
+        assert_eq!(cfg.caps, AllocationCaps { per_ip: 3, total: 0 });
         assert_eq!(cfg.identity_path, PathBuf::from("/srv/relay.pem"));
         assert!(matches!(
             RelayConfig::from_vars(vars(&[(ENV_USERS, "a:1"), (ENV_ALLOCATION_MAX_BYTES, "lots")])),

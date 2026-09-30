@@ -66,14 +66,48 @@ pub fn decode_payload<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ProtoError
 }
 
 /// A streaming decoder for length-delimited frames arriving in arbitrary chunks.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct FrameCodec {
     buf: BytesMut,
+    /// Largest payload this decoder accepts. The prefix is checked before
+    /// any bytes of the payload are buffered, so a hostile length costs
+    /// nothing beyond the 4-byte header.
+    max: usize,
+}
+
+impl Default for FrameCodec {
+    fn default() -> Self {
+        Self { buf: BytesMut::new(), max: MAX_FRAME_SIZE }
+    }
 }
 
 impl FrameCodec {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A decoder that rejects payloads larger than `max` bytes (never more
+    /// than [`MAX_FRAME_SIZE`]). Links that talk to unauthenticated peers use
+    /// a small value so nobody can make them buffer megabytes before the
+    /// handshake completes.
+    pub fn with_max(max: usize) -> Self {
+        Self { buf: BytesMut::new(), max: max.min(MAX_FRAME_SIZE) }
+    }
+
+    /// Feed freshly received bytes into the internal buffer.
+    ///
+    /// Fails, without buffering, when the frame announced by the bytes
+    /// already held exceeds the limit; the caller should drop the link.
+    pub fn feed_checked(&mut self, chunk: &[u8]) -> Result<(), ProtoError> {
+        self.feed(chunk);
+        if self.buf.len() >= 4 {
+            let len = (&self.buf[..4]).get_u32_le() as usize;
+            if len > self.max {
+                self.buf.clear();
+                return Err(ProtoError::FrameTooLarge { size: len, max: self.max });
+            }
+        }
+        Ok(())
     }
 
     /// Feed freshly received bytes into the internal buffer.
@@ -89,8 +123,8 @@ impl FrameCodec {
             return Ok(None);
         }
         let len = (&self.buf[..4]).get_u32_le() as usize;
-        if len > MAX_FRAME_SIZE {
-            return Err(ProtoError::FrameTooLarge { size: len, max: MAX_FRAME_SIZE });
+        if len > self.max {
+            return Err(ProtoError::FrameTooLarge { size: len, max: self.max });
         }
         if self.buf.len() < 4 + len {
             return Ok(None);
@@ -150,5 +184,21 @@ mod tests {
         codec.feed(&u32::MAX.to_le_bytes());
         codec.feed(&[0u8; 8]);
         assert!(codec.next_payload().is_err());
+    }
+
+    #[test]
+    fn custom_limit_is_enforced_from_the_prefix_before_buffering() {
+        let mut codec = FrameCodec::with_max(16);
+        // Announcing 17 bytes fails as soon as the header is complete.
+        assert!(codec.feed_checked(&17u32.to_le_bytes()).is_err());
+        let mut codec = FrameCodec::with_max(16);
+        codec.feed_checked(&[16, 0]).unwrap();
+        codec.feed_checked(&[0, 0]).unwrap();
+        assert!(codec.next_payload().unwrap().is_none());
+        codec.feed_checked(&[7u8; 16]).unwrap();
+        assert_eq!(codec.next_payload().unwrap(), Some(vec![7u8; 16]));
+        // The limit never exceeds the global cap.
+        let mut codec = FrameCodec::with_max(usize::MAX);
+        assert!(codec.feed_checked(&u32::MAX.to_le_bytes()).is_err());
     }
 }

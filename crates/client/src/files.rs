@@ -122,15 +122,41 @@ pub(crate) async fn run_files(ctx: FilesCtx, mut rx: mpsc::UnboundedReceiver<Fil
                     ctx.emit(ClientEvent::FileFailed { id, reason: "no such offer".into() }).await;
                     continue;
                 };
+                if inc.is_accepted() {
+                    // A second accept would open a second file and orphan
+                    // the first one's bytes.
+                    debug!(id, "duplicate accept ignored");
+                    continue;
+                }
                 if let Err(e) = tokio::fs::create_dir_all(&ctx.downloads).await {
                     incoming.remove(id);
                     ctx.send_control(FileTransferMsg::Cancel { transfer_id: id });
                     ctx.emit(ClientEvent::FileFailed { id, reason: format!("cannot create downloads dir: {e}") }).await;
                     continue;
                 }
-                let path = unique_path(&ctx.downloads, &inc.name);
-                match tokio::fs::File::create(&path).await {
-                    Ok(file) => {
+                // `create_new` closes the window between picking a free
+                // name and opening it: a file (or a symlink) that appears in
+                // between is never truncated.
+                let mut created = None;
+                for _ in 0..8 {
+                    let path = unique_path(&ctx.downloads, &inc.name);
+                    match tokio::fs::OpenOptions::new().write(true).create_new(true).open(&path).await {
+                        Ok(file) => {
+                            created = Some(Ok((file, path)));
+                            break;
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                        Err(e) => {
+                            created = Some(Err(e));
+                            break;
+                        }
+                    }
+                }
+                let created = created.unwrap_or_else(|| {
+                    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "no free file name"))
+                });
+                match created {
+                    Ok((file, path)) => {
                         info!(id, path = %path.display(), size = inc.size, "receiving file");
                         writers.insert(id, Writer { file, path });
                         let _ = incoming.accept(id);

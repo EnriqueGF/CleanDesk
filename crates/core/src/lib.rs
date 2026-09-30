@@ -17,6 +17,7 @@
 pub mod addressbook;
 pub mod config;
 pub mod error;
+pub mod dpapi;
 pub mod history;
 pub mod session;
 pub mod storage;

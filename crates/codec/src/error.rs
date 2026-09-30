@@ -17,6 +17,15 @@ pub enum CodecError {
     )]
     FrameTooLarge { width: u32, height: u32, max: u32 },
 
+    #[error("frame {width}x{height} exceeds the maximum supported area of {max} pixels")]
+    FrameAreaTooLarge { width: u32, height: u32, max: u64 },
+
+    #[error("tile payload carries {count} tiles for a grid of {cols}x{rows}")]
+    TooManyTiles { count: usize, cols: u32, rows: u32 },
+
+    #[error("tile index {index} repeats or is out of order in the payload")]
+    TileOrder { index: u32 },
+
     #[error(
         "stride {stride} bytes is too small for width {width} \
          (need >= {min} bytes/row for BGRA8)"

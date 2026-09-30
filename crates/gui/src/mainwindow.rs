@@ -1702,7 +1702,7 @@ fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     {
         if enabled && !has_password {
             app.unattended_msg = Some((
-                tr("Set a password below first (at least 6 characters).").into(),
+                tr("Set a password below first (at least 10 characters).").into(),
                 true,
             ));
         } else if enabled {
@@ -1727,14 +1727,14 @@ fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
                 .hint_text(if has_password {
                     tr("(set; type a new one to replace it)")
                 } else {
-                    tr("at least 6 characters")
+                    tr("at least 10 characters")
                 })
                 .desired_width(180.0),
         );
         if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             save = true;
         }
-        let valid = app.unattended_pw.trim().len() >= 6;
+        let valid = app.unattended_pw.trim().chars().count() >= cleandesk_core::config::MIN_UNATTENDED_PASSWORD_LEN;
         if ui
             .add_enabled(valid, theme::primary_button(tr("Save password")))
             .clicked()
@@ -1744,9 +1744,9 @@ fn unattended_settings(app: &mut CleanDeskApp, ui: &mut egui::Ui) {
     });
     if save {
         let pw = app.unattended_pw.trim().to_string();
-        if pw.len() < 6 {
+        if pw.chars().count() < cleandesk_core::config::MIN_UNATTENDED_PASSWORD_LEN {
             app.unattended_msg = Some((
-                tr("The unattended-access password must be at least 6 characters long.").into(),
+                tr("The unattended-access password must be at least 10 characters long.").into(),
                 true,
             ));
         } else {

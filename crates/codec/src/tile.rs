@@ -21,6 +21,12 @@ pub const TILE_SIZE: u32 = 64;
 /// a valid frame is.
 pub const MAX_DIMENSION: u32 = 8192;
 
+/// Largest pixel count (width × height) the codec will allocate a canvas
+/// for: an 8K UHD desktop with headroom. Bounding the *area* as well as each
+/// side keeps a hostile 8192×8192 keyframe (256 MiB canvas plus the copy the
+/// decoder hands back) off the table.
+pub const MAX_PIXELS: u64 = 8192 * 4320;
+
 /// Number of tile columns/rows needed to cover a `width`×`height` image.
 ///
 /// Rounds up so a width/height that isn't a multiple of [`TILE_SIZE`] still

@@ -58,6 +58,9 @@ const RELAY_VERIFY_TIMEOUT: Duration = Duration::from_secs(4);
 /// How many `get_peers` candidates are checked per `find_relays` call at most
 /// (each costs a DHT lookup; the directory may hold junk).
 const MAX_RELAY_CANDIDATES: usize = 16;
+/// Most by-ID records collected per lookup; a squatter spraying valid-looking
+/// records must not grow the candidate list without bound.
+const MAX_ID_CANDIDATES: usize = 64;
 
 /// A running DHT node.
 #[derive(Clone)]
@@ -148,9 +151,9 @@ impl DhtNode {
         let value = record.to_json()?;
         let seq = record.ts as i64;
         // `mainline` pins its own ed25519-dalek major; bridge by raw seed bytes.
-        let key_of = |seed: [u8; 32]| mainline::SigningKey::from_bytes(&seed);
-        let by_key_signer = key_of(identity.seed());
-        let by_id_signer = key_of(id_index_key(identity.derive_id()).to_bytes());
+        let key_of = |seed: &[u8; 32]| mainline::SigningKey::from_bytes(seed);
+        let by_key_signer = key_of(&identity.seed());
+        let by_id_signer = key_of(&id_index_key(identity.derive_id()).to_bytes());
         let salt = record_salt();
         let a = self.put_with_seq_recovery(&by_key_signer, &salt, &value, seq, "record by key").await;
         let b = self.put_with_seq_recovery(&by_id_signer, &salt, &value, seq, "record by id").await;
@@ -213,6 +216,9 @@ impl DhtNode {
             let Some(item) = next else { break };
             if let Some(r) = self.accept(item, id) {
                 candidates.push(r);
+                if candidates.len() >= MAX_ID_CANDIDATES {
+                    break;
+                }
             }
         }
         select_by_id(candidates, pinned_key)
@@ -314,7 +320,10 @@ impl DhtNode {
             let Some(batch) = next else { break };
             for p in batch {
                 let addr = SocketAddr::V4(p);
-                if p.port() != 0 && !out.contains(&addr) {
+                // A community relay must be globally routable: anyone can
+                // announce, and a private address here would make every
+                // client send TURN traffic into its own network.
+                if p.port() != 0 && crate::addr::is_global(addr.ip()) && !out.contains(&addr) {
                     out.push(addr);
                 }
             }

@@ -17,3 +17,7 @@ serde_json.workspace = true
 directories.workspace = true
 uuid.workspace = true
 parking_lot.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# At-rest protection of identity.pem / appdata.json (DPAPI).
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }

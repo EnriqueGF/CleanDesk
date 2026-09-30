@@ -73,18 +73,26 @@ brute-force throttle by the viewer's proven key and does not send `Hello` /
 ## Known MVP limitation and plan
 
 The current challenge-response proof (`crypto::proof`) uses
-`HMAC(Argon2id(pw), challenge)`. Since the **server forwards** the challenge
-and the response, a malicious server could attempt an **offline** dictionary
-attack. In the MVP this is accepted because the server is first-party
-infrastructure and the password goes through Argon2id.
+`HMAC(Argon2id(pw), challenge)`. The challenge travels on the control channel
+(after DTLS and the identity proofs), so the server never sees it; the party
+that does is **whoever the viewer ends up talking to**. Against the genuine
+host that is fine. Against an impostor holding a key ground to the same ID
+(first contact, no pinned key) the viewer would hand over HMAC material that
+can be attacked offline. This is why the server now remembers ID ownership,
+why a password must be at least 10 characters, and why the fingerprint is
+shown for out-of-band verification.
 
 **Post-MVP plan:** replace it with a **PAKE** (e.g. SPAKE2 / OPAQUE) so that
 not even a compromised server can derive the password. Tracking: this document.
 
 ## Local storage
 
-- The identity private key is stored as PKCS#8 PEM, protected by OS ACLs (and
-  DPAPI on Windows as additional hardening). Excluded from git.
+- The identity private key is stored as PKCS#8 PEM, protected by OS ACLs and,
+  on Windows, wrapped with **DPAPI in machine scope** (`core::dpapi`, marker
+  `CLEANDESK-DPAPI-1`), so a copied profile or backup does not yield it;
+  `appdata.json` (unattended key material, pinned keys, remembered
+  passwords) is wrapped the same way. Files written before this are read as
+  they are and rewritten protected on the next save. Excluded from git.
 - Tokens and password hashes are stored in the user profile, never in the
   repository (`.gitignore` covers `/data`, `*.identity`, `*.token`).
 - Next to the Argon2id hash, the **derived HMAC key** is stored (Argon2id of the
@@ -215,6 +223,119 @@ Alongside the per-connection budgets, one source IP may hold at most 20
 concurrent sockets (refused before the WebSocket upgrade) and start at most 30
 registrations per minute (`state::IpLimits`); the table of tracked addresses
 is pruned once it exceeds 10 000 entries.
+
+## September 2026 audit, second round
+
+A full read of every crate (protocol, crypto, codec, servers, host, client,
+transport, discovery, platform, GUI) with the fixes that went in. Severity is
+the auditors' assessment before the fix.
+
+### High
+
+* **Host cleanup skipped when the session task is aborted.** "End session"
+  from the host, a `Reject` for the active session or an `IdConflict` abort
+  the tokio task; the code that released held keys, unblocked local input
+  and deleted partial files ran *after* the loop and never executed on those
+  paths. Held keys and the local-input block are now owned by a guard whose
+  destructor does the work (`host::SessionCleanup`), and `FileReceiver`
+  deletes partial files in its own destructor.
+* **`BlockInput(FALSE)` from the wrong thread.** Windows only lets the thread
+  that blocked input unblock it, and an async task migrates between worker
+  threads. Block/unblock now ride the injector's dedicated OS thread
+  (`InputInjector::set_local_input_blocked`), which also unblocks when the
+  injector is dropped.
+* **Signaling server memory.** Outbound queues were unbounded and `Signal`
+  was not rate-limited: a peer that stopped reading made the server buffer
+  everything its partner sent. Queues are bounded (64 messages, `try_send`),
+  `Signal` has a token bucket per connection (64 / 10 s), the writer task is
+  aborted after the flush timeout, and each callee has a budget of
+  `IncomingRequest`s across all callers (10 / min).
+* **Community relay had no allocation caps.** With the public credential one
+  address could open thousands of relay sockets and use the relay as a
+  UDP flood source. The listener socket is wrapped (`guard::ListenerGuard`)
+  to rate-limit unauthenticated STUN (20 / 10 s per source, the requests
+  that make the engine remember a nonce), rate-limit `Allocate` (10 / min
+  per source), refuse `Allocate` over the per-IP (8) and global (1000)
+  caps, and each allocation is also throughput-limited (25 Mbit/s in
+  community mode). Only globally routable relay addresses are announced or
+  used.
+* **Direct-link handshakes were serialised.** One idle TCP connection to port
+  7423 blocked every viewer for 24 s. Handshakes now run in their own tasks
+  (32 in flight, 4 per source address), and the frame length prefix is
+  checked before any payload is buffered.
+* **LocalSystem writing into a user-controlled directory.** The service and
+  its helper logged into the installing user's data folder, so a junction
+  planted there would have made SYSTEM create or append files anywhere. They
+  now log into the running account's own profile; the helper no longer
+  receives a `--log-file`. Registering the service is refused unless the
+  executable lives under Program Files.
+* **Colliding keys for a 9-digit ID.** The server only refused a different
+  key while the owner was online. It now persists ID → key ownership
+  (`state::OwnerRegistry`, `owners.json`) and refuses another key for 30
+  days after the owner was last seen.
+
+### Medium
+
+* Peer-supplied text (device names, disconnect and refusal reasons, mDNS
+  aliases) is bounded and stripped of control and bidi-override characters
+  (`proto::text`) by the server, the host and the LAN browser; file names
+  additionally drop zero-width and direction-override characters.
+* Nostr replay ring: only events that decrypted and verified occupy a slot,
+  so junk from throwaway keys can no longer evict a genuine event and reopen
+  its replay window.
+* Addresses from the DHT, mDNS and UPnP are checked by class
+  (`discovery::addr`): relays must be global, LAN endpoints must be private,
+  nothing loopback or bogus is dialled, the UPnP gateway must be on the LAN
+  and its reported external IP must be global.
+* Signaling client: inbound WebSocket messages capped at 256 KiB, the
+  registration nonce at 64 bytes, the confirmed ID must be our own, and
+  plaintext `ws://` is refused towards non-local servers unless
+  `CLEANDESK_ALLOW_INSECURE_SIGNALING=1`.
+* The GUI approver now narrows unattended requests to the interactive
+  permission set like the headless host (`CLEANDESK_UNATTENDED_FULL=1` for
+  everything).
+* Updater: only an asset named exactly `CleanDesk-<version>-x64.msi` served
+  from GitHub's asset hosts is accepted, and it is stored under a fixed local
+  name, so nothing from the release JSON reaches a path or a command line.
+* `identity.pem` and `appdata.json` are DPAPI-wrapped on Windows (see Local
+  storage).
+* The GUI presence lock is only honoured when the PID belongs to a CleanDesk
+  executable.
+
+### Low
+
+* Codec: frame area capped at 8192×4320 pixels on top of the per-side limit;
+  duplicate or unordered tiles in a payload are rejected.
+* File transfer: at most 16 pending offers per peer; the viewer opens
+  received files with `create_new` (no truncation through a planted file or
+  symlink) and ignores a duplicate accept; the host does not decode chunks
+  when no transfer is active.
+* Input: virtual-key codes above `0xFE` are refused before they reach
+  `SendInput`.
+* Host re-checks the brute-force lock right before verifying an unattended
+  response; a `Trusted` auth kind from the rendezvous is treated as
+  interactive (there is no trusted-device store yet).
+* Duplicate data-channel labels from the peer are ignored.
+* Key material: `Identity::seed`/`to_pem` and the viewer's unattended
+  credential are zeroized on drop; token comparison uses `subtle`; a
+  pre-epoch clock no longer makes every token valid.
+* Unattended password minimum raised to 10 characters.
+* Relay identity file is created with a restricted ACL on Windows; a
+  DHT-learned public address is only announced when globally routable.
+* CI: actions pinned to commits, WiX download verified by SHA-256.
+
+### Not changed (documented)
+
+* The 9-digit ID carries ~30 bits: a colliding key can be ground in minutes.
+  Pinning, the server-side ownership hold and the fingerprint mitigate; a
+  first unattended contact by ID alone in community mode remains exposed
+  until a PAKE replaces the HMAC proof.
+* Release binaries are not code-signed and the updater trusts the release
+  checksums as published; an offline signing key for `SHA256SUMS` and
+  Authenticode signing are the next steps.
+* The signaling server has no built-in TLS or proxy-header handling; put a
+  TLS terminator in front of it and be aware that per-IP limits then apply
+  to the proxy's address.
 
 ## Responsible disclosure
 

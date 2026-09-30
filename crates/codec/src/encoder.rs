@@ -9,7 +9,7 @@ use crate::{
     error::CodecError,
     jpeg,
     payload::{self, Payload, TileEntry},
-    tile::{grid_dims, tile_index, tile_rect, TileRect, MAX_DIMENSION},
+    tile::{grid_dims, tile_index, tile_rect, TileRect, MAX_DIMENSION, MAX_PIXELS},
     RawFrame, VideoEncoder,
 };
 
@@ -106,6 +106,14 @@ impl VideoEncoder for TileEncoder {
                 width: frame.width,
                 height: frame.height,
                 max: MAX_DIMENSION,
+            }
+            .into());
+        }
+        if u64::from(frame.width) * u64::from(frame.height) > MAX_PIXELS {
+            return Err(CodecError::FrameAreaTooLarge {
+                width: frame.width,
+                height: frame.height,
+                max: MAX_PIXELS,
             }
             .into());
         }

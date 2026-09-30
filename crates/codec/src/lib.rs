@@ -43,7 +43,7 @@ mod tile;
 pub use decoder::TileDecoder;
 pub use encoder::TileEncoder;
 pub use error::CodecError;
-pub use tile::{MAX_DIMENSION, TILE_SIZE};
+pub use tile::{MAX_DIMENSION, MAX_PIXELS, TILE_SIZE};
 
 use cleandesk_proto::{message::VideoFrame, quality::QualityParams};
 

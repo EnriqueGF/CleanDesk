@@ -19,6 +19,7 @@ pub mod message;
 pub mod permissions;
 pub mod quality;
 pub mod session;
+pub mod text;
 
 pub use error::ProtoError;
 pub use id::CleanDeskId;

@@ -7,6 +7,7 @@ license.workspace = true
 description = "Viewer role runtime: receive & decode video; capture & send input."
 
 [dependencies]
+zeroize.workspace = true
 cleandesk-proto.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

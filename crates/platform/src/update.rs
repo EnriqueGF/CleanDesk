@@ -53,6 +53,23 @@ impl Release {
     }
 }
 
+/// Name the downloaded installer gets on disk, whatever the release calls it.
+pub const LOCAL_MSI_NAME: &str = "CleanDesk-update.msi";
+
+/// Hosts GitHub serves release assets from.
+const ASSET_HOSTS: &[&str] = &["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"];
+
+/// Is `url` an HTTPS link to one of GitHub's release-asset hosts?
+pub fn is_release_asset_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else { return false };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.contains('@') {
+        return false;
+    }
+    let host = authority.rsplit_once(':').map(|(h, _)| h).unwrap_or(authority);
+    ASSET_HOSTS.iter().any(|h| host.eq_ignore_ascii_case(h))
+}
+
 /// Parse "v0.1.4" / "0.1.4" / "0.1.4-beta" (pre-release suffix ignored) into
 /// a comparable triple.
 pub fn parse_version(text: &str) -> Option<(u16, u16, u16)> {
@@ -115,12 +132,17 @@ pub fn release_from_json(json: &serde_json::Value, current: (u16, u16, u16)) -> 
                 .collect()
         })
         .unwrap_or_default();
-    let msi = assets
-        .iter()
-        .find(|a| a.name.to_ascii_lowercase().ends_with("-x64.msi"))
-        .cloned();
+    // The asset name and URL come from the release JSON; only the exact
+    // installer name for this version, served by GitHub, is acceptable
+    // (the name also ends up on a command line).
+    let (a, b, c) = version;
+    let expected_msi = format!("CleanDesk-{a}.{b}.{c}-x64.msi");
+    let msi = assets.iter().find(|a| a.name == expected_msi).cloned();
     let sums = assets.iter().find(|a| a.name == SUMS_ASSET).cloned();
     match (msi, sums) {
+        (Some(msi), Some(sums)) if !is_release_asset_url(&msi.url) || !is_release_asset_url(&sums.url) => {
+            Err(PlatformError::Other(format!("release {tag} serves assets from an unexpected host")))
+        }
         (Some(msi), Some(sums)) => Ok(Some(Release {
             version,
             tag,
@@ -195,8 +217,9 @@ pub fn download(release: &Release, dir: &Path, mut progress: impl FnMut(u64, u64
             let _ = std::fs::remove_file(e.path());
         }
     }
-    let final_path = dir.join(&release.msi.name);
-    let part_path = dir.join(format!("{}.part", release.msi.name));
+    // Fixed local names: nothing from the release JSON becomes a path.
+    let final_path = dir.join(LOCAL_MSI_NAME);
+    let part_path = dir.join(format!("{LOCAL_MSI_NAME}.part"));
 
     let resp = agent.get(&release.msi.url).call().map_err(http_err)?;
     let total = resp
@@ -329,13 +352,13 @@ mod tests {
     fn fixture(tag: &str, with_sums: bool) -> serde_json::Value {
         let mut assets = vec![serde_json::json!({
             "name": format!("CleanDesk-{}-x64.msi", tag.trim_start_matches('v')),
-            "browser_download_url": "https://example.invalid/msi",
+            "browser_download_url": "https://github.com/EnriqueGF/CleanDesk/releases/download/v0.2.0/CleanDesk-0.2.0-x64.msi",
             "size": 12_000_000
         })];
         if with_sums {
             assets.push(serde_json::json!({
                 "name": "SHA256SUMS",
-                "browser_download_url": "https://example.invalid/sums",
+                "browser_download_url": "https://github.com/EnriqueGF/CleanDesk/releases/download/v0.2.0/SHA256SUMS",
                 "size": 200
             }));
         }
@@ -356,6 +379,20 @@ mod tests {
         assert_eq!(r.version_string(), "0.2.0");
         assert_eq!(r.msi.name, "CleanDesk-0.2.0-x64.msi");
         assert_eq!(r.sums.name, SUMS_ASSET);
+    }
+
+    #[test]
+    fn assets_with_the_wrong_name_or_host_are_refused() {
+        let mut json = fixture("v0.2.0", true);
+        json["assets"][0]["name"] = serde_json::Value::String("CleanDesk-0.2.0-x64.msi\" & calc & \"".into());
+        assert!(release_from_json(&json, (0, 1, 4)).unwrap().is_none(), "no exact installer name: nothing offered");
+        let mut json = fixture("v0.2.0", true);
+        json["assets"][0]["browser_download_url"] = serde_json::Value::String("https://evil.example/CleanDesk-0.2.0-x64.msi".into());
+        assert!(release_from_json(&json, (0, 1, 4)).is_err());
+        assert!(is_release_asset_url("https://objects.githubusercontent.com/x/y"));
+        assert!(!is_release_asset_url("http://github.com/x"));
+        assert!(!is_release_asset_url("https://github.com.evil.example/x"));
+        assert!(!is_release_asset_url("https://user@github.com/x"));
     }
 
     #[test]

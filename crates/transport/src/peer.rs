@@ -298,7 +298,17 @@ impl PeerConnectionEventHandler for Handler {
         };
         match Channel::from_label(&label) {
             Some(ch) => {
-                lock(&self.channels).insert(ch, dc.clone());
+                // One channel per label: a second one would let the peer
+                // interleave two streams under one name and swap the send
+                // target mid-session.
+                {
+                    let mut channels = lock(&self.channels);
+                    if channels.contains_key(&ch) {
+                        warn!(%label, "ignoring duplicate data channel");
+                        return;
+                    }
+                    channels.insert(ch, dc.clone());
+                }
                 spawn_reader(ch, dc, self.incoming_tx.clone(), self.open_gate.clone());
             }
             None => warn!(%label, "ignoring data channel with unknown label"),

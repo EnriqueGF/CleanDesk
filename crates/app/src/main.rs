@@ -192,16 +192,23 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Service-side modes have no console: log into the data directory.
+    // Service-side modes have no console: log into a file. The GUI logs
+    // next to its data; the service, the elevated installer and the helper
+    // log into the *running account's* own profile, never into a directory
+    // handed over on the command line (a SYSTEM process appending to a
+    // user-controlled path is a privilege escalation).
     let data_dir_for_logs = match &opts.data_dir {
         Some(d) => Some(d.clone()),
         None => cleandesk_core::storage::Storage::locate().ok().map(|s| s.base_dir().to_path_buf()),
     };
+    let own_profile_dir = cleandesk_core::storage::Storage::locate().ok().map(|s| s.base_dir().to_path_buf());
     let default_log = |name: &str| data_dir_for_logs.as_ref().map(|d| d.join(name));
-    let log_file = opts.log_file.clone().or_else(|| match opts.mode {
-        Mode::Service => default_log("service.log"),
-        Mode::InstallService | Mode::UninstallService => default_log("service-install.log"),
-        Mode::Host if std::env::var_os("CLEANDESK_HELPER").is_some() => default_log("host.log"),
+    let own_log = |name: &str| own_profile_dir.as_ref().map(|d| d.join(name));
+    let is_helper = std::env::var_os("CLEANDESK_HELPER").is_some();
+    let log_file = opts.log_file.clone().filter(|_| !is_helper).or_else(|| match opts.mode {
+        Mode::Service => own_log("service.log"),
+        Mode::InstallService | Mode::UninstallService => own_log("service-install.log"),
+        Mode::Host if is_helper => own_log("host.log"),
         // The GUI has no console: keep a log next to the data for support.
         Mode::Gui | Mode::Connect(_) => default_log("gui.log"),
         _ => None,

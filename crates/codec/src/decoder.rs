@@ -15,7 +15,7 @@ use tracing::{debug, trace};
 use crate::{
     error::CodecError,
     jpeg, payload,
-    tile::{grid_dims, tile_coords, tile_rect, MAX_DIMENSION},
+    tile::{grid_dims, tile_coords, tile_rect, MAX_DIMENSION, MAX_PIXELS},
     DecodedImage, VideoDecoder,
 };
 
@@ -85,6 +85,9 @@ fn check_dimensions(width: u32, height: u32) -> Result<(), CodecError> {
     }
     if width > MAX_DIMENSION || height > MAX_DIMENSION {
         return Err(CodecError::FrameTooLarge { width, height, max: MAX_DIMENSION });
+    }
+    if u64::from(width) * u64::from(height) > MAX_PIXELS {
+        return Err(CodecError::FrameAreaTooLarge { width, height, max: MAX_PIXELS });
     }
     Ok(())
 }
@@ -177,6 +180,18 @@ impl TileDecoder {
         let (expected_cols, expected_rows) = grid_dims(frame.width, frame.height);
         if parsed.cols != expected_cols || parsed.rows != expected_rows {
             return Err(CodecError::GridMismatch { width: frame.width, height: frame.height });
+        }
+        // The encoder emits every tile at most once, in row-major order. A
+        // payload that repeats a tile is not a valid frame, and honouring it
+        // would let a peer make us decode the same JPEG thousands of times.
+        let max_tiles = parsed.cols as usize * parsed.rows as usize;
+        if parsed.tiles.len() > max_tiles {
+            return Err(CodecError::TooManyTiles { count: parsed.tiles.len(), cols: parsed.cols, rows: parsed.rows });
+        }
+        for pair in parsed.tiles.windows(2) {
+            if pair[1].index <= pair[0].index {
+                return Err(CodecError::TileOrder { index: pair[1].index });
+            }
         }
 
         // A delta can only patch a canvas that already matches this frame's
@@ -279,6 +294,32 @@ mod tests {
 
     fn decode(width: u32, height: u32, p: &Payload) -> Result<(u32, u32), CodecError> {
         TileDecoder::new().decode_into(&frame_from_payload(width, height, true, p), &mut Vec::new())
+    }
+
+    #[test]
+    fn duplicate_or_unordered_tiles_are_rejected() {
+        let jpeg = solid_jpeg(0, TILE_SIZE, TILE_SIZE);
+        let dup = Payload::new(2, 1, vec![
+            TileEntry { index: 0, jpeg: jpeg.clone() },
+            TileEntry { index: 0, jpeg: jpeg.clone() },
+        ]);
+        assert!(matches!(decode(128, 64, &dup), Err(CodecError::TileOrder { index: 0 })));
+        let unordered = Payload::new(2, 1, vec![
+            TileEntry { index: 1, jpeg: jpeg.clone() },
+            TileEntry { index: 0, jpeg: jpeg.clone() },
+        ]);
+        assert!(matches!(decode(128, 64, &unordered), Err(CodecError::TileOrder { index: 0 })));
+        let too_many = Payload::new(1, 1, vec![
+            TileEntry { index: 0, jpeg: jpeg.clone() },
+            TileEntry { index: 0, jpeg: jpeg.clone() },
+        ]);
+        assert!(matches!(decode(64, 64, &too_many), Err(CodecError::TooManyTiles { count: 2, .. })));
+        // The well-formed ordering still decodes.
+        let ok = Payload::new(2, 1, vec![
+            TileEntry { index: 0, jpeg: jpeg.clone() },
+            TileEntry { index: 1, jpeg },
+        ]);
+        assert!(decode(128, 64, &ok).is_ok());
     }
 
     #[test]

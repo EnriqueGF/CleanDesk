@@ -324,11 +324,21 @@ async fn handle_signal(
     active: &mut Option<ActiveSession>,
 ) {
     match msg {
-        SignalMessage::IncomingRequest { session, from, requested, quality, auth } => {
+        SignalMessage::IncomingRequest { session, mut from, requested, quality, auth } => {
             if active.as_ref().is_some_and(|a| a.is_alive()) {
                 let _ = signal.send(reject(session, RejectReason::Busy)).await;
                 return;
             }
+            // Everything in `from` but the id is the caller's own claim and
+            // goes straight into a dialog and the history.
+            cleandesk_proto::text::sanitize_device_info(&mut from);
+            // `auth` is only what the rendezvous relayed. There is no trusted
+            // device store yet, so a "trusted" request gets exactly the
+            // treatment of an interactive one: a human decides.
+            let auth = match auth {
+                AuthKind::Trusted => AuthKind::Interactive,
+                other => other,
+            };
             info!(%session, from = %from.id, ?requested, ?auth, "incoming request");
 
             if matches!(auth, AuthKind::UnattendedPassword) {
@@ -575,8 +585,11 @@ async fn run_session_inner(
         send_ctrl(&peer, &SessionMessage::AuthChallenge { challenge_b64: challenge.to_b64() }).await;
     }
 
-    let mut injector = cleandesk_input::new_injector();
-    let mut pressed = PressedState::default();
+    // Held keys, the local-input block and the injector live in one guard:
+    // the session task can be aborted at any `.await` (local "End session",
+    // a rejection from the rendezvous), and only a destructor is guaranteed
+    // to run on that path.
+    let mut guard = SessionCleanup::new(cleandesk_input::new_injector(), media.clone());
     let granted = ctx.granted;
 
     // Clipboard sync runs only once the viewer is authenticated *and* the
@@ -589,9 +602,6 @@ async fn run_session_inner(
     }
     let downloads = ctx.config.downloads_dir.clone().unwrap_or_else(default_downloads_dir);
     let mut files = files::FileReceiver::new(downloads, ctx.config.max_file_size);
-    // Whether we currently hold the host's local input blocked; must be
-    // undone on every exit path.
-    let mut local_input_blocked = false;
 
     let mut idle_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     let reason = loop {
@@ -619,15 +629,15 @@ async fn run_session_inner(
                 }
                 let Ok(ev) = frame::decode_payload::<InputEvent>(&bytes) else { continue };
                 if input_allowed(ev, granted) {
-                    pressed.observe(ev);
+                    guard.pressed.observe(ev);
                     let mon = media.monitor();
-                    if let Err(e) = injector.inject(ev, &mon) {
+                    if let Err(e) = guard.injector.inject(ev, &mon) {
                         debug!(error = %e, "input injection failed");
                     }
                 }
             }
             Channel::Files => {
-                if !authed || !granted.contains(Permissions::FILE_TRANSFER) {
+                if !authed || !granted.contains(Permissions::FILE_TRANSFER) || !files.has_active() {
                     continue;
                 }
                 let Ok(chunk) = frame::decode_payload::<FileChunk>(&bytes) else { continue };
@@ -639,6 +649,15 @@ async fn run_session_inner(
                 let Ok(msg) = frame::decode_payload::<SessionMessage>(&bytes) else { continue };
                 match msg {
                     SessionMessage::AuthResponse { response_b64 } if !authed => {
+                        // Other callers may have tripped the breaker while
+                        // this one was thinking; a locked host verifies nothing.
+                        let locked = { ctx.throttle.lock().locked_for(&viewer_key, Instant::now()) };
+                        if let Some(wait) = locked {
+                            warn!(%viewer_key, ?wait, "unattended auth locked out before the response was checked");
+                            send_ctrl(&peer, &SessionMessage::AuthResult { ok: false }).await;
+                            send_ctrl(&peer, &SessionMessage::Disconnect { reason: "auth locked out".into() }).await;
+                            break "authentication locked out".to_string();
+                        }
                         let ok = verify_unattended(&response_b64, &challenge, ctx.config.unattended_key);
                         send_ctrl(&peer, &SessionMessage::AuthResult { ok }).await;
                         if ok {
@@ -674,6 +693,10 @@ async fn run_session_inner(
                     SessionMessage::RequestKeyframe => media.request_keyframe(),
                     SessionMessage::Pong { nonce } => media.observe_pong(nonce),
                     SessionMessage::Clipboard(ClipboardData::Text { content }) => {
+                        if content.len() > clipboard::MAX_TEXT_LEN {
+                            debug!(len = content.len(), "clipboard update ignored (too large)");
+                            continue;
+                        }
                         // `clipboard` only exists when CLIPBOARD was granted,
                         // so this doubles as the permission check.
                         match &clipboard {
@@ -682,13 +705,17 @@ async fn run_session_inner(
                         }
                     }
                     SessionMessage::PasteClipboard { content } => {
+                        if content.len() > clipboard::MAX_TEXT_LEN {
+                            debug!(len = content.len(), "paste ignored (too large)");
+                            continue;
+                        }
                         if granted.contains(Permissions::CLIPBOARD | Permissions::CONTROL_KEYBOARD) {
                             if let Some(sync) = &clipboard {
                                 if sync.apply_remote_confirmed(content).await {
                                     let mon = media.monitor();
-                                    for ev in clipboard_paste_keys(&pressed) {
-                                        pressed.observe(ev);
-                                        if let Err(e) = injector.inject(ev, &mon) {
+                                    for ev in clipboard_paste_keys(&guard.pressed) {
+                                        guard.pressed.observe(ev);
+                                        if let Err(e) = guard.injector.inject(ev, &mon) {
                                             debug!(error = %e, "clipboard paste injection failed");
                                         }
                                     }
@@ -716,13 +743,14 @@ async fn run_session_inner(
                             continue;
                         }
                         info!(?action, "remote action");
-                        match perform_remote_action(action) {
-                            Ok(()) => {
-                                if let RemoteAction::LockLocalInput { locked } = action {
-                                    local_input_blocked = locked;
-                                }
-                            }
-                            Err(e) => warn!(?action, error = %e, "remote action failed"),
+                        let res = match action {
+                            // Rides the injector thread: only the thread that
+                            // blocked input can unblock it.
+                            RemoteAction::LockLocalInput { locked } => guard.injector.set_local_input_blocked(locked),
+                            other => perform_remote_action(other),
+                        };
+                        if let Err(e) = res {
+                            warn!(?action, error = %e, "remote action failed");
                         }
                     }
                     SessionMessage::Chat { .. } => {
@@ -730,6 +758,7 @@ async fn run_session_inner(
                         debug!("chat message not yet surfaced");
                     }
                     SessionMessage::Disconnect { reason } => {
+                        let reason = cleandesk_proto::text::sanitize_text(&reason);
                         info!(%reason, "viewer disconnected");
                         break format!("the viewer ended the session ({reason})");
                     }
@@ -746,17 +775,44 @@ async fn run_session_inner(
 
     // Whatever happened, never leave a key or button held down on the host,
     // never leave its local input blocked, and never leave half a file behind.
-    for ev in pressed.release_all() {
-        let _ = injector.inject(ev, &media.monitor());
-    }
-    if local_input_blocked {
-        if let Err(e) = cleandesk_input::block_local_input(false) {
-            warn!(error = %e, "could not unblock local input at session end");
-        }
-    }
+    // (`guard` and `files` repeat this from their destructors if the task
+    // is aborted before reaching here.)
+    guard.release();
     files.abort_all().await;
     drop(clipboard);
     reason
+}
+
+/// Everything a session must undo on the host, however it ends.
+struct SessionCleanup {
+    injector: Box<dyn cleandesk_input::InputInjector>,
+    pressed: PressedState,
+    media: MediaControl,
+}
+
+impl SessionCleanup {
+    fn new(injector: Box<dyn cleandesk_input::InputInjector>, media: MediaControl) -> Self {
+        Self { injector, pressed: PressedState::default(), media }
+    }
+
+    /// Release every held key/button and the local-input block. Idempotent.
+    fn release(&mut self) {
+        let monitor = self.media.monitor();
+        for ev in self.pressed.release_all() {
+            if let Err(e) = self.injector.inject(ev, &monitor) {
+                debug!(error = %e, "could not release held input at session end");
+            }
+        }
+        if let Err(e) = self.injector.set_local_input_blocked(false) {
+            warn!(error = %e, "could not unblock local input at session end");
+        }
+    }
+}
+
+impl Drop for SessionCleanup {
+    fn drop(&mut self) {
+        self.release();
+    }
 }
 
 /// The transfer a file control message refers to.
@@ -858,7 +914,8 @@ fn perform_remote_action(action: RemoteAction) -> Result<()> {
     match action {
         RemoteAction::RestartMachine => restart_machine(),
         RemoteAction::LockWorkstation => cleandesk_input::lock_workstation(),
-        RemoteAction::LockLocalInput { locked } => cleandesk_input::block_local_input(locked),
+        // Handled by the session through its injector (thread affinity).
+        RemoteAction::LockLocalInput { .. } => Ok(()),
         RemoteAction::SecureAttention => cleandesk_input::send_secure_attention(),
     }
 }
@@ -940,7 +997,11 @@ pub fn input_allowed(ev: InputEvent, granted: Permissions) -> bool {
         InputEvent::MouseMove { .. }
         | InputEvent::MouseButton { .. }
         | InputEvent::MouseScroll { .. } => granted.contains(Permissions::CONTROL_MOUSE),
-        InputEvent::Key { .. } => granted.contains(Permissions::CONTROL_KEYBOARD),
+        // Codes above the virtual-key range are not keys; `SendInput` would
+        // truncate them into one and the held-key tracker would not match.
+        InputEvent::Key { code, .. } => {
+            code <= cleandesk_input::MAX_VIRTUAL_KEY && granted.contains(Permissions::CONTROL_KEYBOARD)
+        }
     }
 }
 

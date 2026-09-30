@@ -172,11 +172,13 @@ fn peer_from_resolved(info: &mdns_sd::ResolvedService) -> Option<LanPeer> {
     let id = CleanDeskId::parse(info.get_property_val_str("id")?).ok()?;
     let public_key = info.get_property_val_str("pk")?.to_string();
     let port = info.get_port();
+    // An mDNS reply is unsigned: only addresses that belong on a LAN are
+    // dialled (never loopback, never something on the Internet).
     let mut endpoints: Vec<SocketAddr> = info
         .get_addresses()
         .iter()
         .map(|a| SocketAddr::new(a.to_ip_addr(), port))
-        .filter(|a| !a.ip().is_loopback())
+        .filter(|a| crate::addr::is_lan(a.ip()))
         .collect();
     // Prefer IPv4 (simpler routing on typical home LANs), then IPv6.
     endpoints.sort_by_key(|a| a.is_ipv6());
@@ -187,7 +189,10 @@ fn peer_from_resolved(info: &mdns_sd::ResolvedService) -> Option<LanPeer> {
         id,
         public_key,
         endpoints,
-        alias: info.get_property_val_str("alias").map(str::to_string),
+        alias: info
+            .get_property_val_str("alias")
+            .map(|a| cleandesk_proto::text::sanitize(a, 32))
+            .filter(|a| !a.is_empty()),
         mac: info
             .get_property_val_str("mac")
             .and_then(|m| crate::wol::parse_mac(m).ok())

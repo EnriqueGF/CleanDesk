@@ -72,8 +72,13 @@ async fn main() -> Result<()> {
                 loop {
                     // Prefer the configured public IP; fall back to what the
                     // DHT peers see us as.
+                    // The DHT-learned address is peer-supplied: only a
+                    // globally routable one is worth signing and publishing.
                     let ip: Option<IpAddr> = if public_ip.is_loopback() || public_ip.is_unspecified() {
-                        node.public_address().await.map(|a| IpAddr::V4(*a.ip()))
+                        node.public_address()
+                            .await
+                            .map(|a| IpAddr::V4(*a.ip()))
+                            .filter(|ip| cleandesk_relay_server::guard::is_peer_allowed(*ip, false))
                     } else {
                         Some(public_ip)
                     };
@@ -132,9 +137,30 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     f.write_all(bytes)
 }
 
+/// Windows: create the file, then cut inheritance and leave only the current
+/// user (plus SYSTEM and Administrators) on its ACL via `icacls`, so the key
+/// is not readable by every account that can read the working directory.
 #[cfg(not(unix))]
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
-    f.write_all(bytes)
+    f.write_all(bytes)?;
+    drop(f);
+    let user = std::env::var("USERNAME").unwrap_or_default();
+    let mut cmd = std::process::Command::new("icacls");
+    cmd.arg(path).arg("/inheritance:r").arg("/grant:r").arg("*S-1-5-18:F").arg("/grant:r").arg("*S-1-5-32-544:F");
+    if !user.is_empty() {
+        cmd.arg("/grant:r").arg(format!("{user}:F"));
+    }
+    match cmd.output() {
+        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) => {
+            tracing::warn!(status = %out.status, "could not restrict the identity file ACL; it inherits the directory's");
+            Ok(())
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "icacls unavailable; identity file inherits the directory ACL");
+            Ok(())
+        }
+    }
 }

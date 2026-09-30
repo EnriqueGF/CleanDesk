@@ -9,7 +9,7 @@
 
 use cleandesk_codec::{
     CodecError, DecodedImage, RawFrame, TileDecoder, TileEncoder, VideoDecoder, VideoEncoder, MAX_DIMENSION,
-    TILE_SIZE,
+    MAX_PIXELS, TILE_SIZE,
 };
 use cleandesk_proto::{message::VideoFrame, quality::QualityParams};
 
@@ -86,9 +86,28 @@ fn dimensions_just_over_the_limit_are_rejected_but_the_limit_itself_is_allowed_t
     // Exactly MAX_DIMENSION passes the size gate; it then fails on the grid
     // (the payload is for 64x64), proving the gate is not off by one.
     frame.width = MAX_DIMENSION;
-    frame.height = MAX_DIMENSION;
+    frame.height = 64;
     let err = TileDecoder::new().decode(&frame).unwrap_err();
     assert!(matches!(codec_error(&err), Some(CodecError::GridMismatch { .. })), "{err:?}");
+}
+
+#[test]
+fn frames_over_the_pixel_budget_are_rejected_even_when_each_side_is_legal() {
+    // 8192x8192 respects MAX_DIMENSION per side but would cost a 256 MiB
+    // canvas plus a 256 MiB copy per keyframe; the area cap stops it.
+    let mut frame = valid_keyframe(64, 64);
+    frame.width = MAX_DIMENSION;
+    frame.height = MAX_DIMENSION;
+    let err = TileDecoder::new().decode(&frame).unwrap_err();
+    assert!(matches!(codec_error(&err), Some(CodecError::FrameAreaTooLarge { .. })), "{err:?}");
+    assert!(u64::from(MAX_DIMENSION) * u64::from(MAX_DIMENSION) > MAX_PIXELS);
+    // The encoder refuses to produce such a frame as well.
+    let (w, h) = (MAX_DIMENSION, MAX_DIMENSION);
+    let bgra = vec![0u8; 64];
+    let err = TileEncoder::new(params())
+        .encode(RawFrame { width: w, height: h, stride: w as usize * 4, bgra: &bgra, timestamp_us: 0 })
+        .unwrap_err();
+    assert!(matches!(codec_error(&err), Some(CodecError::FrameAreaTooLarge { .. })), "{err:?}");
 }
 
 #[test]
@@ -155,10 +174,11 @@ fn decompression_bomb_with_maximal_valid_dimensions_hits_the_hard_cap() {
     // still rejected rather than fully materialized.
     let zeros = vec![0u8; 80 * 1024 * 1024];
     let bomb = zstd::encode_all(&zeros[..], 3).unwrap();
+    // 8192x4320 is the largest area the codec accepts (raw RGBA ≈ 135 MiB).
     let frame = VideoFrame {
         sequence: 0,
         width: MAX_DIMENSION,
-        height: MAX_DIMENSION,
+        height: (MAX_PIXELS / u64::from(MAX_DIMENSION)) as u32,
         keyframe: true,
         timestamp_us: 0,
         data: bomb,

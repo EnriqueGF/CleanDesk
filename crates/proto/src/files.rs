@@ -57,6 +57,10 @@ pub const MAX_FILE_NAME_LEN: usize = 200;
 /// Name used when sanitisation leaves nothing usable.
 pub const FALLBACK_FILE_NAME: &str = "file";
 
+/// Most offers (accepted or not) a peer may keep open at once. Offers that
+/// are never accepted would otherwise accumulate without bound.
+pub const MAX_PENDING_OFFERS: usize = 16;
+
 /// One slice of a file, carried as a single `files` channel message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileChunk {
@@ -83,6 +87,8 @@ pub enum FileError {
     ChunkTooLarge { len: usize, max: usize },
     #[error("received {received} bytes but {expected} were announced")]
     SizeMismatch { received: u64, expected: u64 },
+    #[error("too many transfers offered at once (limit {0})")]
+    TooManyOffers(usize),
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +137,7 @@ pub fn sanitize_file_name(name: &str) -> String {
     let last = name.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or("");
     let mut out: String = last
         .chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !c.is_control() && !crate::text::is_invisible_format_char(*c))
         .map(|c| match c {
             '<' | '>' | ':' | '"' | '|' | '?' | '*' => '_',
             c => c,
@@ -318,6 +324,9 @@ impl IncomingTable {
         if self.transfers.contains_key(&transfer_id) {
             return Err(FileError::DuplicateId(transfer_id));
         }
+        if self.transfers.len() >= MAX_PENDING_OFFERS {
+            return Err(FileError::TooManyOffers(MAX_PENDING_OFFERS));
+        }
         let entry = self.transfers.entry(transfer_id).or_insert(Incoming {
             transfer_id,
             name: sanitize_file_name(name),
@@ -433,6 +442,9 @@ mod tests {
         assert_eq!(sanitize_file_name("CON"), "_CON");
         assert_eq!(sanitize_file_name("nul.txt"), "_nul.txt");
         assert_eq!(sanitize_file_name("informe ✓ ñ.pdf"), "informe ✓ ñ.pdf");
+        // Direction overrides and zero-width characters are stripped.
+        assert_eq!(sanitize_file_name("report\u{202E}txt.exe"), "reporttxt.exe");
+        assert_eq!(sanitize_file_name("a\u{200B}b\u{FEFF}c.txt"), "abc.txt");
         let long = "x".repeat(500) + ".bin";
         let s = sanitize_file_name(&long);
         assert!(s.len() <= MAX_FILE_NAME_LEN);
@@ -451,6 +463,18 @@ mod tests {
         assert_eq!(dedupe_file_name("README", |s| s == "README"), "README (2)");
         assert_eq!(dedupe_file_name(".bashrc", |s| s == ".bashrc"), ".bashrc (2)");
         assert_eq!(dedupe_file_name("a.tar.gz", |s| s == "a.tar.gz"), "a.tar (2).gz");
+    }
+
+    #[test]
+    fn pending_offers_are_capped() {
+        let mut table = IncomingTable::new();
+        for id in 0..MAX_PENDING_OFFERS as u64 {
+            table.on_offer(id, "f", 1, false).unwrap();
+        }
+        assert_eq!(
+            table.on_offer(MAX_PENDING_OFFERS as u64, "f", 1, false).err(),
+            Some(FileError::TooManyOffers(MAX_PENDING_OFFERS))
+        );
     }
 
     #[test]

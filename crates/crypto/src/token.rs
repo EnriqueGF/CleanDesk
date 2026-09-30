@@ -43,19 +43,16 @@ pub fn verify_any(stored: &[SessionToken], presented: &str) -> bool {
 }
 
 fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    // A clock before the epoch is broken; treat "now" as the far future so
+    // every token reads as expired rather than as valid forever.
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(u64::MAX)
 }
 
-/// Constant-time byte-slice equality.
+/// Constant-time byte-slice equality (length mismatch short-circuits: the
+/// length of a bearer token is not secret).
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
+    use subtle::ConstantTimeEq;
+    a.len() == b.len() && bool::from(a.ct_eq(b))
 }
 
 impl From<base64::DecodeError> for CryptoError {

@@ -52,10 +52,19 @@ impl PortMapping {
         let gateway = search_gateway(opts)
             .await
             .map_err(|e| DiscoveryError::Other(format!("no UPnP gateway: {e}")))?;
+        // The SSDP reply names the control URL; a hostile device on the LAN
+        // can point it anywhere. Only talk to a gateway that lives on the
+        // LAN, and only believe an external address that is actually global.
+        if !crate::addr::is_lan(gateway.addr.ip()) {
+            return Err(DiscoveryError::Other(format!("UPnP gateway {} is not on the local network", gateway.addr)));
+        }
         let external_ip = gateway
             .get_external_ip()
             .await
             .map_err(|e| DiscoveryError::Other(format!("UPnP external ip: {e}")))?;
+        if !crate::addr::is_global(external_ip) {
+            return Err(DiscoveryError::Other(format!("UPnP external ip {external_ip} is not globally routable")));
+        }
         let local_ip = local_ip_towards(gateway.addr.ip())?;
         let mut me = Self { gateway, local_ip, external_ip, mapped: Vec::new() };
         for req in requests {
@@ -85,7 +94,7 @@ impl PortMapping {
             }
         }
         match self.gateway.get_external_ip().await {
-            Ok(ip) if ip != self.external_ip => {
+            Ok(ip) if ip != self.external_ip && crate::addr::is_global(ip) => {
                 info!(old = %self.external_ip, new = %ip, "external IP changed");
                 self.external_ip = ip;
             }

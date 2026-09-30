@@ -90,8 +90,7 @@ impl SeenSet {
         true
     }
 
-    #[cfg(test)]
-    fn contains(&self, id: &EventId) -> bool {
+    pub(crate) fn contains(&self, id: &EventId) -> bool {
         self.set.contains(id)
     }
 
@@ -336,8 +335,8 @@ fn decode_relay_message(
         return None;
     }
     {
-        let mut s = seen.lock().unwrap_or_else(|p| p.into_inner());
-        if !s.insert(event.id) {
+        let s = seen.lock().unwrap_or_else(|p| p.into_inner());
+        if s.contains(&event.id) {
             return None;
         }
     }
@@ -346,6 +345,15 @@ fn decode_relay_message(
     // Bind the Ed25519 identity to the Nostr key that signed the event.
     verify_b64_sig(&env.pk, &nostr_binding_message(&event.pubkey.to_hex()), &env.bind).ok()?;
     let from_id = derive_id_from_public_key_b64(&env.pk).ok()?;
+    // Only an event that decrypted and verified occupies a replay slot:
+    // junk from throwaway keys must not be able to evict a genuine event
+    // and reopen its replay window.
+    {
+        let mut s = seen.lock().unwrap_or_else(|p| p.into_inner());
+        if !s.insert(event.id) {
+            return None;
+        }
+    }
     Some(Inbound { from_public_key: env.pk, from_id, from_nostr: event.pubkey, msg: env.msg })
 }
 

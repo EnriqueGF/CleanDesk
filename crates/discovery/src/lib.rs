@@ -111,3 +111,100 @@ pub const COMMUNITY_TURN_PASS: &str = "cleandesk-community";
 /// mode (both forwarded through UPnP when possible).
 pub const DEFAULT_DIRECT_PORT: u16 = 7423;
 pub const DEFAULT_ICE_UDP_PORT: u16 = 7424;
+
+/// Address-class checks shared by every path that turns a peer-supplied
+/// address into a connection attempt. A DHT record, a relay announcement or
+/// an mDNS reply names *some* address; nothing about it proves the address
+/// is what it claims to be, so the kind of address must fit the source.
+pub mod addr {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    /// Loopback, link-local, RFC 1918 / ULA, carrier-grade NAT.
+    pub fn is_private(ip: IpAddr) -> bool {
+        match ip {
+            IpAddr::V4(v4) => v4_private(v4),
+            IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+                Some(v4) => v4_private(v4),
+                None => v6_private(v6),
+            },
+        }
+    }
+
+    fn v4_private(v4: Ipv4Addr) -> bool {
+        let o = v4.octets();
+        v4.is_loopback() || v4.is_link_local() || v4.is_private() || (o[0] == 100 && (64..=127).contains(&o[1]))
+    }
+
+    fn v6_private(v6: Ipv6Addr) -> bool {
+        let s = v6.segments();
+        v6.is_loopback() || (s[0] & 0xffc0) == 0xfe80 || (s[0] & 0xfe00) == 0xfc00
+    }
+
+    /// Never worth a packet: unspecified, multicast, broadcast, the zero
+    /// network, documentation and benchmarking ranges.
+    pub fn is_bogus(ip: IpAddr) -> bool {
+        match ip {
+            IpAddr::V4(v4) => {
+                let o = v4.octets();
+                v4.is_unspecified()
+                    || v4.is_broadcast()
+                    || v4.is_multicast()
+                    || v4.is_documentation()
+                    || o[0] == 0
+                    || (o[0] == 198 && (o[1] == 18 || o[1] == 19))
+                    || o[0] >= 240
+            }
+            IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+                Some(v4) => is_bogus(IpAddr::V4(v4)),
+                None => v6.is_unspecified() || v6.is_multicast() || (v6.segments()[0] == 0x2001 && v6.segments()[1] == 0x0db8),
+            },
+        }
+    }
+
+    /// Reachable across the Internet: neither bogus nor private.
+    pub fn is_global(ip: IpAddr) -> bool {
+        !is_bogus(ip) && !is_private(ip)
+    }
+
+    /// Acceptable as a *LAN* endpoint (learned from mDNS): a private or
+    /// link-local unicast address, never loopback.
+    pub fn is_lan(ip: IpAddr) -> bool {
+        !is_bogus(ip) && is_private(ip) && !ip.is_loopback()
+    }
+
+    /// Acceptable as a direct endpoint from a signed record: global, or a
+    /// private one (a host may list its LAN address for viewers nearby).
+    pub fn is_dialable(ip: IpAddr) -> bool {
+        !is_bogus(ip) && !ip.is_loopback()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn ip(s: &str) -> IpAddr {
+            s.parse().unwrap()
+        }
+
+        #[test]
+        fn classes() {
+            assert!(!is_global(ip("203.0.113.5")), "TEST-NET-3 is documentation");
+            assert!(is_global(ip("8.8.8.8")));
+            assert!(is_global(ip("2606:4700::1111")));
+            for s in ["10.0.0.1", "192.168.1.1", "172.16.0.1", "169.254.1.1", "100.64.0.1", "fd00::1", "fe80::1", "::ffff:10.1.2.3"] {
+                assert!(is_private(ip(s)), "{s}");
+                assert!(!is_global(ip(s)), "{s}");
+                assert!(is_lan(ip(s)), "{s}");
+                assert!(is_dialable(ip(s)), "{s}");
+            }
+            for s in ["0.0.0.0", "255.255.255.255", "224.0.0.1", "198.18.0.1", "240.0.0.1", "::", "ff02::1", "2001:db8::1"] {
+                assert!(is_bogus(ip(s)), "{s}");
+                assert!(!is_dialable(ip(s)), "{s}");
+                assert!(!is_lan(ip(s)), "{s}");
+            }
+            assert!(!is_dialable(ip("127.0.0.1")));
+            assert!(!is_lan(ip("127.0.0.1")));
+            assert!(!is_lan(ip("8.8.8.8")));
+        }
+    }
+}

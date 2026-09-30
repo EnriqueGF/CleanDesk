@@ -16,6 +16,10 @@ pub enum TransportError {
     #[error("signaling connection closed")]
     SignalingClosed,
 
+    /// Plaintext `ws://` towards a server outside the local network.
+    #[error("refusing plaintext signaling to {0}: use wss:// (or set CLEANDESK_ALLOW_INSECURE_SIGNALING=1 on a trusted network)")]
+    InsecureSignaling(String),
+
     /// The server did not confirm registration within the allotted time.
     #[error("registration timed out after {0:?}")]
     RegisterTimeout(Duration),

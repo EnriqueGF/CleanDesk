@@ -46,15 +46,42 @@ pub enum ServiceStatus {
     Other,
 }
 
-/// Command-line arguments for the service's helper host.
+/// Command-line arguments for the service's helper host. The helper reads
+/// the user's data directory but logs into its own (LocalSystem) profile:
+/// a SYSTEM process must never create or append files inside a directory
+/// another account can turn into a junction.
 pub fn helper_args(data_dir: &Path) -> Vec<String> {
     vec![
         "--host".to_string(),
         "--data-dir".to_string(),
         data_dir.to_string_lossy().to_string(),
-        "--log-file".to_string(),
-        data_dir.join("host.log").to_string_lossy().to_string(),
     ]
+}
+
+/// Environment variable: `1` lets the service be installed from an
+/// executable outside Program Files (development only).
+pub const ENV_SERVICE_ALLOW_ANY_PATH: &str = "CLEANDESK_SERVICE_ALLOW_ANY_PATH";
+
+/// May `exe` be registered as a LocalSystem service binary? Only when it
+/// lives under one of `program_dirs` (Program Files, which standard users
+/// cannot write to). A service pointing at a user-writable executable is a
+/// privilege escalation waiting to happen.
+pub fn exe_location_allowed(exe: &Path, program_dirs: &[PathBuf]) -> bool {
+    let normalise = |p: &Path| p.to_string_lossy().replace('/', "\\").trim_end_matches('\\').to_ascii_lowercase();
+    let exe = normalise(exe);
+    program_dirs.iter().filter(|d| !d.as_os_str().is_empty()).any(|dir| {
+        let dir = normalise(dir);
+        exe.starts_with(&format!("{dir}\\"))
+    })
+}
+
+/// The Program Files roots of this machine, from the environment.
+pub fn program_dirs() -> Vec<PathBuf> {
+    ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .collect()
 }
 
 /// Parse `sc.exe query` output into a [`ServiceStatus`]. Pure; tested.
@@ -134,6 +161,13 @@ mod imp {
 
     /// Create + start the service. Must already run elevated.
     pub fn install_here(exe: &Path, data_dir: &Path) -> Result<()> {
+        let allow_any = std::env::var(ENV_SERVICE_ALLOW_ANY_PATH).is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes"));
+        if !allow_any && !exe_location_allowed(exe, &program_dirs()) {
+            return Err(PlatformError::Other(format!(
+                "refusing to register {} as a service: install CleanDesk (MSI) so the service runs from Program Files",
+                exe.display()
+            )));
+        }
         let bin = build_command_line([
             exe.to_string_lossy().as_ref(),
             "--service",
@@ -445,7 +479,16 @@ mod tests {
     fn helper_args_shape() {
         let a = helper_args(Path::new("C:\\data dir"));
         assert_eq!(&a[..3], &["--host", "--data-dir", "C:\\data dir"]);
-        assert_eq!(a[3], "--log-file");
-        assert!(a[4].ends_with("host.log"));
+        assert_eq!(a.len(), 3, "the helper logs into its own profile, never into the user's directory");
+    }
+
+    #[test]
+    fn service_binary_must_live_under_program_files() {
+        let dirs = vec![PathBuf::from("C:\\Program Files"), PathBuf::from("C:\\Program Files (x86)"), PathBuf::new()];
+        assert!(exe_location_allowed(Path::new("C:\\Program Files\\CleanDesk\\cleandesk.exe"), &dirs));
+        assert!(exe_location_allowed(Path::new("c:/program files (x86)/CleanDesk/cleandesk.exe"), &dirs));
+        assert!(!exe_location_allowed(Path::new("C:\\Users\\me\\Downloads\\cleandesk.exe"), &dirs));
+        assert!(!exe_location_allowed(Path::new("C:\\Program Files Extra\\cleandesk.exe"), &dirs), "prefix must be a directory boundary");
+        assert!(!exe_location_allowed(Path::new("C:\\Program Files"), &dirs));
     }
 }

@@ -21,11 +21,35 @@ use cleandesk_proto::{
     session::{DeviceInfo, SessionId},
 };
 use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
-use tokio::sync::mpsc::UnboundedSender;
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::sync::mpsc::Sender;
 use tracing::{info, warn};
+
+/// Outbound messages queued per connection before the server starts
+/// dropping them. ICE trickle is a few dozen candidates; a peer that cannot
+/// drain this many is dead or deliberately not reading.
+pub const OUTBOUND_QUEUE: usize = 64;
+
+/// `IncomingRequest`s one callee may receive per [`CALLEE_WINDOW`], across
+/// every caller. Bounds the dialogs / auth attempts a host can be flooded
+/// with from many addresses.
+pub const CALLEE_BURST: u32 = 10;
+pub const CALLEE_WINDOW: Duration = Duration::from_secs(60);
+
+/// How long a CleanDesk ID stays reserved for the key that last registered
+/// it. A different key that derives to the same ID (a ground collision, see
+/// `docs/SECURITY.md`) is refused for this long after the owner was last
+/// seen, even while the owner is offline.
+pub const ID_HOLD: Duration = Duration::from_secs(30 * 24 * 3600);
+
+/// Most ID->key ownership records kept; beyond this the oldest are evicted.
+const MAX_OWNERS: usize = 1_000_000;
 
 /// Concurrent WebSocket connections accepted from one IP.
 pub const MAX_CONNS_PER_IP: usize = 20;
@@ -126,7 +150,113 @@ pub struct Peer {
     pub info: DeviceInfo,
     pub public_key: String,
     pub conn: ConnId,
-    pub tx: UnboundedSender<SignalMessage>,
+    pub tx: Sender<SignalMessage>,
+}
+
+/// Which key last held an ID and when it was last seen (Unix seconds).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Owner {
+    pub public_key: String,
+    pub last_seen: u64,
+}
+
+/// Persistent ID->key ownership. The live registry only knows who is online;
+/// this remembers who *was*, so an attacker who grinds a key colliding with
+/// a victim's ID cannot register while the victim is merely offline.
+#[derive(Default)]
+pub struct OwnerRegistry {
+    owners: Mutex<HashMap<CleanDeskId, Owner>>,
+    path: Option<PathBuf>,
+    hold: Duration,
+}
+
+impl OwnerRegistry {
+    /// In-memory only (tests, ephemeral deployments).
+    pub fn ephemeral() -> Self {
+        Self { owners: Mutex::new(HashMap::new()), path: None, hold: ID_HOLD }
+    }
+
+    /// Backed by a JSON file; a missing file starts empty, a corrupt one is
+    /// set aside rather than overwritten.
+    pub fn load(path: PathBuf) -> Self {
+        let owners = match std::fs::read(&path) {
+            Ok(bytes) => match serde_json::from_slice::<HashMap<CleanDeskId, Owner>>(&bytes) {
+                Ok(map) => map,
+                Err(e) => {
+                    let aside = path.with_extension("json.corrupt");
+                    warn!(path = %path.display(), error = %e, aside = %aside.display(), "owner registry unreadable; starting empty");
+                    let _ = std::fs::rename(&path, &aside);
+                    HashMap::new()
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+            Err(e) => {
+                warn!(path = %path.display(), error = %e, "owner registry unreadable; starting empty");
+                HashMap::new()
+            }
+        };
+        info!(path = %path.display(), count = owners.len(), "owner registry loaded");
+        Self { owners: Mutex::new(owners), path: Some(path), hold: ID_HOLD }
+    }
+
+    #[cfg(test)]
+    fn with_hold(mut self, hold: Duration) -> Self {
+        self.hold = hold;
+        self
+    }
+
+    /// Record that `public_key` proved ownership of `id` now. `Err` when a
+    /// different key still holds the ID.
+    pub fn claim(&self, id: CleanDeskId, public_key: &str) -> Result<(), RegisterError> {
+        self.claim_at(id, public_key, unix_now())
+    }
+
+    fn claim_at(&self, id: CleanDeskId, public_key: &str, now: u64) -> Result<(), RegisterError> {
+        let mut owners = self.owners.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(owner) = owners.get(&id) {
+            let held = now.saturating_sub(owner.last_seen) < self.hold.as_secs();
+            if owner.public_key != public_key && held {
+                warn!(%id, "id held by another key; refusing registration");
+                return Err(RegisterError::IdHeldByOtherKey);
+            }
+        }
+        owners.insert(id, Owner { public_key: public_key.to_string(), last_seen: now });
+        if owners.len() > MAX_OWNERS {
+            // Drop the stalest fifth so this does not run on every claim.
+            let mut by_age: Vec<(CleanDeskId, u64)> = owners.iter().map(|(k, v)| (*k, v.last_seen)).collect();
+            by_age.sort_by_key(|(_, seen)| *seen);
+            for (k, _) in by_age.iter().take(MAX_OWNERS / 5) {
+                owners.remove(k);
+            }
+        }
+        if let Some(path) = &self.path {
+            let snapshot = serde_json::to_vec(&*owners);
+            drop(owners);
+            match snapshot {
+                Ok(bytes) => {
+                    let tmp = path.with_extension("json.tmp");
+                    let res = std::fs::write(&tmp, &bytes).and_then(|_| std::fs::rename(&tmp, path));
+                    if let Err(e) = res {
+                        warn!(path = %path.display(), error = %e, "could not persist owner registry");
+                    }
+                }
+                Err(e) => warn!(error = %e, "could not serialise owner registry"),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.owners.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// A pending or active session, used to route Accept/Reject/Signal messages
@@ -159,6 +289,8 @@ pub struct ServerState {
     sessions: DashMap<SessionId, Session>,
     next_conn: AtomicU64,
     ip_limits: IpLimits,
+    owners: OwnerRegistry,
+    callee_limits: DashMap<CleanDeskId, RateLimiter>,
 }
 
 impl ServerState {
@@ -172,8 +304,36 @@ impl ServerState {
         Self { ip_limits, ..Self::default() }
     }
 
+    /// State whose ID ownership survives restarts.
+    pub fn with_owners(owners: OwnerRegistry) -> Self {
+        Self { owners, ..Self::default() }
+    }
+
     pub fn ip_limits(&self) -> &IpLimits {
         &self.ip_limits
+    }
+
+    pub fn owners(&self) -> &OwnerRegistry {
+        &self.owners
+    }
+
+    /// May `callee` receive another `IncomingRequest` now?
+    pub fn allow_incoming(&self, callee: CleanDeskId) -> bool {
+        let now = Instant::now();
+        if self.callee_limits.len() > IP_TABLE_SOFT_CAP {
+            self.callee_limits.retain(|_, rl| !rl.is_replenished_at(now));
+        }
+        self.callee_limits
+            .entry(callee)
+            .or_insert_with(|| RateLimiter::new(CALLEE_BURST, CALLEE_WINDOW))
+            .allow_at(now)
+    }
+
+    /// Is `conn` still the connection that holds `id`? A connection that
+    /// was replaced by a newer registration of the same device must stop
+    /// acting under the ID.
+    pub fn holds(&self, id: CleanDeskId, conn: ConnId) -> bool {
+        self.peers.get(&id).map(|p| p.conn == conn).unwrap_or(false)
     }
 
     /// Hand out a fresh connection identifier.
@@ -193,7 +353,7 @@ impl ServerState {
         info: DeviceInfo,
         public_key: String,
         conn: ConnId,
-        tx: UnboundedSender<SignalMessage>,
+        tx: Sender<SignalMessage>,
     ) -> Result<CleanDeskId, RegisterError> {
         let id = info.id;
         if let Some(existing) = self.peers.get(&id) {
@@ -204,7 +364,7 @@ impl ServerState {
             // Tell the old connection it lost the registration, so a host that
             // is still alive there (e.g. the service helper while the GUI runs)
             // can stand down instead of believing it is reachable.
-            let _ = existing.tx.send(SignalMessage::Error {
+            let _ = existing.tx.try_send(SignalMessage::Error {
                 code: cleandesk_proto::message::ErrorCode::IdConflict,
                 detail: "replaced by a newer registration of the same device".into(),
             });
@@ -212,6 +372,8 @@ impl ServerState {
             // on the other end will get nothing back, so drop them now.
             self.sessions.retain(|_, s| s.caller != id && s.callee != id);
         }
+        // Offline owners keep their ID for `ID_HOLD`.
+        self.owners.claim(id, &public_key)?;
         self.peers.insert(id, Peer { info, public_key, conn, tx });
         info!(%id, count = self.peers.len(), "device registered");
         Ok(id)
@@ -229,7 +391,7 @@ impl ServerState {
     }
 
     /// Look up a peer's outbound channel.
-    pub fn sender(&self, id: CleanDeskId) -> Option<UnboundedSender<SignalMessage>> {
+    pub fn sender(&self, id: CleanDeskId) -> Option<Sender<SignalMessage>> {
         self.peers.get(&id).map(|p| p.tx.clone())
     }
 
@@ -274,7 +436,7 @@ impl ServerState {
         &self,
         session: SessionId,
         me: CleanDeskId,
-    ) -> Option<UnboundedSender<SignalMessage>> {
+    ) -> Option<Sender<SignalMessage>> {
         let s = *self.sessions.get(&session)?;
         let other = match self.role_in(session, me)? {
             Role::Caller => s.callee,
@@ -354,8 +516,60 @@ mod tests {
         }
     }
 
-    fn chan() -> (UnboundedSender<SignalMessage>, mpsc::UnboundedReceiver<SignalMessage>) {
-        mpsc::unbounded_channel()
+    fn chan() -> (Sender<SignalMessage>, mpsc::Receiver<SignalMessage>) {
+        mpsc::channel(OUTBOUND_QUEUE)
+    }
+
+    #[test]
+    fn offline_owner_keeps_its_id_until_the_hold_expires() {
+        let reg = OwnerRegistry::ephemeral().with_hold(Duration::from_secs(100));
+        reg.claim_at(id(100_000_001), "KEY-A", 1_000).unwrap();
+        assert_eq!(reg.claim_at(id(100_000_001), "KEY-B", 1_050), Err(RegisterError::IdHeldByOtherKey));
+        // The owner coming back refreshes the hold.
+        reg.claim_at(id(100_000_001), "KEY-A", 1_090).unwrap();
+        assert_eq!(reg.claim_at(id(100_000_001), "KEY-B", 1_150), Err(RegisterError::IdHeldByOtherKey));
+        // Once the owner has been gone for the hold period the ID is free.
+        reg.claim_at(id(100_000_001), "KEY-B", 1_200).unwrap();
+        assert_eq!(reg.claim_at(id(100_000_001), "KEY-A", 1_201), Err(RegisterError::IdHeldByOtherKey));
+    }
+
+    #[test]
+    fn owner_registry_round_trips_through_disk() {
+        let dir = std::env::temp_dir().join(format!("cleandesk-owners-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("owners.json");
+        let reg = OwnerRegistry::load(path.clone());
+        reg.claim(id(100_000_001), "KEY-A").unwrap();
+        let reloaded = OwnerRegistry::load(path.clone());
+        assert_eq!(reloaded.len(), 1);
+        assert_eq!(reloaded.claim(id(100_000_001), "KEY-B"), Err(RegisterError::IdHeldByOtherKey));
+        // Garbage on disk is set aside, not trusted and not clobbered.
+        std::fs::write(&path, b"{not json").unwrap();
+        let fresh = OwnerRegistry::load(path.clone());
+        assert!(fresh.is_empty());
+        assert!(path.with_extension("json.corrupt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_replaced_connection_no_longer_holds_the_id() {
+        let st = ServerState::new();
+        let (tx1, _rx1) = chan();
+        let (tx2, _rx2) = chan();
+        st.register(info(100_000_001), "KEY".into(), 1, tx1).unwrap();
+        assert!(st.holds(id(100_000_001), 1));
+        st.register(info(100_000_001), "KEY".into(), 2, tx2).unwrap();
+        assert!(!st.holds(id(100_000_001), 1));
+        assert!(st.holds(id(100_000_001), 2));
+    }
+
+    #[test]
+    fn incoming_requests_per_callee_are_bounded() {
+        let st = ServerState::new();
+        let callee = id(100_000_009);
+        let allowed = (0..CALLEE_BURST + 5).filter(|_| st.allow_incoming(callee)).count();
+        assert_eq!(allowed, CALLEE_BURST as usize);
+        assert!(st.allow_incoming(id(100_000_010)), "another callee has its own budget");
     }
 
     #[test]
@@ -403,7 +617,7 @@ mod tests {
         assert_eq!(st.role_in(s, id(100_000_002)), Some(Role::Callee));
         assert_eq!(st.role_in(s, id(100_000_003)), None);
         assert!(st.peer_across(s, id(100_000_003)).is_none());
-        st.peer_across(s, id(100_000_001)).unwrap().send(SignalMessage::Ping { nonce: 1 }).unwrap();
+        st.peer_across(s, id(100_000_001)).unwrap().try_send(SignalMessage::Ping { nonce: 1 }).unwrap();
         assert!(matches!(rb.try_recv(), Ok(SignalMessage::Ping { nonce: 1 })));
     }
 

@@ -46,7 +46,45 @@ pub fn gui_is_running(data_dir: &Path) -> bool {
     let Ok(pid) = text.trim().parse::<u32>() else {
         return false;
     };
-    pid != std::process::id() && process_alive(pid)
+    pid != std::process::id() && process_alive(pid) && process_is_cleandesk(pid)
+}
+
+/// Does `pid` run a CleanDesk executable? The lock file is just a number
+/// any local process can write; a PID that belongs to something else (say,
+/// `4`, the System process) must not keep the headless host standing by.
+#[cfg(windows)]
+pub fn process_is_cleandesk(pid: u32) -> bool {
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    let Some(own) = std::env::current_exe().ok().and_then(|p| p.file_name().map(|n| n.to_os_string())) else {
+        return true;
+    };
+    // SAFETY: documented Win32 calls; the buffer outlives the call and the
+    // handle is always closed.
+    let name = unsafe {
+        let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return false;
+        };
+        let mut buf = vec![0u16; 1024];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+        let _ = CloseHandle(h);
+        if !ok {
+            return false;
+        }
+        String::from_utf16_lossy(&buf[..len as usize])
+    };
+    Path::new(&name)
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(&own.to_string_lossy()))
+}
+
+#[cfg(not(windows))]
+pub fn process_is_cleandesk(_pid: u32) -> bool {
+    true
 }
 
 #[cfg(windows)]
@@ -111,5 +149,16 @@ mod tests {
     #[test]
     fn current_process_is_alive() {
         assert!(process_alive(std::process::id()));
+        assert!(process_is_cleandesk(std::process::id()), "our own image name matches itself");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_lock_naming_a_foreign_process_is_ignored() {
+        let dir = temp();
+        // PID 4 is the System process: alive, but not CleanDesk.
+        fs::write(dir.join(LOCK_FILE), "4").unwrap();
+        assert!(!gui_is_running(&dir));
+        let _ = fs::remove_dir_all(dir);
     }
 }

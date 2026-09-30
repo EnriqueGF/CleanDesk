@@ -40,7 +40,12 @@ Sections 1 to 3 describe the **private server mode** (Settings → Network).
 # Terminal 1
 cargo run -p cleandesk-signal-server
 # Listens on 0.0.0.0:7420 (change with CLEANDESK_SIGNAL_PORT)
+# ID ownership is persisted in ./data/owners.json (CLEANDESK_SIGNAL_STATE_DIR)
 ```
+
+Plain `ws://` is only accepted towards loopback / private addresses; an
+Internet-facing server must be reached over `wss://` (terminate TLS in front
+of it), or set `CLEANDESK_ALLOW_INSECURE_SIGNALING=1` on a network you trust.
 
 ## 2. Start two instances of the app
 
@@ -68,7 +73,7 @@ someone is connected, with an **End session** button.
 ## 3. Unattended access (without anyone accepting)
 
 On the machine that will act as host, open the GUI → ⚙ **Settings** →
-**Unattended access**: type a password (at least 6 characters) and tick *Allow
+**Unattended access**: type a password (at least 10 characters) and tick *Allow
 unattended connections*. The derived key (Argon2id) is stored, never the
 password in the clear. Restart the app so the host loads the key, or run it
 headless:
@@ -100,8 +105,18 @@ Under ⚙ **Settings → System**:
   GUI closes the service resumes registration within seconds.
 - Changing the unattended password in the GUI is applied to the service's host
   automatically (it watches `appdata.json`).
-- Logs: `service.log`, `host.log` and `service-install.log` in the data folder
-  (`%APPDATA%\CleanDesk\CleanDesk\data` or `--data-dir`).
+- Logs: `gui.log` in the data folder (`%APPDATA%\CleanDesk\CleanDesk\data`
+  or `--data-dir`); `service.log` and `host.log` in the *LocalSystem* profile
+  (`C:\Windows\System32\config\systemprofile\AppData\Roaming\CleanDesk\CleanDesk\data`)
+  and `service-install.log` in the administrator's own data folder. A SYSTEM
+  process never writes into a directory another account controls.
+- The service can only be registered from an executable under *Program
+  Files* (the MSI install); the portable binary refuses, because a service
+  pointing at a user-writable file would hand SYSTEM to whoever can replace
+  it. `CLEANDESK_SERVICE_ALLOW_ANY_PATH=1` overrides this for development.
+- Unattended callers get the interactive permission set (screen, keyboard,
+  mouse, clipboard) whether the GUI or the service answers; file transfer,
+  restart and local-input lock need `CLEANDESK_UNATTENDED_FULL=1`.
 - Manual: `cleandesk --install-service` / `cleandesk --uninstall-service` from
   an administrator console.
 
@@ -155,7 +170,8 @@ Updates, on by default; *Check now* forces it). When a newer version exists a
 banner offers **Update now**: the MSI is downloaded to `<data dir>\updates`,
 its SHA-256 is verified against the `SHA256SUMS` file published with the
 release (a release without checksums, or a mismatching file, is never
-installed), and *Install and restart* hands it to `msiexec /passive`, closes
+installed; only an asset named exactly `CleanDesk-<version>-x64.msi` served
+by GitHub is considered), and *Install and restart* hands it to `msiexec /passive`, closes
 CleanDesk and reopens it once the upgrade finishes. `installer/build-msi.ps1`
 writes `SHA256SUMS` next to the MSI; upload both to the release.
 
@@ -173,6 +189,14 @@ cargo run -p cleandesk-relay-server      # or cleandesk-relay-server.exe from th
 
 Clients in community mode query the DHT when connecting and add the relays
 found as last-resort TURN.
+
+The relay caps what one client can do with the public credential:
+`CLEANDESK_RELAY_MAX_ALLOCATIONS` (1000 live allocations in total),
+`CLEANDESK_RELAY_MAX_ALLOCATIONS_PER_IP` (8 per source address),
+`CLEANDESK_RELAY_ALLOCATION_MAX_KBPS` (25 000 kbit/s per allocation in
+community mode), plus the lifetime and byte quotas below. Unauthenticated
+STUN requests and `Allocate`s are rate-limited per source. Only globally
+routable relay addresses are announced or used.
 
 ## 7. Private TURN relay (when there is no direct route)
 

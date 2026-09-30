@@ -60,11 +60,21 @@ impl Drop for PendingRequest {
 /// [`Approver`] que delega cada decisión en la interfaz gráfica.
 pub struct GuiApprover {
     requests: mpsc::Sender<PendingRequest>,
+    /// What an unattended (password) caller may get without a human. Same
+    /// default as the headless host: the interactive set, everything with
+    /// `CLEANDESK_UNATTENDED_FULL=1`.
+    unattended_allowed: Permissions,
 }
+
+/// Environment variable: `1` lets unattended callers request every permission
+/// instead of only the interactive set (shared with the headless host).
+pub const ENV_UNATTENDED_FULL: &str = "CLEANDESK_UNATTENDED_FULL";
 
 impl GuiApprover {
     pub fn new(requests: mpsc::Sender<PendingRequest>) -> Self {
-        Self { requests }
+        let full = std::env::var(ENV_UNATTENDED_FULL).is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes"));
+        let unattended_allowed = if full { Permissions::full() } else { Permissions::interactive() };
+        Self { requests, unattended_allowed }
     }
 }
 
@@ -82,8 +92,15 @@ impl Approver for GuiApprover {
         // contraseña no cuadra, el host corta la sesión. Sin prompt, como
         // espera cualquier acceso desatendido.
         if matches!(auth, AuthKind::UnattendedPassword) {
+            // La contraseña da acceso interactivo; reiniciar, transferir
+            // archivos o bloquear el teclado local siguen exigiendo a la
+            // persona del host (o `CLEANDESK_UNATTENDED_FULL=1`).
+            let granted = requested & self.unattended_allowed;
+            if granted != requested {
+                tracing::info!(from = %from.id, ?requested, ?granted, "narrowing unattended request (set {ENV_UNATTENDED_FULL}=1 to allow all)");
+            }
             tracing::info!(from = %from.id, "unattended request accepted automatically (password verified by challenge)");
-            return Decision::Accept(requested);
+            return Decision::Accept(granted);
         }
         let (tx, rx) = oneshot::channel();
         let pending = PendingRequest {

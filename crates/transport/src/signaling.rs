@@ -26,9 +26,21 @@ use futures_util::{SinkExt, StreamExt};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::connect_async_with_config;
+use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 use tracing::{debug, trace, warn};
+
+/// Largest signaling message accepted from the server. The server itself
+/// caps what it sends at 64 KiB; anything near this is not signaling and
+/// must not be parsed, let alone allocated.
+pub const MAX_INBOUND_MESSAGE_BYTES: usize = 256 * 1024;
+
+/// Longest registration nonce we sign. The server sends 32 bytes.
+const MAX_NONCE_BYTES: usize = 64;
+
+/// Environment variable: `1` allows plaintext `ws://` towards non-local
+/// servers (a lab, a reverse proxy on a trusted network).
+pub const ENV_ALLOW_INSECURE_SIGNALING: &str = "CLEANDESK_ALLOW_INSECURE_SIGNALING";
 
 /// How long [`SignalingClient::register`] waits for each server reply.
 const REGISTER_TIMEOUT: Duration = Duration::from_secs(10);
@@ -74,7 +86,13 @@ impl SignalingClient {
     /// Connect to `ws://host:port/` (or `wss://…`) and start the reader/writer
     /// tasks.
     pub async fn connect(url: &str) -> Result<Self> {
-        let (ws, _resp) = connect_async(url)
+        check_scheme(url, std::env::var(ENV_ALLOW_INSECURE_SIGNALING).is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes")))?;
+        let config = WebSocketConfig {
+            max_message_size: Some(MAX_INBOUND_MESSAGE_BYTES),
+            max_frame_size: Some(MAX_INBOUND_MESSAGE_BYTES),
+            ..Default::default()
+        };
+        let (ws, _resp) = connect_async_with_config(url, Some(config), false)
             .await
             .with_context(|| format!("connecting to signaling server at {url}"))?;
         let (mut sink, mut source) = ws.split();
@@ -165,6 +183,7 @@ impl SignalingClient {
         public_key_b64: String,
         signer: &dyn ChallengeSigner,
     ) -> Result<CleanDeskId> {
+        let device_id = device.id;
         self.send(SignalMessage::Register {
             device,
             protocol: PROTOCOL_VERSION,
@@ -186,12 +205,27 @@ impl SignalingClient {
                     let nonce_bytes = B64.decode(&nonce).map_err(|e| {
                         TransportError::RegisterProtocol(format!("malformed challenge nonce: {e}"))
                     })?;
+                    if nonce_bytes.len() > MAX_NONCE_BYTES {
+                        return Err(TransportError::RegisterProtocol(format!(
+                            "challenge nonce of {} bytes is not a nonce",
+                            nonce_bytes.len()
+                        ))
+                        .into());
+                    }
                     let signature = signer.sign_b64(&register_proof_message(&nonce_bytes));
                     out_tx
                         .send(SignalMessage::RegisterProof { signature })
                         .map_err(|_| TransportError::SignalingClosed)?;
                 }
-                Ok(Some(SignalMessage::Registered { id })) => return Ok(id),
+                // A server that confirms a different ID is lying or broken;
+                // the ID is derived from our key and nothing else.
+                Ok(Some(SignalMessage::Registered { id })) if id == device_id => return Ok(id),
+                Ok(Some(SignalMessage::Registered { id })) => {
+                    return Err(TransportError::RegisterProtocol(format!(
+                        "server confirmed id {id} but this device is {device_id}"
+                    ))
+                    .into());
+                }
                 Ok(Some(SignalMessage::Error { code, detail })) => {
                     return Err(TransportError::RegisterRejected { code, detail }.into());
                 }
@@ -266,5 +300,61 @@ impl SignalOut for QueueOut {
     async fn send(&self, msg: SignalMessage) -> Result<()> {
         self.0.send(msg).map_err(|_| TransportError::SignalingClosed)?;
         Ok(())
+    }
+}
+
+/// Refuse plaintext signaling towards anything but a local network unless
+/// the operator opted in. Everything on the WebSocket is readable to a
+/// passive observer otherwise (ids, names, who connects to whom) and an
+/// active one can inject `Reject`/`Error` at will. The session itself stays
+/// protected by DTLS and the identity proofs either way.
+fn check_scheme(url: &str, allow_insecure: bool) -> Result<()> {
+    let Some(rest) = url.strip_prefix("ws://") else {
+        return Ok(()); // wss:// (or something connect_async will refuse)
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
+    let host = match host.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host),
+    };
+    let local = host.eq_ignore_ascii_case("localhost")
+        || host.parse::<std::net::IpAddr>().is_ok_and(|ip| match ip {
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00 || (v6.segments()[0] & 0xffc0) == 0xfe80
+            }
+        });
+    if local || allow_insecure {
+        if !local {
+            warn!(%url, "plaintext signaling towards a remote server ({ENV_ALLOW_INSECURE_SIGNALING} is set)");
+        }
+        Ok(())
+    } else {
+        Err(TransportError::InsecureSignaling(url.to_string()).into())
+    }
+}
+
+#[cfg(test)]
+mod scheme_tests {
+    use super::check_scheme;
+
+    #[test]
+    fn plaintext_is_only_allowed_towards_local_networks() {
+        for ok in [
+            "ws://127.0.0.1:7420",
+            "ws://localhost:7420/",
+            "ws://192.168.1.5:7420",
+            "ws://10.0.0.1",
+            "ws://[::1]:7420",
+            "ws://[fd00::1]:7420/x",
+            "wss://signal.example.org:7420",
+        ] {
+            assert!(check_scheme(ok, false).is_ok(), "{ok}");
+        }
+        for bad in ["ws://signal.example.org:7420", "ws://203.0.113.5:7420", "ws://user@203.0.113.5"] {
+            assert!(check_scheme(bad, false).is_err(), "{bad}");
+            assert!(check_scheme(bad, true).is_ok(), "{bad} with opt-in");
+        }
     }
 }

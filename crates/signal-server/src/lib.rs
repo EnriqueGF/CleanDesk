@@ -48,8 +48,12 @@ use cleandesk_proto::{
     Version, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
-use state::{ConnId, RateLimiter, RegisterError, Role, ServerState};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use state::{ConnId, RateLimiter, RegisterError, Role, ServerState, OUTBOUND_QUEUE};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
@@ -73,6 +77,12 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 /// `ConnectRequest` budget per connection: burst of 5, refilling over 30 s.
 const CONNECT_BURST: u32 = 5;
 const CONNECT_WINDOW: Duration = Duration::from_secs(30);
+
+/// `Signal` budget per connection: an SDP exchange plus ICE trickle is a
+/// few dozen messages; refilling over 10 s keeps retries possible while a
+/// flood aimed at the peer's queue is cut off.
+const SIGNAL_BURST: u32 = 64;
+const SIGNAL_WINDOW: Duration = Duration::from_secs(10);
 
 /// Malformed / out-of-protocol messages tolerated per connection before the
 /// socket is closed.
@@ -130,8 +140,9 @@ struct Conn {
     ip: std::net::IpAddr,
     phase: Phase,
     connect_limit: RateLimiter,
+    signal_limit: RateLimiter,
     bad_messages: u32,
-    tx: mpsc::UnboundedSender<SignalMessage>,
+    tx: mpsc::Sender<SignalMessage>,
 }
 
 /// What the message loop should do after handling one message.
@@ -161,9 +172,11 @@ async fn handle_connection(
     .map_err(|_| anyhow::anyhow!("websocket handshake timed out"))??;
     let (mut sink, mut source) = ws.split();
 
-    // Outbound queue: any task can push a SignalMessage to this peer.
-    let (tx, mut rx) = mpsc::unbounded_channel::<SignalMessage>();
-    let writer = tokio::spawn(async move {
+    // Outbound queue: any task can push a SignalMessage to this peer. It is
+    // bounded and every producer uses `try_send`: a peer that stops reading
+    // loses messages instead of growing the server's memory.
+    let (tx, mut rx) = mpsc::channel::<SignalMessage>(OUTBOUND_QUEUE);
+    let mut writer = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             match serde_json::to_string(&msg) {
                 Ok(json) => {
@@ -182,14 +195,24 @@ async fn handle_connection(
         ip: peer_addr.ip(),
         phase: Phase::Unregistered,
         connect_limit: RateLimiter::new(CONNECT_BURST, CONNECT_WINDOW),
+        signal_limit: RateLimiter::new(SIGNAL_BURST, SIGNAL_WINDOW),
         bad_messages: 0,
         tx,
     };
+    let connected_at = Instant::now();
 
     loop {
+        // The registration deadline is absolute: pinging every few seconds
+        // must not let an unregistered socket hold its per-IP slot forever.
         let deadline = match conn.phase {
             Phase::Registered(_) => IDLE_TIMEOUT,
-            _ => REGISTER_DEADLINE,
+            _ => match REGISTER_DEADLINE.checked_sub(connected_at.elapsed()) {
+                Some(left) => left,
+                None => {
+                    debug!(%peer_addr, "registration deadline passed");
+                    break;
+                }
+            },
         };
         let frame = match tokio::time::timeout(deadline, source.next()).await {
             Ok(Some(frame)) => frame,
@@ -206,12 +229,20 @@ async fn handle_connection(
                 break;
             }
         };
+        // A newer registration of the same device replaced this connection:
+        // it must not keep accepting or signalling under the ID.
+        if let Phase::Registered(id) = conn.phase {
+            if !state.holds(id, conn.id) {
+                debug!(%peer_addr, %id, "connection superseded; closing");
+                break;
+            }
+        }
         let flow = match frame {
             Message::Text(text) => match serde_json::from_str::<SignalMessage>(&text) {
                 Ok(msg) => handle_message(msg, &state, &mut conn),
                 Err(e) => {
                     warn!(%peer_addr, error = %e, "bad signaling message");
-                    let _ = conn.tx.send(err(ErrorCode::BadRequest, &e.to_string()));
+                    conn.reply(err(ErrorCode::BadRequest, "malformed message"));
                     conn.strike()
                 }
             },
@@ -233,13 +264,24 @@ async fn handle_connection(
     if let Phase::Registered(id) = conn.phase {
         state.unregister(id, conn.id);
     }
-    // Let queued replies (e.g. the final Error) flush before tearing down.
+    // Let queued replies (e.g. the final Error) flush before tearing down;
+    // a peer that will not take them does not get to keep the queue alive.
     drop(conn);
-    let _ = tokio::time::timeout(Duration::from_secs(2), writer).await;
+    if tokio::time::timeout(Duration::from_secs(2), &mut writer).await.is_err() {
+        writer.abort();
+    }
     Ok(())
 }
 
 impl Conn {
+    /// Queue a message for this connection; dropped when the queue is full
+    /// (the peer is not reading) or the writer is gone.
+    fn reply(&self, msg: SignalMessage) {
+        if let Err(e) = self.tx.try_send(msg) {
+            debug!(conn = self.id, error = %e, "dropping reply; peer not draining");
+        }
+    }
+
     /// Count a protocol violation; close once the budget is exhausted.
     fn strike(&mut self) -> Flow {
         self.bad_messages += 1;
@@ -262,22 +304,23 @@ impl Conn {
 /// Handle one decoded signaling message from a peer.
 fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn) -> Flow {
     match msg {
-        SignalMessage::Register { device, protocol, public_key } => {
+        SignalMessage::Register { mut device, protocol, public_key } => {
+            cleandesk_proto::text::sanitize_device_info(&mut device);
             if !protocol.compatible_with(PROTOCOL_VERSION) {
-                let _ = conn.tx.send(version_mismatch(protocol));
+                conn.reply(version_mismatch(protocol));
                 return Flow::Close;
             }
             if let Phase::Registered(id) = conn.phase {
                 // Re-registering on a live connection is not a use case; the
                 // caller opens a new socket instead.
                 debug!(%id, "ignoring duplicate Register");
-                let _ = conn.tx.send(err(ErrorCode::BadRequest, "already registered"));
+                conn.reply(err(ErrorCode::BadRequest, "already registered"));
                 return conn.strike();
             }
             // Counted before the key is even parsed: the point is to bound
             // the work one address can make the server do.
             if !state.ip_limits().allow_registration(conn.ip) {
-                let _ = conn.tx.send(err(ErrorCode::RateLimited, "too many registrations from this address"));
+                conn.reply(err(ErrorCode::RateLimited, "too many registrations from this address"));
                 return Flow::Close;
             }
             // The claimed ID must be the one derived from the key. This is
@@ -285,17 +328,17 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
             let derived = match cleandesk_crypto::identity::derive_id_from_public_key_b64(&public_key) {
                 Ok(id) => id,
                 Err(e) => {
-                    let _ = conn.tx.send(err(ErrorCode::BadRequest, &format!("invalid public key: {e}")));
+                    conn.reply(err(ErrorCode::BadRequest, &format!("invalid public key: {e}")));
                     return conn.strike();
                 }
             };
             if derived != device.id {
                 warn!(claimed = %device.id, %derived, "ID does not match public key");
-                let _ = conn.tx.send(err(ErrorCode::Unauthorized, "id does not match public key"));
+                conn.reply(err(ErrorCode::Unauthorized, "id does not match public key"));
                 return conn.strike();
             }
             let nonce = cleandesk_crypto::identity::random_bytes(32);
-            let _ = conn.tx.send(SignalMessage::RegisterChallenge { nonce: B64.encode(&nonce) });
+            conn.reply(SignalMessage::RegisterChallenge { nonce: B64.encode(&nonce) });
             conn.phase = Phase::Challenged { device, public_key, nonce };
             Flow::Continue
         }
@@ -304,23 +347,23 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
             let Phase::Challenged { device, public_key, nonce } =
                 std::mem::replace(&mut conn.phase, Phase::Unregistered)
             else {
-                let _ = conn.tx.send(err(ErrorCode::BadRequest, "no registration in progress"));
+                conn.reply(err(ErrorCode::BadRequest, "no registration in progress"));
                 return conn.strike();
             };
             let msg = register_proof_message(&nonce);
             if cleandesk_crypto::identity::verify_b64_sig(&public_key, &msg, &signature).is_err() {
                 warn!(id = %device.id, "registration proof failed");
-                let _ = conn.tx.send(err(ErrorCode::Unauthorized, "bad registration proof"));
+                conn.reply(err(ErrorCode::Unauthorized, "bad registration proof"));
                 return Flow::Close;
             }
             match state.register(device, public_key, conn.id, conn.tx.clone()) {
                 Ok(id) => {
                     conn.phase = Phase::Registered(id);
-                    let _ = conn.tx.send(SignalMessage::Registered { id });
+                    conn.reply(SignalMessage::Registered { id });
                     Flow::Continue
                 }
                 Err(RegisterError::IdHeldByOtherKey) => {
-                    let _ = conn.tx.send(err(ErrorCode::IdConflict, "id already in use by another device"));
+                    conn.reply(err(ErrorCode::IdConflict, "id already in use by another device"));
                     Flow::Close
                 }
             }
@@ -328,24 +371,32 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
 
         SignalMessage::ConnectRequest { target, mut from, requested, quality, auth_proof } => {
             let Some(me) = conn.registered_id() else {
-                let _ = conn.tx.send(err(ErrorCode::Unauthorized, "register first"));
+                conn.reply(err(ErrorCode::Unauthorized, "register first"));
                 return conn.strike();
             };
             if !conn.connect_limit.allow() {
-                let _ = conn.tx.send(err(ErrorCode::RateLimited, "too many connection requests"));
+                conn.reply(err(ErrorCode::RateLimited, "too many connection requests"));
                 return Flow::Continue;
             }
             if target == me {
-                let _ = conn.tx.send(err(ErrorCode::BadRequest, "cannot connect to yourself"));
+                conn.reply(err(ErrorCode::BadRequest, "cannot connect to yourself"));
                 return Flow::Continue;
             }
             let Some(target_tx) = state.sender(target) else {
-                let _ = conn.tx.send(err(ErrorCode::TargetOffline, "target not reachable"));
+                conn.reply(err(ErrorCode::TargetOffline, "target not reachable"));
                 return Flow::Continue;
             };
+            // Many callers from many addresses must not be able to flood
+            // one host with dialogs.
+            if !state.allow_incoming(target) {
+                conn.reply(err(ErrorCode::RateLimited, "target is receiving too many requests"));
+                return Flow::Continue;
+            }
             // The callee shows `from` to a human. Never let a caller present
-            // itself under a different ID than the one it registered.
+            // itself under a different ID than the one it registered, nor
+            // with names that break the dialog or the logs.
             from.id = me;
+            cleandesk_proto::text::sanitize_device_info(&mut from);
             let session = Uuid::new_v4();
             state.open_session(session, me, target);
             let auth = if auth_proof.is_some() {
@@ -354,11 +405,11 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
                 AuthKind::Interactive
             };
             if target_tx
-                .send(SignalMessage::IncomingRequest { session, from, requested, quality, auth })
+                .try_send(SignalMessage::IncomingRequest { session, from, requested, quality, auth })
                 .is_err()
             {
                 state.close_session(session);
-                let _ = conn.tx.send(err(ErrorCode::TargetOffline, "target went away"));
+                conn.reply(err(ErrorCode::TargetOffline, "target went away"));
                 return Flow::Continue;
             }
             debug!(%session, caller = %me, %target, "connect request routed");
@@ -378,12 +429,16 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
         }
 
         SignalMessage::Signal { session, payload } => {
+            if !conn.signal_limit.allow() {
+                conn.reply(err(ErrorCode::RateLimited, "too many signaling messages"));
+                return conn.strike();
+            }
             forward_as(state, conn, session, None, SignalMessage::Signal { session, payload });
             Flow::Continue
         }
 
         SignalMessage::Ping { nonce } => {
-            let _ = conn.tx.send(SignalMessage::Pong { nonce });
+            conn.reply(SignalMessage::Pong { nonce });
             Flow::Continue
         }
         // Answer to a ping we never send; harmless.
@@ -420,7 +475,13 @@ fn forward_as(
         }
     }
     match state.peer_across(session, me) {
-        Some(peer) => peer.send(msg).is_ok(),
+        Some(peer) => match peer.try_send(msg) {
+            Ok(()) => true,
+            Err(e) => {
+                debug!(%session, error = %e, "peer across session not draining; message dropped");
+                false
+            }
+        },
         None => {
             debug!(%session, "peer across session is gone");
             false

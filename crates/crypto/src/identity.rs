@@ -9,6 +9,7 @@ use ed25519_dalek::{
 };
 use rand_core::RngCore;
 use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
 /// A device's long-lived identity keypair.
 ///
@@ -78,8 +79,8 @@ impl Identity {
 
     /// The 32-byte seed, for deriving *other* keys (e.g. the Nostr secp256k1
     /// key) so the device has one identity across every rendezvous system.
-    pub fn seed(&self) -> [u8; 32] {
-        self.signing.to_bytes()
+    pub fn seed(&self) -> Zeroizing<[u8; 32]> {
+        Zeroizing::new(self.signing.to_bytes())
     }
 }
 
@@ -134,10 +135,9 @@ impl Identity {
     ///
     /// The caller is responsible for storing this at rest with OS protection
     /// (DPAPI / restrictive ACLs); never commit it.
-    pub fn to_pem(&self) -> Result<String, CryptoError> {
+    pub fn to_pem(&self) -> Result<Zeroizing<String>, CryptoError> {
         self.signing
             .to_pkcs8_pem(Default::default())
-            .map(|z| z.to_string())
             .map_err(|e| CryptoError::Key(e.to_string()))
     }
 
@@ -221,6 +221,6 @@ mod tests {
         let id = Identity::generate();
         let dbg = format!("{id:?}");
         assert!(dbg.contains(&id.fingerprint()));
-        assert!(!dbg.contains(&id.to_pem().unwrap()));
+        assert!(!dbg.contains(id.to_pem().unwrap().as_str()));
     }
 }

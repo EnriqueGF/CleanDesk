@@ -19,7 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SM_YVIRTUALSCREEN, WHEEL_DELTA, XBUTTON1, XBUTTON2,
 };
 
-use crate::{mouse_move_absolute, InputInjector, VirtualScreen};
+use crate::{mouse_move_absolute, InputInjector, VirtualScreen, MAX_VIRTUAL_KEY};
 
 /// `InputInjector` implemented with the Windows `SendInput` API.
 ///
@@ -32,9 +32,10 @@ pub struct WinInputInjector {
     tx: std::sync::mpsc::Sender<Job>,
 }
 
-struct Job {
-    ev: InputEvent,
-    monitor: MonitorInfo,
+enum Job {
+    Inject { ev: InputEvent, monitor: MonitorInfo },
+    /// Block or unblock local input; the outcome is reported back.
+    Block { blocked: bool, done: std::sync::mpsc::Sender<anyhow::Result<()>> },
 }
 
 /// How often the injector thread looks for a desktop switch.
@@ -62,6 +63,9 @@ impl WinInputInjector {
 fn injector_thread(rx: std::sync::mpsc::Receiver<Job>) {
     let mut last_attach = std::time::Instant::now() - ATTACH_INTERVAL;
     let mut force_attach = true;
+    // `BlockInput(TRUE)` can only be undone by this very thread, so the flag
+    // lives here and is cleared when the injector goes away.
+    let mut blocked = false;
     while let Ok(job) = rx.recv() {
         if force_attach || last_attach.elapsed() >= ATTACH_INTERVAL {
             last_attach = std::time::Instant::now();
@@ -72,9 +76,26 @@ fn injector_thread(rx: std::sync::mpsc::Receiver<Job>) {
                 Err(e) => tracing::debug!(error = %e, "could not follow the input desktop"),
             }
         }
-        if let Err(e) = inject_now(job.ev, &job.monitor) {
-            tracing::warn!(error = %e, "input injection failed");
-            force_attach = true;
+        match job {
+            Job::Inject { ev, monitor } => {
+                if let Err(e) = inject_now(ev, &monitor) {
+                    tracing::warn!(error = %e, "input injection failed");
+                    force_attach = true;
+                }
+            }
+            Job::Block { blocked: want, done } => {
+                let res = if want == blocked { Ok(()) } else { block_local_input(want) };
+                if res.is_ok() {
+                    blocked = want;
+                }
+                let _ = done.send(res);
+            }
+        }
+    }
+    if blocked {
+        match block_local_input(false) {
+            Ok(()) => tracing::info!("local input unblocked as the input thread stopped"),
+            Err(e) => tracing::error!(error = %e, "could not unblock local input while stopping"),
         }
     }
     tracing::debug!("input thread stopped");
@@ -83,8 +104,18 @@ fn injector_thread(rx: std::sync::mpsc::Receiver<Job>) {
 impl InputInjector for WinInputInjector {
     fn inject(&mut self, ev: InputEvent, monitor: &MonitorInfo) -> anyhow::Result<()> {
         self.tx
-            .send(Job { ev, monitor: monitor.clone() })
+            .send(Job::Inject { ev, monitor: monitor.clone() })
             .map_err(|_| anyhow::anyhow!("input thread is gone"))
+    }
+
+    fn set_local_input_blocked(&mut self, blocked: bool) -> anyhow::Result<()> {
+        let (done, result) = std::sync::mpsc::channel();
+        self.tx
+            .send(Job::Block { blocked, done })
+            .map_err(|_| anyhow::anyhow!("input thread is gone"))?;
+        result
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|_| anyhow::anyhow!("input thread did not answer"))?
     }
 }
 
@@ -121,6 +152,9 @@ fn inject_now(ev: InputEvent, monitor: &MonitorInfo) -> anyhow::Result<()> {
                 }
             }
             InputEvent::Key { code, pressed } => {
+                if code > MAX_VIRTUAL_KEY {
+                    anyhow::bail!("virtual-key code {code:#x} out of range");
+                }
                 let flags = if pressed {
                     KEYBD_EVENT_FLAGS(0)
                 } else {

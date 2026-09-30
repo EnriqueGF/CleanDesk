@@ -20,6 +20,9 @@ pub enum CoreError {
     #[error("could not determine the application data directory for this platform")]
     NoDataDir,
 
+    #[error("the unattended-access password must be at least {0} characters long")]
+    WeakPassword(usize),
+
     #[error("illegal session state transition: {from} -> {attempted}")]
     IllegalTransition {
         from: &'static str,

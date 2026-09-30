@@ -72,8 +72,19 @@ pub async fn connect_community(mut config: ClientConfig, pinned_key: Option<Stri
     // least as strict.
     config.expected_host_key.get_or_insert_with(|| host_key.clone());
 
-    // 2. Direct endpoints.
+    // 2. Direct endpoints. The record is signed by the host key, but the
+    // addresses in it are still just claims: never dial loopback or a bogus
+    // range, and only LAN addresses when the hint came from mDNS.
     for ep in &resolved.endpoints {
+        let acceptable = if resolved.via == "LAN" {
+            cleandesk_discovery::addr::is_lan(ep.ip())
+        } else {
+            cleandesk_discovery::addr::is_dialable(ep.ip())
+        };
+        if !acceptable {
+            debug!(%ep, via = resolved.via, "skipping endpoint outside the acceptable address class");
+            continue;
+        }
         match direct::dial(*ep, &config.identity, config.device.clone(), &host_key, config.target).await {
             Ok(link) => {
                 let via = if resolved.via == "LAN" { "LAN" } else { "directo" };

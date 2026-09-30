@@ -1,7 +1,8 @@
 //! CleanDesk Server binary — a thin wrapper around [`cleandesk_signal_server::run`].
 
 use anyhow::{Context, Result};
-use std::net::SocketAddr;
+use cleandesk_signal_server::state::{OwnerRegistry, ServerState};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -22,5 +23,14 @@ async fn main() -> Result<()> {
         .with_context(|| format!("binding {addr}"))?;
     cleandesk_signal_server::log_banner(addr);
 
-    cleandesk_signal_server::run(listener).await
+    // ID ownership survives restarts so an offline device keeps its ID
+    // (`CLEANDESK_SIGNAL_STATE_DIR`, default `./data`).
+    let state_dir = std::env::var_os("CLEANDESK_SIGNAL_STATE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("data"));
+    std::fs::create_dir_all(&state_dir).with_context(|| format!("creating {}", state_dir.display()))?;
+    let owners = OwnerRegistry::load(state_dir.join("owners.json"));
+    let state = Arc::new(ServerState::with_owners(owners));
+
+    cleandesk_signal_server::run_with_state(listener, state).await
 }

@@ -62,6 +62,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use zeroize::Zeroizing;
 use tracing::{debug, info, warn};
 
 /// How long to wait for the host to Accept/Reject.
@@ -647,14 +648,23 @@ struct Dispatch {
     host_protocol_minor: Arc<AtomicU32>,
 }
 
-/// Background: apply offer/answer/ICE from the server to the peer.
+/// Background: apply offer/answer/ICE from the server to the peer. Ends with
+/// the peer connection so the signaling socket (and its registration) does
+/// not outlive the session.
 async fn drive_signaling(
     signal: Arc<dyn SignalOut>,
     peer: Arc<PeerConnection>,
     session: SessionId,
     mut events_rx: mpsc::Receiver<SignalMessage>,
 ) {
-    while let Some(msg) = events_rx.recv().await {
+    loop {
+        let msg = tokio::select! {
+            _ = peer.wait_closed() => break,
+            msg = events_rx.recv() => match msg {
+                Some(msg) => msg,
+                None => break,
+            },
+        };
         match msg {
             SignalMessage::Signal { session: s, payload } if s == session => match payload {
                 SignalPayload::Offer { sdp } => {
@@ -686,7 +696,7 @@ async fn drive_signaling(
             SignalMessage::Ping { nonce } => {
                 let _ = signal.send(SignalMessage::Pong { nonce }).await;
             }
-            SignalMessage::Reject { .. } => break,
+            SignalMessage::Reject { session: s, .. } if s == session => break,
             _ => {}
         }
     }
@@ -906,26 +916,27 @@ async fn dispatch_incoming(
 }
 
 /// Compute and send the HMAC response to an unattended-auth challenge.
-/// What the viewer holds to answer an unattended challenge.
+/// What the viewer holds to answer an unattended challenge. Wiped from
+/// memory when dropped.
 #[derive(Clone)]
 pub enum UnattendedCredential {
-    Password(String),
-    Key([u8; 32]),
+    Password(Zeroizing<String>),
+    Key(Zeroizing<[u8; 32]>),
 }
 
 impl UnattendedCredential {
     fn from_config(config: &ClientConfig) -> Option<Self> {
         if let Some(k) = config.unattended_key {
-            return Some(Self::Key(k));
+            return Some(Self::Key(Zeroizing::new(k)));
         }
-        config.unattended_password.clone().map(Self::Password)
+        config.unattended_password.clone().map(|pw| Self::Password(Zeroizing::new(pw)))
     }
 
     /// The HMAC key for `host_id`, deriving it from the password if needed.
-    pub fn key_for(&self, host_id: CleanDeskId) -> Option<[u8; 32]> {
+    pub fn key_for(&self, host_id: CleanDeskId) -> Option<Zeroizing<[u8; 32]>> {
         match self {
-            Self::Key(k) => Some(*k),
-            Self::Password(pw) => cleandesk_crypto::password::unattended_key(pw, host_id.value()).ok(),
+            Self::Key(k) => Some(k.clone()),
+            Self::Password(pw) => cleandesk_crypto::password::unattended_key(pw, host_id.value()).ok().map(Zeroizing::new),
         }
     }
 }

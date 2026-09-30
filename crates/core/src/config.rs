@@ -1,5 +1,8 @@
 //! User-configurable settings (spec §3, §8, §9, §24).
 
+/// Shortest unattended-access password accepted (characters).
+pub const MIN_UNATTENDED_PASSWORD_LEN: usize = 10;
+
 use cleandesk_crypto::password;
 use cleandesk_proto::QualityProfile;
 use serde::{Deserialize, Serialize};
@@ -164,6 +167,11 @@ impl Settings {
     /// checks) and the derived HMAC key (for the challenge/response) — never the
     /// plaintext (spec §18).
     pub fn enable_unattended(&mut self, password: &str, host_id: u64) -> Result<()> {
+        // The derived key is stored on disk and answers an offline-crackable
+        // challenge; a short password would fall in minutes.
+        if password.chars().count() < MIN_UNATTENDED_PASSWORD_LEN {
+            return Err(crate::CoreError::WeakPassword(MIN_UNATTENDED_PASSWORD_LEN));
+        }
         self.unattended_password_hash = Some(password::hash_password(password)?);
         self.unattended_key_bytes = Some(password::unattended_key(password, host_id)?.to_vec());
         self.unattended_enabled = true;
