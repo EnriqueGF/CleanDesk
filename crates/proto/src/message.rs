@@ -237,6 +237,10 @@ pub enum SessionMessage {
     /// Viewer → host: apply text, then inject Ctrl+V after the clipboard write
     /// succeeds. Requires clipboard and keyboard permissions. Added in 2.4.
     PasteClipboard { content: String },
+    /// Viewer → host, only after authenticated Hello from a 2.5+ host.
+    WallpaperRequest,
+    /// Host → viewer: bounded JPEG of the wallpaper, never a screen capture.
+    Wallpaper { jpeg: Vec<u8> },
 }
 
 /// Privileged one-shot actions a viewer may request from the host.

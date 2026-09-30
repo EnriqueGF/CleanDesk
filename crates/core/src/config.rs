@@ -67,6 +67,9 @@ pub struct Settings {
     /// default because it prompts for elevation at startup.
     #[serde(default)]
     pub privileged_control: bool,
+    /// Keep retrying a lost outgoing session every five seconds. Opt-in.
+    #[serde(default)]
+    pub auto_reconnect: bool,
 }
 
 /// Rendezvous mode.
@@ -102,6 +105,7 @@ impl Default for Settings {
             minimize_to_tray: true,
             check_updates: true,
             privileged_control: false,
+            auto_reconnect: false,
         }
     }
 }

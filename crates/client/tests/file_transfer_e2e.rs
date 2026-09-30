@@ -70,7 +70,7 @@ async fn viewer_sends_a_file_to_the_host() {
     while tokio::time::Instant::now() < deadline && granted.is_none() {
         match tokio::time::timeout(Duration::from_millis(500), session.events.recv()).await {
             Ok(Some(ClientEvent::PermissionsUpdated(p))) => granted = Some(p),
-            Ok(Some(ClientEvent::Disconnected(reason))) => panic!("disconnected early: {reason}"),
+            Ok(Some(ClientEvent::Disconnected(reason) | ClientEvent::ConnectionLost(reason))) => panic!("disconnected early: {reason}"),
             Ok(Some(_)) | Err(_) => {}
             Ok(None) => break,
         }
@@ -98,7 +98,7 @@ async fn viewer_sends_a_file_to_the_host() {
                 done_path = Some(path);
             }
             Ok(Some(ClientEvent::FileFailed { id: fid, reason })) => panic!("transfer {fid} failed: {reason}"),
-            Ok(Some(ClientEvent::Disconnected(reason))) => panic!("disconnected: {reason}"),
+            Ok(Some(ClientEvent::Disconnected(reason) | ClientEvent::ConnectionLost(reason))) => panic!("disconnected: {reason}"),
             Ok(Some(_)) | Err(_) => {}
             Ok(None) => break,
         }

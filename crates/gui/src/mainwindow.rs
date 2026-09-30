@@ -105,7 +105,8 @@ pub fn show(app: &mut RotoDeskApp, ctx: &egui::Context) {
     add_device_window(app, ctx);
     nearby_window(app, ctx);
     password_prompt(app, ctx);
-    if let Some(target) = app.connecting_target() {
+    reconnect_modal(app, ctx);
+    if let Some(target) = app.connecting_target().filter(|_| app.reconnect.is_none()) {
         egui::Modal::new(egui::Id::new("connection-progress")).show(ctx, |ui| {
             ui.set_max_width(360.0);
             ui.heading(tr("Connecting"));
@@ -157,10 +158,43 @@ fn password_prompt(app: &mut RotoDeskApp, ctx: &egui::Context) {
         });
     });
     if cancel || response.should_close() {
-        app.password_prompt = None;
-        app.connect_password.clear();
+        app.cancel_reconnect();
     } else if retry {
-        app.start_connection(target, ctx);
+        app.submit_password(target, ctx);
+    }
+}
+
+fn reconnect_modal(app: &mut RotoDeskApp, ctx: &egui::Context) {
+    if app.password_prompt.is_some() { return; }
+    let Some(retry) = app.reconnect.as_ref() else { return };
+    let mut cancel = false;
+    let response = egui::Modal::new(egui::Id::new("reconnecting")).show(ctx, |ui| {
+        ui.set_width(360.0);
+        ui.heading(tr("Reconnecting"));
+        ui.label(retry.target.to_string());
+        ui.horizontal(|ui| {
+            ui.spinner();
+            if app.is_connecting() {
+                ui.label(trf("Connection attempt {n}…", &[("n", &retry.attempts.to_string())]));
+            } else {
+                ui.label(trf("Retrying in {seconds} s…", &[("seconds", &retry.remaining(std::time::Instant::now()).to_string())]));
+            }
+        });
+        ui.label(tr("RotoDesk will keep retrying until the device reconnects or you cancel."));
+        if !retry.last_error.is_empty() {
+            ui.label(egui::RichText::new(&retry.last_error).color(theme::TEXT_DIM));
+        }
+        cancel = ui.button(tr("Cancel")).clicked();
+    });
+    if cancel || response.should_close() { app.cancel_reconnect(); }
+    ctx.request_repaint_after(std::time::Duration::from_millis(200));
+}
+
+fn reconnect_setting(app: &mut RotoDeskApp, ui: &mut egui::Ui) {
+    let mut enabled = app.state.settings.read().auto_reconnect;
+    if ui.checkbox(&mut enabled, tr("Reconnect if disconnected")).changed() {
+        app.state.settings.write().auto_reconnect = enabled;
+        app.save_settings();
     }
 }
 
@@ -490,6 +524,7 @@ fn connect_bar(app: &mut RotoDeskApp, ui: &mut egui::Ui, ctx: &egui::Context) {
         if go && !connecting {
             start_from_input(app, ctx);
         }
+        reconnect_setting(app, ui);
     });
 }
 
@@ -1444,6 +1479,8 @@ fn settings_window(app: &mut RotoDeskApp, ctx: &egui::Context) {
                                         alias_settings(app, ui);
                                         ui.separator();
                                         tray_settings(app, ui);
+                                        ui.separator();
+                                        reconnect_setting(app, ui);
                                         ui.add_space(12.0);
                                         ui.hyperlink_to(tr("Logo credits"), "https://commons.wikimedia.org/wiki/File:Roto2.png");
                                     }

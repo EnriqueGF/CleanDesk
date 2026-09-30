@@ -81,7 +81,7 @@ async fn end_to_end_connect_and_control_handshake() {
                     assert!(p.contains(Permissions::VIEW_SCREEN));
                     got_permissions = true;
                 }
-                Some(ClientEvent::Disconnected(reason)) => panic!("disconnected early: {reason}"),
+                Some(ClientEvent::Disconnected(reason) | ClientEvent::ConnectionLost(reason)) => panic!("disconnected early: {reason}"),
                 Some(_) => {}
                 None => break,
             },

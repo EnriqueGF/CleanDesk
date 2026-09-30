@@ -143,6 +143,8 @@ pub enum HostEvent {
     SessionStarted { session: SessionId, peer: DeviceInfo, granted: Permissions },
     /// The session ended; `reason` is human-readable.
     SessionEnded { session: SessionId, reason: String },
+    /// A preview supplied by the authenticated viewer, never from discovery.
+    Wallpaper { device: rotodesk_proto::RotoDeskId, jpeg: Vec<u8> },
 }
 
 /// Local control over the running host (spec §18 / §28: the person at the
@@ -577,6 +579,8 @@ async fn run_session_inner(
     let challenge = rotodesk_crypto::proof::Challenge::issue();
     let media = MediaControl::new(ctx.quality, monitor.clone());
     let mut media_started = false;
+    let mut wallpaper_requested = false;
+    let mut wallpaper_received = false;
     let auth_deadline = Instant::now() + AUTH_TIMEOUT;
 
     if authed {
@@ -679,6 +683,25 @@ async fn run_session_inner(
                     }
                     // Nothing else is honoured until the viewer is authenticated.
                     _ if !authed => {}
+                    SessionMessage::WallpaperRequest if wallpaper_allowed(authed, granted, wallpaper_requested) => {
+                            wallpaper_requested = true;
+                            // The viewer's request proves support for protocol 2.5.
+                            send_ctrl(&peer, &SessionMessage::WallpaperRequest).await;
+                            let peer = peer.clone();
+                            tokio::spawn(async move {
+                                match tokio::task::spawn_blocking(rotodesk_platform::wallpaper::preview).await {
+                                    Ok(Ok(Some(jpeg))) => { send_ctrl(&peer, &SessionMessage::Wallpaper { jpeg }).await; }
+                                    Ok(Ok(None)) => {}
+                                    Ok(Err(e)) => debug!(error = %e, "wallpaper unavailable"),
+                                    Err(e) => debug!(error = %e, "wallpaper worker failed"),
+                                }
+                            });
+                    }
+                    SessionMessage::Wallpaper { jpeg }
+                        if wallpaper_requested && !wallpaper_received && rotodesk_proto::wallpaper::valid_payload(&jpeg) => {
+                            wallpaper_received = true;
+                            emit(&ctx.config, HostEvent::Wallpaper { device: ctx.peer.id, jpeg });
+                    }
                     SessionMessage::SetQuality { profile } => {
                         media.set_quality(profile);
                         debug!(?profile, "quality change requested");
@@ -1005,6 +1028,10 @@ pub fn input_allowed(ev: InputEvent, granted: Permissions) -> bool {
     }
 }
 
+fn wallpaper_allowed(authed: bool, granted: Permissions, already_requested: bool) -> bool {
+    authed && granted.contains(Permissions::VIEW_SCREEN) && !already_requested
+}
+
 /// Tracks which keys and mouse buttons the viewer currently holds down, so
 /// they can all be released when the session ends.
 #[derive(Debug, Default)]
@@ -1108,6 +1135,14 @@ fn default_monitor() -> MonitorInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wallpaper_requires_authenticated_screen_access_and_only_one_request() {
+        assert!(wallpaper_allowed(true, Permissions::VIEW_SCREEN, false));
+        assert!(!wallpaper_allowed(false, Permissions::VIEW_SCREEN, false));
+        assert!(!wallpaper_allowed(true, Permissions::empty(), false));
+        assert!(!wallpaper_allowed(true, Permissions::VIEW_SCREEN, true));
+    }
 
     #[test]
     fn clipboard_paste_preserves_held_modifiers() {

@@ -157,6 +157,10 @@ impl ClientConfig {
 /// Control-plane events surfaced to the embedding UI.
 #[derive(Debug, Clone)]
 pub enum ClientEvent {
+    /// Transport failure, unlike an explicit session termination by the host.
+    ConnectionLost(String),
+    /// Wallpaper preview from an authenticated host (protocol 2.5+).
+    Wallpaper(Vec<u8>),
     Connected,
     /// The host introduced itself.
     Hello(DeviceInfo),
@@ -211,6 +215,23 @@ pub struct ClientSession {
     clipboard: Arc<Mutex<Option<clipboard::ClipboardSync>>>,
     clipboard_tx: mpsc::UnboundedSender<String>,
     host_protocol_minor: Arc<AtomicU32>,
+    peer: Arc<PeerConnection>,
+}
+
+impl Drop for ClientSession {
+    fn drop(&mut self) {
+        self.disable_clipboard_sync();
+        let peer = self.peer.clone();
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.spawn(async move {
+                // Also covers a completed attempt cancelled before the GUI receives it.
+                if let Ok(bytes) = frame::encode_payload(&SessionMessage::Disconnect { reason: "viewer closed".into() }) {
+                    let _ = tokio::time::timeout(Duration::from_millis(500), peer.send(Channel::Control, Bytes::from(bytes))).await;
+                }
+                let _ = peer.close().await;
+            });
+        }
+    }
 }
 
 impl std::fmt::Debug for ClientSession {
@@ -347,6 +368,17 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Failed or cancelled attempts must release their transport before retrying.
+struct PendingPeer(Option<Arc<PeerConnection>>);
+
+impl Drop for PendingPeer {
+    fn drop(&mut self) {
+        if let (Some(peer), Ok(rt)) = (self.0.take(), tokio::runtime::Handle::try_current()) {
+            rt.spawn(async move { let _ = peer.close().await; });
+        }
+    }
+}
+
 /// Open a session to `config.target`. Returns once the P2P link is connected, or
 /// an error if the request is rejected / times out / fails to connect.
 pub async fn connect(config: ClientConfig) -> Result<ClientSession> {
@@ -422,12 +454,17 @@ pub(crate) async fn connect_over(
     let mut incoming = peer.incoming()?;
     let mut ice_out = peer.ice_candidates()?;
     let peer = Arc::new(peer);
+    let mut pending_peer = PendingPeer(Some(peer.clone()));
 
     // Trickle local ICE candidates outward.
     {
         let signal = signal.clone();
+        let peer = peer.clone();
         tokio::spawn(async move {
-            while let Some(payload) = ice_out.recv().await {
+            while let Some(payload) = tokio::select! {
+                _ = peer.wait_closed() => None,
+                payload = ice_out.recv() => payload,
+            } {
                 let _ = signal.send(SignalMessage::Signal { session, payload }).await;
             }
         });
@@ -544,7 +581,10 @@ pub(crate) async fn connect_over(
         let peer = peer.clone();
         let mut control_rx = control_rx;
         tokio::spawn(async move {
-            while let Some(msg) = control_rx.recv().await {
+            while let Some(msg) = tokio::select! {
+                _ = peer.wait_closed() => None,
+                msg = control_rx.recv() => msg,
+            } {
                 let disconnect = matches!(msg, SessionMessage::Disconnect { .. });
                 if let Ok(bytes) = frame::encode_payload(&msg) {
                     let _ = peer.send(Channel::Control, Bytes::from(bytes)).await;
@@ -557,6 +597,7 @@ pub(crate) async fn connect_over(
         });
     }
 
+    pending_peer.0 = None;
     Ok(ClientSession {
         session,
         granted,
@@ -573,6 +614,7 @@ pub(crate) async fn connect_over(
         clipboard,
         clipboard_tx,
         host_protocol_minor,
+        peer,
     })
 }
 
@@ -797,6 +839,10 @@ async fn dispatch_incoming(
     let mut decoder = TileDecoder::new();
     let mut reassembler = Reassembler::new();
     let mut gate = FrameGate::new();
+    let mut wallpaper_requested = false;
+    let mut wallpaper_received = false;
+    let mut wallpaper_sent = false;
+    let mut disconnect_emitted = false;
     let request_keyframe = |action: GateAction| {
         if action == GateAction::DropAndRequest {
             debug!("requesting keyframe from host");
@@ -810,7 +856,8 @@ async fn dispatch_incoming(
             biased;
             _ = peer.wait_closed() => None,
             _ = tokio::time::sleep_until(deadline) => {
-                let _ = cev_tx.send(ClientEvent::Disconnected("remote timed out after 20 seconds".into())).await;
+                let _ = cev_tx.send(ClientEvent::ConnectionLost("remote timed out after 20 seconds".into())).await;
+                disconnect_emitted = true;
                 break;
             }
             next = incoming.recv() => next,
@@ -846,6 +893,10 @@ async fn dispatch_incoming(
                         if !protocol.compatible_with(PROTOCOL_VERSION) {
                             warn!(%protocol, "host speaks an incompatible protocol");
                         }
+                        if protocol.compatible_with(PROTOCOL_VERSION) && protocol.minor >= 5 && !wallpaper_requested {
+                            wallpaper_requested = true;
+                            let _ = control_tx.send(SessionMessage::WallpaperRequest);
+                        }
                         let _ = cev_tx.send(ClientEvent::Hello(info)).await;
                     }
                     SessionMessage::AuthChallenge { challenge_b64 } => {
@@ -860,9 +911,11 @@ async fn dispatch_incoming(
                     SessionMessage::AuthResult { ok } => {
                         let _ = cev_tx.send(ClientEvent::AuthResult(ok)).await;
                         if !ok {
+                            disconnect_emitted = true;
                             let _ = cev_tx
                                 .send(ClientEvent::Disconnected("authentication failed".into()))
                                 .await;
+                            break;
                         }
                     }
                     SessionMessage::PermissionsUpdate { granted } => {
@@ -896,12 +949,27 @@ async fn dispatch_incoming(
                         let _ = control_tx.send(SessionMessage::Pong { nonce });
                     }
                     SessionMessage::Disconnect { reason } => {
+                        disconnect_emitted = true;
                         let _ = cev_tx.send(ClientEvent::Disconnected(reason)).await;
                         break;
                     }
                     // Binding happened before this task started; a late
                     // proof never re-binds.
                     SessionMessage::IdentityProof { .. } => debug!("duplicate identity proof ignored"),
+                    SessionMessage::WallpaperRequest if wallpaper_requested && !wallpaper_sent => {
+                        wallpaper_sent = true;
+                        let control_tx = control_tx.clone();
+                        tokio::spawn(async move {
+                            if let Ok(Ok(Some(jpeg))) = tokio::task::spawn_blocking(rotodesk_platform::wallpaper::preview).await {
+                                let _ = control_tx.send(SessionMessage::Wallpaper { jpeg });
+                            }
+                        });
+                    }
+                    SessionMessage::Wallpaper { jpeg }
+                        if wallpaper_requested && !wallpaper_received && rotodesk_proto::wallpaper::valid_payload(&jpeg) => {
+                            wallpaper_received = true;
+                            let _ = cev_tx.send(ClientEvent::Wallpaper(jpeg)).await;
+                    }
                     _ => {}
                 }
             }
@@ -912,7 +980,9 @@ async fn dispatch_incoming(
         }
     }
     let _ = peer.close().await;
-    let _ = cev_tx.send(ClientEvent::Disconnected("session ended".into())).await;
+    if !disconnect_emitted {
+        let _ = cev_tx.send(ClientEvent::ConnectionLost("transport closed".into())).await;
+    }
 }
 
 /// Compute and send the HMAC response to an unattended-auth challenge.
@@ -1023,39 +1093,95 @@ mod tests {
 mod session_lifecycle_tests {
     use super::*;
 
-    async fn silent_session() -> (Arc<PeerConnection>, mpsc::Sender<(Channel, Bytes)>, mpsc::Receiver<ClientEvent>, tokio::task::JoinHandle<()>) {
+    #[tokio::test]
+    async fn cancelling_an_attempt_closes_its_transport() {
+        let peer = Arc::new(PeerConnection::new(IceConfig::default(), false).await.unwrap());
+        let pending = PendingPeer(Some(peer.clone()));
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _pending = pending;
+            let _ = ready_tx.send(());
+            std::future::pending::<()>().await;
+        });
+        ready_rx.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        tokio::time::timeout(Duration::from_secs(2), peer.wait_closed()).await.unwrap();
+    }
+
+    async fn silent_session() -> (Arc<PeerConnection>, mpsc::Sender<(Channel, Bytes)>, mpsc::Receiver<ClientEvent>, tokio::task::JoinHandle<()>, mpsc::UnboundedReceiver<SessionMessage>) {
         let peer = Arc::new(PeerConnection::new(IceConfig::default(), false).await.unwrap());
         let (incoming_tx, incoming) = mpsc::channel(8);
         let (frames_tx, _frames) = mpsc::channel(8);
         let (events_tx, events) = mpsc::channel(8);
-        let (control_tx, _control) = mpsc::unbounded_channel();
+        let (control_tx, control) = mpsc::unbounded_channel();
         let (files_tx, _files) = mpsc::unbounded_channel();
         let task = tokio::spawn(dispatch_incoming(peer.clone(), incoming, frames_tx, events_tx, control_tx, None,
             RotoDeskId::parse("123456789").unwrap(), Dispatch {
                 files_tx, granted: Arc::new(AtomicU32::new(0)),
                 clipboard: Arc::new(Mutex::new(None)), host_protocol_minor: Arc::new(AtomicU32::new(0)),
             }));
-        (peer, incoming_tx, events, task)
+        (peer, incoming_tx, events, task, control)
+    }
+
+    #[tokio::test]
+    async fn explicit_remote_close_is_not_a_connection_loss() {
+        let (_peer, sender, mut events, task, _control) = silent_session().await;
+        sender.send((Channel::Control, frame::encode_payload(&SessionMessage::Disconnect {
+            reason: "closed by the host".into(),
+        }).unwrap().into())).await.unwrap();
+        assert!(matches!(tokio::time::timeout(Duration::from_secs(2), events.recv()).await.unwrap().unwrap(),
+            ClientEvent::Disconnected(reason) if reason == "closed by the host"));
+        task.await.unwrap();
+        assert!(events.recv().await.is_none(), "an explicit close must not trigger automatic reconnection");
     }
 
     #[tokio::test]
     async fn silent_remote_ends_session_after_twenty_seconds_with_sender_alive() {
-        let (_peer, _sender, mut events, task) = silent_session().await;
+        let (_peer, _sender, mut events, task, _control) = silent_session().await;
         let start = Instant::now();
         let event = tokio::time::timeout(Duration::from_secs(23), events.recv()).await.unwrap().unwrap();
-        assert!(matches!(event, ClientEvent::Disconnected(reason) if reason.contains("20 seconds")));
+        assert!(matches!(event, ClientEvent::ConnectionLost(reason) if reason.contains("20 seconds")));
         assert!(start.elapsed() >= Duration::from_secs(20));
         task.await.unwrap();
     }
 
     #[tokio::test]
     async fn inbound_heartbeat_refreshes_timeout_and_transport_close_ends_session() {
-        let (peer, sender, mut events, task) = silent_session().await;
+        let (peer, sender, mut events, task, _control) = silent_session().await;
         tokio::time::sleep(Duration::from_secs(12)).await;
         sender.send((Channel::Control, frame::encode_payload(&SessionMessage::Ping { nonce: 1 }).unwrap().into())).await.unwrap();
         assert!(tokio::time::timeout(Duration::from_secs(10), events.recv()).await.is_err(), "heartbeat must extend the original 20 second deadline");
         peer.close().await.unwrap();
-        assert!(matches!(tokio::time::timeout(Duration::from_secs(2), events.recv()).await.unwrap().unwrap(), ClientEvent::Disconnected(_)));
+        assert!(matches!(tokio::time::timeout(Duration::from_secs(2), events.recv()).await.unwrap().unwrap(), ClientEvent::ConnectionLost(_)));
         task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn wallpaper_is_negotiated_bounded_and_received_once() {
+        let (_peer, sender, mut events, task, mut control) = silent_session().await;
+        async fn send(sender: &mpsc::Sender<(Channel, Bytes)>, msg: SessionMessage) {
+            sender.send((Channel::Control, frame::encode_payload(&msg).unwrap().into())).await.unwrap();
+        }
+        let jpeg = vec![0xff, 0xd8, 0, 1];
+        send(&sender, SessionMessage::Wallpaper { jpeg: jpeg.clone() }).await;
+        let info = DeviceInfo { id: RotoDeskId::new(123456789).unwrap(), alias: None,
+            hostname: "test".into(), os: "test".into(), app_version: "0.2.1".into() };
+        let mut protocol = PROTOCOL_VERSION;
+        protocol.minor = 4;
+        send(&sender, SessionMessage::Hello { info: info.clone(), protocol }).await;
+        assert!(matches!(events.recv().await.unwrap(), ClientEvent::Hello(_)));
+        assert!(control.try_recv().is_err(), "older hosts must receive no new protocol tags");
+        send(&sender, SessionMessage::Hello { info, protocol: PROTOCOL_VERSION }).await;
+        assert!(matches!(events.recv().await.unwrap(), ClientEvent::Hello(_)));
+        assert!(matches!(control.recv().await.unwrap(), SessionMessage::WallpaperRequest));
+        send(&sender, SessionMessage::Wallpaper { jpeg: vec![0xff; rotodesk_proto::wallpaper::MAX_BYTES + 1] }).await;
+        send(&sender, SessionMessage::Wallpaper { jpeg: jpeg.clone() }).await;
+        assert!(matches!(events.recv().await.unwrap(), ClientEvent::Wallpaper(bytes) if bytes == jpeg));
+        send(&sender, SessionMessage::Wallpaper { jpeg }).await;
+        send(&sender, SessionMessage::Disconnect { reason: "done".into() }).await;
+        assert!(matches!(events.recv().await.unwrap(), ClientEvent::Disconnected(_)));
+        task.await.unwrap();
+        assert!(events.recv().await.is_none());
     }
 }

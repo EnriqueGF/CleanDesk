@@ -9,6 +9,14 @@ server and relay.
 
 ## Communication planes
 
+Protocol 2.5 appends `WallpaperRequest` and `Wallpaper` to the reliable control
+messages. Only authenticated peers with screen access exchange previews;
+older peers receive no new messages. The platform reads the desktop background
+and bounds encoding/decoding to 320 × 180 / 48 KiB. The GUI caches it separately
+from legacy screen thumbnails. Transport loss and explicit session closure are
+distinct client events; the GUI schedules opt-in retries five seconds after
+each failed attempt, keeping the session credential in zeroized memory.
+
 RotoDesk separates three planes, each with its optimal serialization:
 
 | Plane | Channel | Serialization | Content |

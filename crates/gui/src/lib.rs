@@ -10,6 +10,7 @@
 //! rutas de red.
 
 mod app;
+mod reconnect;
 mod approval;
 mod i18n;
 mod keymap;

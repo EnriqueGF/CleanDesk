@@ -106,7 +106,10 @@ pub(crate) async fn run_files(ctx: FilesCtx, mut rx: mpsc::UnboundedReceiver<Fil
     let mut incoming = IncomingTable::new();
     let mut writers: HashMap<u64, Writer> = HashMap::new();
 
-    while let Some(cmd) = rx.recv().await {
+    while let Some(cmd) = tokio::select! {
+        _ = ctx.peer.wait_closed() => None,
+        cmd = rx.recv() => cmd,
+    } {
         match cmd {
             FileCommand::Send { transfer_id, path } => {
                 if !ctx.allowed() {

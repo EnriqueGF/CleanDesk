@@ -8,6 +8,7 @@ description = "Host role runtime: capture -> encode -> send; receive & inject in
 
 [dependencies]
 rotodesk-proto.workspace = true
+rotodesk-platform.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

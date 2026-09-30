@@ -19,6 +19,12 @@ Each installation has a unique **RotoDesk ID** (e.g. `548 291 743`) and,
 optionally, an alias (e.g. `pc-oficina.roto`).
 
 ## 4. Main screen
+- Recent devices and contacts display the last authenticated desktop-wallpaper
+  preview (protocol 2.5), retained locally without capturing open windows.
+- Optional automatic reconnection: after connection loss, a modal retries
+  indefinitely with a five-second delay between attempts and a Cancel button.
+  Intentional closure stops the session; password rejection pauses retries
+  for user input, and identity changes stop retries for verification.
 - *This device:* ID, alias, connection status, copy-ID button, service status.
 - *Connect to device:* "Enter RotoDesk ID" field + "Connect" button; list of
   recent connections and saved devices.

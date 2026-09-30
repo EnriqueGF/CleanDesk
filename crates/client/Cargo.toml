@@ -9,6 +9,7 @@ description = "Viewer role runtime: receive & decode video; capture & send input
 [dependencies]
 zeroize.workspace = true
 rotodesk-proto.workspace = true
+rotodesk-platform.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

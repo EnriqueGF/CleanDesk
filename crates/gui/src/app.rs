@@ -128,6 +128,8 @@ pub struct RotoDeskApp {
     /// Aviso a mostrar en la ventana principal (error de conexión, desconexión…).
     pub notice: Option<String>,
     pub password_prompt: Option<PasswordPrompt>,
+    pub reconnect: Option<crate::reconnect::Reconnect>,
+    last_unattended_key: Option<zeroize::Zeroizing<[u8; 32]>>,
     /// Equipo cuya identidad cambió respecto a la clave fijada; el usuario
     /// decide si confiar en la nueva (tras comprobar la huella).
     pub identity_alarm: Option<RotoDeskId>,
@@ -297,6 +299,8 @@ impl RotoDeskApp {
             pending_remember: None,
             notice: None,
             password_prompt: None,
+            reconnect: None,
+            last_unattended_key: None,
             identity_alarm: None,
             tray: match crate::tray::Tray::new(cc.egui_ctx.clone(), crate::tray::native_handle(cc))
             {
@@ -381,6 +385,17 @@ impl RotoDeskApp {
     /// la calidad por defecto de los ajustes. Si hay contraseña en el campo, la
     /// conexión se hace en modo desatendido.
     pub fn start_connection(&mut self, target: RotoDeskId, ctx: &egui::Context) {
+        if self.is_connecting() || matches!(self.connect, ConnectPhase::Active(_)) { return; }
+        self.reconnect = None;
+        self.begin_connection(target, ctx, None);
+    }
+
+    /// A password supplied by the user resumes a paused reconnection, if any.
+    pub fn submit_password(&mut self, target: RotoDeskId, ctx: &egui::Context) {
+        self.begin_connection(target, ctx, None);
+    }
+
+    fn begin_connection(&mut self, target: RotoDeskId, ctx: &egui::Context, retry_key: Option<Option<[u8; 32]>>) {
         if self.is_connecting() || matches!(self.connect, ConnectPhase::Active(_)) {
             return; // una sesión a la vez (MVP)
         }
@@ -402,7 +417,9 @@ impl RotoDeskApp {
         config.quality = quality;
         self.pending_remember = None;
         let pw = self.connect_password.trim();
-        if !pw.is_empty() {
+        if let Some(key) = retry_key {
+            config.unattended_key = key;
+        } else if !pw.is_empty() {
             // Derivamos la clave aquí (Argon2id, ~100 ms) para poder recordarla
             // sin guardar nunca la contraseña en claro.
             match rotodesk_crypto::password::unattended_key(pw, target.value()) {
@@ -442,6 +459,7 @@ impl RotoDeskApp {
         // primera sesión la fija tras verificarla.
         config.expected_host_key = pinned.clone();
         let unattended = config.unattended_key.is_some();
+        self.last_unattended_key = config.unattended_key.map(zeroize::Zeroizing::new);
         let (tx, rx) = oneshot::channel();
         let ctx = ctx.clone();
         let task = self.rt.spawn(async move {
@@ -464,6 +482,28 @@ impl RotoDeskApp {
             self.connect = ConnectPhase::Idle;
             self.pending_remember = None;
         }
+    }
+
+    pub fn cancel_reconnect(&mut self) {
+        self.cancel_connection();
+        self.reconnect = None;
+        self.password_prompt = None;
+        self.last_unattended_key = None;
+        self.connect_password.clear();
+        self.pending_remember = None;
+    }
+
+    fn poll_reconnect(&mut self, ctx: &egui::Context) {
+        if self.password_prompt.is_some() || !matches!(self.connect, ConnectPhase::Idle) { return; }
+        let Some(retry) = self.reconnect.as_mut() else { return };
+        let now = std::time::Instant::now();
+        if retry.due(now) {
+            retry.begin_attempt();
+            let target = retry.target;
+            let key = self.last_unattended_key.as_deref().copied();
+            self.begin_connection(target, ctx, Some(key));
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(200));
     }
 
     /// Modo de red efectivo: `--signal-url` manda; si no, los ajustes.
@@ -565,6 +605,7 @@ impl RotoDeskApp {
         match rx.try_recv() {
             Ok(Ok(session)) => {
                 let target = *target;
+                self.reconnect = None;
                 info!(%target, "conexión establecida");
                 self.last_target = Some(target);
                 self.mark_connected(target);
@@ -591,7 +632,9 @@ impl RotoDeskApp {
                 if let Some(mac) = session.peer_mac.clone() {
                     self.remember_mac(target, mac);
                 }
-                self.connect = ConnectPhase::Active(Box::new(ViewerState::new(session)));
+                let mut viewer = ViewerState::new(session);
+                viewer.auto_reconnect = self.state.settings.read().auto_reconnect;
+                self.connect = ConnectPhase::Active(Box::new(viewer));
             }
             Ok(Err(e)) => {
                 warn!(error = %e, "conexión fallida");
@@ -607,10 +650,17 @@ impl RotoDeskApp {
                     return;
                 }
                 if is_identity_change(&raw) {
+                    self.reconnect = None;
+                    self.last_unattended_key = None;
                     self.identity_alarm = Some(*target);
                 }
                 let text = friendly_error(&raw);
-                self.notice = Some(trf("Could not connect: {err}", &[("err", &text)]));
+                if let Some(retry) = self.reconnect.as_mut() {
+                    retry.failed(text, std::time::Instant::now());
+                    self.notice = None;
+                } else {
+                    self.notice = Some(trf("Could not connect: {err}", &[("err", &text)]));
+                }
                 self.connect = ConnectPhase::Idle;
             }
             Err(oneshot::error::TryRecvError::Empty) => {
@@ -618,8 +668,10 @@ impl RotoDeskApp {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
             }
             Err(oneshot::error::TryRecvError::Closed) => {
-                self.notice =
-                    Some(tr("The connection was interrupted before it was established.").into());
+                let text = tr("The connection was interrupted before it was established.").to_string();
+                if let Some(retry) = self.reconnect.as_mut() {
+                    retry.failed(text, std::time::Instant::now());
+                } else { self.notice = Some(text); }
                 self.connect = ConnectPhase::Idle;
             }
         }
@@ -657,6 +709,7 @@ impl RotoDeskApp {
     fn drain_host_events(&mut self) {
         while let Ok(ev) = self.host_events_rx.try_recv() {
             match ev {
+                HostEvent::Wallpaper { device, jpeg } => self.save_wallpaper(device, &jpeg),
                 HostEvent::Registered(id) => {
                     if id != self.id {
                         warn!(%id, expected = %self.id, "el servidor confirmó un ID distinto");
@@ -708,6 +761,7 @@ impl eframe::App for RotoDeskApp {
 
         // 1) Avanzar la conexión saliente si está en curso.
         self.poll_connecting(ctx);
+        self.poll_reconnect(ctx);
 
         // 2) Recoger solicitudes/eventos entrantes y mostrar el modal si hay.
         self.drain_incoming();
@@ -865,6 +919,13 @@ impl RotoDeskApp {
         };
 
         let outcome = crate::viewer::show(&mut viewer, ctx);
+        if self.state.settings.read().auto_reconnect != viewer.auto_reconnect {
+            self.state.settings.write().auto_reconnect = viewer.auto_reconnect;
+            self.save_settings();
+        }
+        if let (Some(target), Some(jpeg)) = (self.last_target, viewer.take_wallpaper()) {
+            self.save_wallpaper(target, &jpeg);
+        }
 
         let (notice, password_rejected) = match outcome {
             crate::viewer::ViewerOutcome::Continue => {
@@ -873,11 +934,19 @@ impl RotoDeskApp {
             }
             crate::viewer::ViewerOutcome::Disconnected(notice) => (notice, false),
             crate::viewer::ViewerOutcome::PasswordRejected => (None, true),
+            crate::viewer::ViewerOutcome::ConnectionLost(reason) => {
+                if viewer.auto_reconnect {
+                    if let Some(target) = self.last_target {
+                        self.reconnect = Some(crate::reconnect::Reconnect::new(target,
+                            friendly_reason(&reason).to_string(), std::time::Instant::now()));
+                    }
+                    (None, false)
+                } else {
+                    (Some(trf("Disconnected: {reason}", &[("reason", friendly_reason(&reason))])), false)
+                }
+            }
         };
         viewer.disconnect();
-        if let (Some(target), Some(frame)) = (self.last_target, viewer.last_frame()) {
-            self.save_thumbnail(target, frame);
-        }
         if let Err(e) = self.state.record_session_end(viewer.session_id(), "closed") {
             warn!(error = %e, "no se pudo cerrar el registro de historial");
         }
@@ -895,6 +964,7 @@ impl RotoDeskApp {
             }
         }
         self.connect = ConnectPhase::Idle;
+        if self.reconnect.is_none() && !password_rejected { self.last_unattended_key = None; }
     }
 }
 
@@ -1065,34 +1135,19 @@ impl RotoDeskApp {
     fn thumb_path(&self, id: RotoDeskId) -> std::path::PathBuf {
         self.state
             .data_dir()
-            .join("thumbs")
+            .join("wallpapers")
             .join(format!("{}.png", id.value()))
     }
 
-    /// Guarda una miniatura (≈320 px de ancho) del último fotograma de una
-    /// sesión, para la tarjeta de "Sesiones recientes".
-    pub fn save_thumbnail(&mut self, id: RotoDeskId, frame: &rotodesk_codec::DecodedImage) {
-        if frame.width == 0 || frame.height == 0 {
-            return;
-        }
-        let Some(src) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone())
-        else {
-            return;
-        };
-        let target_w = 320u32.min(frame.width);
-        let target_h = ((frame.height as u64 * target_w as u64) / frame.width as u64).max(1) as u32;
-        let small = image::imageops::resize(
-            &src,
-            target_w,
-            target_h,
-            image::imageops::FilterType::Triangle,
-        );
+    /// Guarda solo el wallpaper autorizado; nunca las ventanas de la sesión.
+    pub fn save_wallpaper(&mut self, id: RotoDeskId, jpeg: &[u8]) {
+        let Ok(small) = rotodesk_platform::wallpaper::decode_preview(jpeg) else { return };
         let path = self.thumb_path(id);
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         if let Err(e) = small.save(&path) {
-            warn!(error = %e, "could not save session thumbnail");
+            warn!(error = %e, "could not save wallpaper preview");
         }
         // Forzamos recarga en la siguiente pintura.
         self.thumbs.remove(&id.value());
@@ -1108,7 +1163,19 @@ impl RotoDeskApp {
             return cached.clone();
         }
         let path = self.thumb_path(id);
-        let loaded = image::open(&path).ok().map(|img| {
+        let loaded = (|| -> anyhow::Result<image::DynamicImage> {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            std::fs::File::open(&path)?.take(256 * 1024 + 1).read_to_end(&mut bytes)?;
+            anyhow::ensure!(bytes.len() <= 256 * 1024, "wallpaper cache is too large");
+            let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
+            let mut limits = image::Limits::default();
+            limits.max_image_width = Some(rotodesk_proto::wallpaper::MAX_WIDTH);
+            limits.max_image_height = Some(rotodesk_proto::wallpaper::MAX_HEIGHT);
+            limits.max_alloc = Some(1024 * 1024);
+            reader.limits(limits);
+            Ok(reader.decode()?)
+        })().ok().map(|img| {
             let rgba = img.to_rgba8();
             let size = [rgba.width() as usize, rgba.height() as usize];
             let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
@@ -1237,6 +1304,22 @@ impl RotoDeskApp {
         if std::env::var("ROTODESK_PREVIEW_PASSWORD").is_ok_and(|v| v == "1") {
             self.password_prompt = PasswordPrompt::for_rejection(RotoDeskId::new(987654321).unwrap(), "UnattendedOnly", false);
             self.show_connect_password = true;
+        }
+        if std::env::var("ROTODESK_PREVIEW_RECONNECT").is_ok_and(|v| v == "1") {
+            self.state.settings.write().auto_reconnect = true;
+            self.reconnect = Some(crate::reconnect::Reconnect::new(RotoDeskId::new(987654321).unwrap(),
+                "El equipo ha perdido la conexión.".into(), std::time::Instant::now()));
+        }
+        for (n, tint) in [(987654321, [30u8, 110, 100]), (234567891, [70, 65, 125]), (345678912, [110, 70, 35])] {
+            let image = image::RgbImage::from_fn(320, 180, |x, y| {
+                let light = ((x + y) / 5) as u8;
+                image::Rgb(tint.map(|c| c.saturating_add(light)))
+            });
+            let mut jpeg = Vec::new();
+            if image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 65)
+                .encode(image.as_raw(), 320, 180, image::ExtendedColorType::Rgb8).is_ok() {
+                self.save_wallpaper(RotoDeskId::new(n).unwrap(), &jpeg);
+            }
         }
         {
             let mut history = self.state.history.write();

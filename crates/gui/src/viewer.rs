@@ -36,6 +36,8 @@ pub enum ViewerOutcome {
     Disconnected(Option<String>),
     /// The host refused the unattended credential; ask for a replacement.
     PasswordRejected,
+    /// Network loss may be retried when the user enabled automatic reconnection.
+    ConnectionLost(String),
 }
 
 /// Estado de los modificadores que ya hemos comunicado al host, para emitir solo
@@ -49,6 +51,7 @@ struct ModifierState {
 
 /// Todo el estado vivo de una sesión en el visor.
 pub struct ViewerState {
+    pub auto_reconnect: bool,
     session: ClientSession,
     /// Permisos concedidos, actualizados en vivo por el host.
     granted: Permissions,
@@ -61,7 +64,7 @@ pub struct ViewerState {
     /// Frames recibidos (para el contador de la barra).
     frames_received: u64,
     /// Último fotograma decodificado (para la miniatura de la sesión).
-    last_frame: Option<DecodedImage>,
+    wallpaper: Option<Vec<u8>>,
 
     /// Estadísticas de sesión más recientes (para la barra).
     stats: Option<SessionStats>,
@@ -137,7 +140,8 @@ impl ViewerState {
             texture: None,
             frame_size: [0, 0],
             frames_received: 0,
-            last_frame: None,
+            wallpaper: None,
+            auto_reconnect: false,
             stats: None,
             quality: QualityProfile::Auto,
             monitors: Vec::new(),
@@ -167,9 +171,9 @@ impl ViewerState {
         self.fullscreen
     }
 
-    /// El último fotograma completo recibido, si lo hubo.
-    pub fn last_frame(&self) -> Option<&DecodedImage> {
-        self.last_frame.as_ref()
+    /// Consume la vista previa del wallpaper del equipo autenticado.
+    pub fn take_wallpaper(&mut self) -> Option<Vec<u8>> {
+        self.wallpaper.take()
     }
 
     /// Solicita el cierre ordenado de la sesión (best-effort, no bloquea).
@@ -257,6 +261,7 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                                 theme::status_dot(ui, theme::ACCENT, "");
                                 ui.label(egui::RichText::new(who).strong());
                                 ui.separator();
+                                ui.checkbox(&mut viewer.auto_reconnect, tr("Reconnect if disconnected"));
 
                                 // Selector de monitor (spec §15).
                                 if viewer.monitors.len() > 1 {
@@ -715,6 +720,7 @@ fn drain_events(viewer: &mut ViewerState) -> Option<ViewerOutcome> {
                     return Some(ViewerOutcome::PasswordRejected);
                 }
             }
+            Ok(ClientEvent::Wallpaper(jpeg)) => viewer.wallpaper = Some(jpeg),
             Ok(ClientEvent::Clipboard(_)) => {
                 // El cliente ya lo aplicó al portapapeles local si la
                 // sincronización está activa; nada que mostrar.
@@ -788,11 +794,10 @@ fn drain_events(viewer: &mut ViewerState) -> Option<ViewerOutcome> {
                     &[("reason", crate::app::friendly_reason(&reason))],
                 ))));
             }
+            Ok(ClientEvent::ConnectionLost(reason)) => return Some(ViewerOutcome::ConnectionLost(reason)),
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => return None,
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                return Some(ViewerOutcome::Disconnected(Some(
-                    tr("The session was closed.").into(),
-                )));
+                return Some(ViewerOutcome::ConnectionLost(tr("The session was closed.").into()));
             }
         }
     }
@@ -832,7 +837,6 @@ fn upload_latest_frame(viewer: &mut ViewerState, ctx: &egui::Context) {
             ));
         }
     }
-    viewer.last_frame = Some(img);
 }
 
 /// Dibuja la imagen remota (o un aviso de espera) y captura el input sobre ella.

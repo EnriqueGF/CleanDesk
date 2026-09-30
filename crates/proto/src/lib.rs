@@ -12,6 +12,7 @@
 
 pub mod error;
 pub mod compat;
+pub mod wallpaper;
 pub mod files;
 pub mod frame;
 pub mod id;
@@ -49,7 +50,8 @@ pub use quality::QualityProfile;
 ///   so a rendezvous in the middle of the DTLS handshake is detected. Also
 ///   `FileTransferMsg::Refused` (a cancel that carries the reason).
 /// * 2.4 — ordered clipboard paste (`SessionMessage::PasteClipboard`).
-pub const PROTOCOL_VERSION: Version = Version { major: 2, minor: 4 };
+/// * 2.5 — authenticated wallpaper previews (`WallpaperRequest` / `Wallpaper`).
+pub const PROTOCOL_VERSION: Version = Version { major: 2, minor: 5 };
 
 /// Default TCP port for the signaling (RotoDesk Server) WebSocket endpoint.
 ///

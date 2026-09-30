@@ -28,6 +28,7 @@ pub mod single_instance;
 pub mod service;
 pub mod startup;
 pub mod update;
+pub mod wallpaper;
 
 use thiserror::Error;
 

@@ -7,7 +7,7 @@
 
 use rotodesk_client::{connect_community, ClientConfig, ClientError, ClientEvent};
 use rotodesk_crypto::identity::Identity;
-use rotodesk_host::{serve_community, AutoAccept, CommunityOptions, HostConfig};
+use rotodesk_host::{serve_community, AutoAccept, CommunityOptions, HostConfig, HostEvent};
 use rotodesk_proto::{id::RotoDeskId, permissions::Permissions, quality::QualityProfile, session::DeviceInfo};
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,6 +24,8 @@ async fn lan_only_community_session() {
     let host_id = host_ident.derive_id();
     let mut host_cfg = HostConfig::new(String::new(), dev_info(host_id, "host"), host_ident.clone());
     host_cfg.quality = QualityProfile::Performance;
+    let (host_events_tx, mut host_events) = tokio::sync::mpsc::unbounded_channel();
+    host_cfg.events = Some(host_events_tx);
     host_cfg.community = CommunityOptions {
         direct_port: 0,
         ice_udp_port: 0,
@@ -40,6 +42,7 @@ async fn lan_only_community_session() {
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
     let cli_ident = Identity::generate();
+    let viewer_id = cli_ident.derive_id();
     let mut cli_cfg = ClientConfig::new(String::new(), dev_info(cli_ident.derive_id(), "viewer"), cli_ident, host_id);
     cli_cfg.quality = QualityProfile::Performance;
 
@@ -51,22 +54,34 @@ async fn lan_only_community_session() {
     assert_eq!(session.peer_public_key.as_deref(), Some(host_ident.public_key_b64().as_str()));
 
     let mut got_permissions = false;
+    let mut got_wallpaper = !cfg!(windows);
+    let mut got_viewer_wallpaper = !cfg!(windows);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(12);
-    while tokio::time::Instant::now() < deadline && !got_permissions {
+    while tokio::time::Instant::now() < deadline && !(got_permissions && got_wallpaper && got_viewer_wallpaper) {
         tokio::select! {
             ev = session.events.recv() => match ev {
                 Some(ClientEvent::PermissionsUpdated(p)) => {
                     assert!(p.contains(Permissions::VIEW_SCREEN));
                     got_permissions = true;
                 }
-                Some(ClientEvent::Disconnected(reason)) => panic!("disconnected early: {reason}"),
+                Some(ClientEvent::Wallpaper(jpeg)) => {
+                    rotodesk_platform::wallpaper::decode_preview(&jpeg).expect("bounded host wallpaper over P2P");
+                    got_wallpaper = true;
+                }
+                Some(ClientEvent::Disconnected(reason) | ClientEvent::ConnectionLost(reason)) => panic!("disconnected early: {reason}"),
                 Some(_) => {}
                 None => break,
+            },
+            Some(HostEvent::Wallpaper { device, jpeg }) = host_events.recv() => {
+                assert_eq!(device, viewer_id);
+                rotodesk_platform::wallpaper::decode_preview(&jpeg).expect("bounded viewer wallpaper over P2P");
+                got_viewer_wallpaper = true;
             },
             _ = tokio::time::sleep(Duration::from_millis(200)) => {}
         }
     }
     assert!(got_permissions, "no permissions handshake over the community P2P session");
+    assert!(got_wallpaper && got_viewer_wallpaper, "both authenticated peers must receive the other's wallpaper");
     session.disconnect();
 }
 
