@@ -144,6 +144,9 @@ fn spanish(en: &str) -> Option<&'static str> {
         "Connect" => "Conectar",
         "Unattended access (with password)" => "Acceso desatendido (con contraseña)",
         "Password:" => "Contraseña:",
+        "Password required" => "Contraseña necesaria",
+        "This device requires its unattended-access password to connect." => "Este equipo requiere su contraseña de acceso desatendido para conectar.",
+        "The password was rejected. Check it and try again." => "La contraseña ha sido rechazada. Revísala e inténtalo de nuevo.",
         "Remember" => "Recordar",
         "Saves the device to favorites with its derived key (never the plaintext password)" => {
             "Guarda el equipo en favoritos con su clave derivada (nunca la contraseña en claro)"
@@ -489,6 +492,8 @@ mod tests {
         "Share this identifier so others can connect to your screen with your permission.", "office-pc",
         "Remote connection", "Enter remote ID…", "Connect ›", "Connect", "Unattended access (with password)",
         "Password:", "Remember", "Saves the device to favorites with its derived key (never the plaintext password)",
+        "Password required", "This device requires its unattended-access password to connect.",
+        "The password was rejected. Check it and try again.",
         "Waiting for {target}…", "End-to-end encryption (DTLS) enabled by default",
         "Invalid RotoDesk ID. Check the number.", "Invalid RotoDesk ID.", "You cannot connect to your own ID.",
         "Could not derive the key: {err}", "Could not connect: {err}",

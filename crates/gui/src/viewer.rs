@@ -34,6 +34,8 @@ pub enum ViewerOutcome {
     Continue,
     /// La sesión terminó; volver a la ventana principal con un aviso opcional.
     Disconnected(Option<String>),
+    /// The host refused the unattended credential; ask for a replacement.
+    PasswordRejected,
 }
 
 /// Estado de los modificadores que ya hemos comunicado al host, para emitir solo
@@ -710,9 +712,7 @@ fn drain_events(viewer: &mut ViewerState) -> Option<ViewerOutcome> {
             }
             Ok(ClientEvent::AuthResult(ok)) => {
                 if !ok {
-                    return Some(ViewerOutcome::Disconnected(Some(
-                        tr("Authentication rejected by the remote device.").into(),
-                    )));
+                    return Some(ViewerOutcome::PasswordRejected);
                 }
             }
             Ok(ClientEvent::Clipboard(_)) => {

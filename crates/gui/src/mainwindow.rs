@@ -104,6 +104,7 @@ pub fn show(app: &mut RotoDeskApp, ctx: &egui::Context) {
     security_window(app, ctx);
     add_device_window(app, ctx);
     nearby_window(app, ctx);
+    password_prompt(app, ctx);
     if let Some(target) = app.connecting_target() {
         egui::Modal::new(egui::Id::new("connection-progress")).show(ctx, |ui| {
             ui.set_max_width(360.0);
@@ -120,6 +121,46 @@ pub fn show(app: &mut RotoDeskApp, ctx: &egui::Context) {
             }
         });
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
+}
+
+/// Always visible, including when the user connected from a recent-device card.
+fn password_prompt(app: &mut RotoDeskApp, ctx: &egui::Context) {
+    let Some(prompt) = app.password_prompt.as_mut() else { return };
+    let target = prompt.target;
+    let mut retry = false;
+    let mut cancel = false;
+    let response = egui::Modal::new(egui::Id::new("connection-password")).show(ctx, |ui| {
+        ui.set_width(360.0);
+        ui.heading(tr("Password required"));
+        ui.label(target.to_string());
+        ui.label(tr("This device requires its unattended-access password to connect."));
+        if prompt.invalid_password {
+            ui.colored_label(theme::DANGER, tr("The password was rejected. Check it and try again."));
+        }
+        let password = ui.add(egui::TextEdit::singleline(&mut app.connect_password)
+            .id(egui::Id::new("connection-password-input"))
+            .password(true).hint_text(tr("Password:")).desired_width(f32::INFINITY));
+        if prompt.focus_needed {
+            password.request_focus();
+            prompt.focus_needed = false;
+        }
+        ui.checkbox(&mut app.remember_password, tr("Remember"))
+            .on_hover_text(tr("Saves the device to favorites with its derived key (never the plaintext password)"));
+        let ready = !app.connect_password.trim().is_empty();
+        if ready && (password.has_focus() || password.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            retry = true;
+        }
+        ui.horizontal(|ui| {
+            retry |= ui.add_enabled(ready, theme::primary_button(tr("Connect"))).clicked();
+            cancel = ui.button(tr("Cancel")).clicked();
+        });
+    });
+    if cancel || response.should_close() {
+        app.password_prompt = None;
+        app.connect_password.clear();
+    } else if retry {
+        app.start_connection(target, ctx);
     }
 }
 

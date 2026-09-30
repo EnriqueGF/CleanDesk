@@ -4086,7 +4086,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-app"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4102,7 +4102,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-capture"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "rotodesk-platform",
@@ -4115,7 +4115,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-client"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4139,7 +4139,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-codec"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "image",
@@ -4153,7 +4153,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "directories",
@@ -4170,7 +4170,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-crypto"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -4188,7 +4188,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-discovery"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4213,7 +4213,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-gui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4241,7 +4241,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-host"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4266,7 +4266,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-input"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "rotodesk-platform",
@@ -4278,7 +4278,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-platform"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "rotodesk-proto",
@@ -4293,7 +4293,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-proto"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bitflags 2.13.2",
  "bytes",
@@ -4306,7 +4306,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-relay-server"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4323,7 +4323,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-signal-server"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4344,7 +4344,7 @@ dependencies = [
 
 [[package]]
 name = "rotodesk-transport"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "async-trait",

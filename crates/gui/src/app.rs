@@ -47,11 +47,27 @@ enum ConnectPhase {
     /// Esperando el resultado de `client::connect` (aceptar/rechazar/conectar).
     Connecting {
         target: RotoDeskId,
+        unattended: bool,
         rx: oneshot::Receiver<anyhow::Result<ClientSession>>,
         task: tokio::task::AbortHandle,
     },
     /// Sesión establecida: mostramos el visor.
     Active(Box<ViewerState>),
+}
+
+/// A rejected interactive request can be retried with explicit credentials.
+pub struct PasswordPrompt {
+    pub target: RotoDeskId,
+    pub invalid_password: bool,
+    pub focus_needed: bool,
+}
+
+impl PasswordPrompt {
+    fn for_rejection(target: RotoDeskId, error: &str, unattended: bool) -> Option<Self> {
+        let required = error.contains("UnattendedOnly");
+        let invalid = unattended && error.contains("AuthFailed");
+        (required || invalid).then_some(Self { target, invalid_password: invalid, focus_needed: true })
+    }
 }
 
 /// Una sesión entrante viva (alguien nos está viendo). Spec §18: confirmación
@@ -111,6 +127,7 @@ pub struct RotoDeskApp {
     pending_remember: Option<(RotoDeskId, [u8; 32])>,
     /// Aviso a mostrar en la ventana principal (error de conexión, desconexión…).
     pub notice: Option<String>,
+    pub password_prompt: Option<PasswordPrompt>,
     /// Equipo cuya identidad cambió respecto a la clave fijada; el usuario
     /// decide si confiar en la nueva (tras comprobar la huella).
     pub identity_alarm: Option<RotoDeskId>,
@@ -279,6 +296,7 @@ impl RotoDeskApp {
             remember_password: false,
             pending_remember: None,
             notice: None,
+            password_prompt: None,
             identity_alarm: None,
             tray: match crate::tray::Tray::new(cc.egui_ctx.clone(), crate::tray::native_handle(cc))
             {
@@ -371,6 +389,7 @@ impl RotoDeskApp {
             return;
         }
         self.notice = None;
+        self.password_prompt = None;
 
         let quality = self.state.settings.read().quality;
         let mode = self.network_mode();
@@ -422,6 +441,7 @@ impl RotoDeskApp {
         // enlace de identidad, en cualquier modo de red; sin clave fijada, la
         // primera sesión la fija tras verificarla.
         config.expected_host_key = pinned.clone();
+        let unattended = config.unattended_key.is_some();
         let (tx, rx) = oneshot::channel();
         let ctx = ctx.clone();
         let task = self.rt.spawn(async move {
@@ -435,7 +455,7 @@ impl RotoDeskApp {
         });
 
         info!(%target, "iniciando conexión saliente");
-        self.connect = ConnectPhase::Connecting { target, rx, task: task.abort_handle() };
+        self.connect = ConnectPhase::Connecting { target, unattended, rx, task: task.abort_handle() };
     }
 
     pub fn cancel_connection(&mut self) {
@@ -539,7 +559,7 @@ impl RotoDeskApp {
 
     /// Sondea el resultado de una conexión saliente en curso.
     fn poll_connecting(&mut self, ctx: &egui::Context) {
-        let ConnectPhase::Connecting { rx, target, .. } = &mut self.connect else {
+        let ConnectPhase::Connecting { rx, target, unattended, .. } = &mut self.connect else {
             return;
         };
         match rx.try_recv() {
@@ -576,6 +596,16 @@ impl RotoDeskApp {
             Ok(Err(e)) => {
                 warn!(error = %e, "conexión fallida");
                 let raw = format!("{e:#}");
+                self.pending_remember = None;
+                self.password_prompt = PasswordPrompt::for_rejection(*target, &raw, *unattended);
+                if self.password_prompt.is_some() {
+                    self.connect_input = target.to_string();
+                    self.connect_password.clear();
+                    self.show_connect_password = true;
+                    self.notice = None;
+                    self.connect = ConnectPhase::Idle;
+                    return;
+                }
                 if is_identity_change(&raw) {
                     self.identity_alarm = Some(*target);
                 }
@@ -836,25 +866,35 @@ impl RotoDeskApp {
 
         let outcome = crate::viewer::show(&mut viewer, ctx);
 
-        match outcome {
+        let (notice, password_rejected) = match outcome {
             crate::viewer::ViewerOutcome::Continue => {
                 self.connect = ConnectPhase::Active(viewer);
+                return;
             }
-            crate::viewer::ViewerOutcome::Disconnected(notice) => {
-                viewer.disconnect();
-                if let (Some(target), Some(frame)) = (self.last_target, viewer.last_frame()) {
-                    self.save_thumbnail(target, frame);
-                }
-                if let Err(e) = self.state.record_session_end(viewer.session_id(), "closed") {
-                    warn!(error = %e, "no se pudo cerrar el registro de historial");
-                }
-                if viewer.is_fullscreen() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                }
-                self.notice = notice;
-                self.connect = ConnectPhase::Idle;
+            crate::viewer::ViewerOutcome::Disconnected(notice) => (notice, false),
+            crate::viewer::ViewerOutcome::PasswordRejected => (None, true),
+        };
+        viewer.disconnect();
+        if let (Some(target), Some(frame)) = (self.last_target, viewer.last_frame()) {
+            self.save_thumbnail(target, frame);
+        }
+        if let Err(e) = self.state.record_session_end(viewer.session_id(), "closed") {
+            warn!(error = %e, "no se pudo cerrar el registro de historial");
+        }
+        if viewer.is_fullscreen() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        }
+        self.notice = notice;
+        self.pending_remember = None;
+        if password_rejected {
+            if let Some(target) = self.last_target {
+                self.password_prompt = PasswordPrompt::for_rejection(target, "AuthFailed", true);
+                self.connect_input = target.to_string();
+                self.connect_password.clear();
+                self.show_connect_password = true;
             }
         }
+        self.connect = ConnectPhase::Idle;
     }
 }
 
@@ -1194,6 +1234,10 @@ impl RotoDeskApp {
             settings.language = Some("es".into());
         }
         i18n::set_lang(Lang::Es);
+        if std::env::var("ROTODESK_PREVIEW_PASSWORD").is_ok_and(|v| v == "1") {
+            self.password_prompt = PasswordPrompt::for_rejection(RotoDeskId::new(987654321).unwrap(), "UnattendedOnly", false);
+            self.show_connect_password = true;
+        }
         {
             let mut history = self.state.history.write();
             history.records.clear();
@@ -1236,5 +1280,28 @@ impl RotoDeskApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
+}
+
+#[cfg(test)]
+mod password_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn interactive_rejection_prompts_for_the_same_device() {
+        let target = RotoDeskId::new(123456789).unwrap();
+        let prompt = PasswordPrompt::for_rejection(target, "connection rejected: UnattendedOnly", false).unwrap();
+        assert_eq!(prompt.target, target);
+        assert!(!prompt.invalid_password);
+        assert!(prompt.focus_needed);
+    }
+
+    #[test]
+    fn authentication_rejection_only_retries_unattended_requests() {
+        let target = RotoDeskId::new(123456789).unwrap();
+        assert!(PasswordPrompt::for_rejection(target, "AuthFailed", true).unwrap().invalid_password);
+        for reason in ["AuthFailed", "UserDeclined", "Busy", "Timeout", "identity mismatch"] {
+            assert!(PasswordPrompt::for_rejection(target, reason, false).is_none());
+        }
     }
 }
