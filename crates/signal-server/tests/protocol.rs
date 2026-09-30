@@ -116,6 +116,35 @@ fn connect_request(target: CleanDeskId, from: DeviceInfo) -> SignalMessage {
 }
 
 #[tokio::test]
+async fn presence_tracks_registration_without_opening_a_session() {
+    let (url, state) = start_server().await;
+    let mut observer = open(&url).await;
+    let peer = Identity::generate();
+    let devices = vec![peer.derive_id()];
+    send(&mut observer, &SignalMessage::PresenceQuery { devices: devices.clone() }).await;
+    assert!(matches!(recv(&mut observer).await, SignalMessage::Error { code: ErrorCode::Unauthorized, .. }));
+    register(&mut observer, &Identity::generate(), "observer").await;
+    send(&mut observer, &SignalMessage::PresenceQuery { devices: devices.clone() }).await;
+    assert!(matches!(recv(&mut observer).await, SignalMessage::PresenceSnapshot { online } if online.is_empty()));
+    let mut host = open(&url).await;
+    register(&mut host, &peer, "host").await;
+    send(&mut observer, &SignalMessage::PresenceQuery { devices: devices.clone() }).await;
+    assert!(matches!(recv(&mut observer).await, SignalMessage::PresenceSnapshot { online } if online == devices));
+    assert_eq!(state.session_count(), 0);
+    // A status lookup must not produce a connection dialog at the other end.
+    assert!(tokio::time::timeout(Duration::from_millis(100), host.next()).await.is_err());
+    host.close(None).await.unwrap();
+    for _ in 0..20 {
+        if !state.is_online(peer.derive_id()) { break; }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    send(&mut observer, &SignalMessage::PresenceQuery { devices: devices.clone() }).await;
+    assert!(matches!(recv(&mut observer).await, SignalMessage::PresenceSnapshot { online } if online.is_empty()));
+    send(&mut observer, &SignalMessage::PresenceQuery { devices: vec![peer.derive_id(); 513] }).await;
+    assert!(matches!(recv(&mut observer).await, SignalMessage::Error { code: ErrorCode::RateLimited, .. }));
+}
+
+#[tokio::test]
 async fn valid_registration_yields_the_derived_id() {
     let (url, state) = start_server().await;
     let ident = Identity::generate();

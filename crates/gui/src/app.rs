@@ -137,6 +137,8 @@ pub struct CleanDeskApp {
     pub show_nearby: bool,
     /// Instante del último rastreo automático.
     pub last_scan: Option<std::time::Instant>,
+    /// Independent background presence monitor, including while hidden in tray.
+    presence_monitor: crate::presence::Presence,
     /// Ventana de ajustes visible.
     pub show_settings: bool,
     pub settings_section: usize,
@@ -259,6 +261,8 @@ impl CleanDeskApp {
         );
         }
 
+        let presence_monitor = crate::presence::Presence::start(&rt, state.clone(), device.clone(),
+            signal_override.clone(), cc.egui_ctx.clone(), crate::tray::native_handle(cc));
         let mut app = Self {
             state,
             device,
@@ -294,6 +298,7 @@ impl CleanDeskApp {
             discovering: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             show_nearby: false,
             last_scan: None,
+            presence_monitor,
             // `CLEANDESK_OPEN_SETTINGS=1` abre Ajustes al arrancar (capturas, soporte).
             settings_section: std::env::var("CLEANDESK_SETTINGS_SECTION").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
             #[cfg(debug_assertions)]
@@ -1104,12 +1109,8 @@ impl CleanDeskApp {
         });
     }
 
-    /// ¿Se ha visto `id` en la red local en el último rastreo?
-    pub fn is_nearby(&self, id: CleanDeskId) -> bool {
-        self.nearby
-            .lock()
-            .map(|n| n.iter().any(|d| d.id == id))
-            .unwrap_or(false)
+    pub fn is_online(&self, id: CleanDeskId) -> bool {
+        self.presence_monitor.online.lock().is_ok_and(|online| online.contains(&id))
     }
 
     /// Refresca `service_status` / `run_at_login` sin bloquear: lanza la sonda

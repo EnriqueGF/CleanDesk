@@ -94,6 +94,10 @@ pub enum SignalMessage {
     /// Bidirectional keepalive / RTT probe.
     Ping { nonce: u64 },
     Pong { nonce: u64 },
+    /// Registered client → server: bounded online-status lookup, without a session.
+    PresenceQuery { devices: Vec<CleanDeskId> },
+    /// Server → client: the queried IDs currently registered and reachable.
+    PresenceSnapshot { online: Vec<CleanDeskId> },
 }
 
 /// Domain-separated bytes a client signs to answer a

@@ -14,6 +14,8 @@ mod approval;
 mod i18n;
 mod keymap;
 mod mainwindow;
+mod notifications;
+mod presence;
 mod theme;
 mod tray;
 mod updater;

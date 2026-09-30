@@ -137,6 +137,8 @@ fn every_signal_message_variant_roundtrips() {
         },
         SignalMessage::Ping { nonce: 0xDEAD_BEEF },
         SignalMessage::Pong { nonce: 0xDEAD_BEEF },
+        SignalMessage::PresenceQuery { devices: vec![id()] },
+        SignalMessage::PresenceSnapshot { online: vec![id()] },
     ];
 
     for msg in &messages {

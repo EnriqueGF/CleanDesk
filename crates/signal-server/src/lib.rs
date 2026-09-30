@@ -437,6 +437,19 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
             Flow::Continue
         }
 
+        SignalMessage::PresenceQuery { devices } => {
+            if conn.registered_id().is_none() {
+                conn.reply(err(ErrorCode::Unauthorized, "register first"));
+                return conn.strike();
+            }
+            if devices.len() > 512 || !conn.signal_limit.allow() {
+                conn.reply(err(ErrorCode::RateLimited, "presence query exceeds budget"));
+                return Flow::Continue;
+            }
+            let online = devices.into_iter().filter(|id| state.is_online(*id)).collect();
+            conn.reply(SignalMessage::PresenceSnapshot { online });
+            Flow::Continue
+        }
         SignalMessage::Ping { nonce } => {
             conn.reply(SignalMessage::Pong { nonce });
             Flow::Continue
@@ -444,7 +457,8 @@ fn handle_message(msg: SignalMessage, state: &Arc<ServerState>, conn: &mut Conn)
         // Answer to a ping we never send; harmless.
         SignalMessage::Pong { .. } => Flow::Continue,
 
-        SignalMessage::Registered { .. }
+        SignalMessage::PresenceSnapshot { .. }
+        | SignalMessage::Registered { .. }
         | SignalMessage::RegisterChallenge { .. }
         | SignalMessage::IncomingRequest { .. }
         | SignalMessage::Error { .. } => {

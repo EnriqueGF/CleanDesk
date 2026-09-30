@@ -746,7 +746,7 @@ fn device_card(
     card: &DeviceCard,
     actions: &mut CardActions,
 ) {
-    let online = app.is_nearby(card.id);
+    let online = app.is_online(card.id);
     let thumb = app.thumbnail(ctx, card.id);
     let hovered = ui.rect_contains_pointer(egui::Rect::from_min_size(
         ui.cursor().min,

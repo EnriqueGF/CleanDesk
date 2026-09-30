@@ -423,6 +423,8 @@ Descarga: https://github.com/EnriqueGF/CleanDesk/releases",
 
         // --- Diálogo de aprobación ---
         "Connection request" => "Solicitud de conexión",
+        "Has connected" => "Se ha conectado",
+        "Has disconnected" => "Se ha desconectado",
         "System: {os}" => "Sistema: {os}",
         "Authentication: {auth}" => "Autenticación: {auth}",
         "Granted permissions" => "Permisos concedidos",
@@ -552,6 +554,7 @@ mod tests {
             include_str!("approval.rs"),
             include_str!("app.rs"),
             include_str!("tray.rs"),
+            include_str!("notifications.rs"),
         ];
         let mut missing = Vec::new();
         for src in sources {
