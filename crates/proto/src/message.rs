@@ -337,6 +337,7 @@ pub enum InputEvent {
     /// Absolute mouse move, normalized 0.0..=1.0 over the current monitor.
     MouseMove { x: f32, y: f32 },
     MouseButton { button: MouseButton, pressed: bool },
+    /// Fractional wheel notches: positive x is right, positive y is up.
     MouseScroll { delta_x: f32, delta_y: f32 },
     /// Key event by OS-independent virtual key code.
     Key { code: u32, pressed: bool },

@@ -16,7 +16,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-    SM_YVIRTUALSCREEN, WHEEL_DELTA, XBUTTON1, XBUTTON2,
+    SM_YVIRTUALSCREEN, XBUTTON1, XBUTTON2,
 };
 
 use crate::{mouse_move_absolute, InputInjector, VirtualScreen, MAX_VIRTUAL_KEY};
@@ -66,6 +66,7 @@ fn injector_thread(rx: std::sync::mpsc::Receiver<Job>) {
     // `BlockInput(TRUE)` can only be undone by this very thread, so the flag
     // lives here and is cleared when the injector goes away.
     let mut blocked = false;
+    let mut wheel = crate::wheel::WheelAccumulator::default();
     while let Ok(job) = rx.recv() {
         if force_attach || last_attach.elapsed() >= ATTACH_INTERVAL {
             last_attach = std::time::Instant::now();
@@ -78,7 +79,7 @@ fn injector_thread(rx: std::sync::mpsc::Receiver<Job>) {
         }
         match job {
             Job::Inject { ev, monitor } => {
-                if let Err(e) = inject_now(ev, &monitor) {
+                if let Err(e) = inject_now(ev, &monitor, &mut wheel) {
                     tracing::warn!(error = %e, "input injection failed");
                     force_attach = true;
                 }
@@ -120,7 +121,7 @@ impl InputInjector for WinInputInjector {
 }
 
 /// Inject one event on the calling thread's desktop.
-fn inject_now(ev: InputEvent, monitor: &MonitorInfo) -> anyhow::Result<()> {
+fn inject_now(ev: InputEvent, monitor: &MonitorInfo, wheel: &mut crate::wheel::WheelAccumulator) -> anyhow::Result<()> {
         match ev {
             InputEvent::MouseMove { x, y } => {
                 let vs = virtual_screen();
@@ -139,11 +140,12 @@ fn inject_now(ev: InputEvent, monitor: &MonitorInfo) -> anyhow::Result<()> {
             InputEvent::MouseScroll { delta_x, delta_y } => {
                 // Vertical first, then horizontal; skip zero axes.
                 let mut inputs = Vec::with_capacity(2);
-                if delta_y != 0.0 {
-                    inputs.push(mouse_input(MOUSEEVENTF_WHEEL, wheel_amount(delta_y) as u32, 0, 0));
+                let [x, y] = wheel.push(delta_x, delta_y);
+                if y != 0 {
+                    inputs.push(mouse_input(MOUSEEVENTF_WHEEL, y as u32, 0, 0));
                 }
-                if delta_x != 0.0 {
-                    inputs.push(mouse_input(MOUSEEVENTF_HWHEEL, wheel_amount(delta_x) as u32, 0, 0));
+                if x != 0 {
+                    inputs.push(mouse_input(MOUSEEVENTF_HWHEEL, x as u32, 0, 0));
                 }
                 if inputs.is_empty() {
                     Ok(())
@@ -206,12 +208,6 @@ fn button_action(button: MouseButton, pressed: bool) -> (MOUSE_EVENT_FLAGS, u32)
             XBUTTON2 as u32,
         ),
     }
-}
-
-/// Convert a scroll delta in wheel notches to `mouseData` clicks
-/// (`notches * WHEEL_DELTA`). Pure function.
-fn wheel_amount(delta: f32) -> i32 {
-    (delta * WHEEL_DELTA as f32).round() as i32
 }
 
 /// Build a mouse `INPUT`. `mouse_data` is reinterpreted as signed by the OS for
@@ -296,6 +292,7 @@ fn send(inputs: &[INPUT]) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::UI::WindowsAndMessaging::WHEEL_DELTA;
 
     #[test]
     fn button_flags_map_correctly() {
@@ -319,6 +316,7 @@ mod tests {
 
     #[test]
     fn wheel_scales_by_wheel_delta() {
+        let wheel_amount = |delta| crate::wheel::WheelAccumulator::default().push(0.0, delta)[1];
         assert_eq!(wheel_amount(1.0), WHEEL_DELTA as i32);
         assert_eq!(wheel_amount(-1.0), -(WHEEL_DELTA as i32));
         assert_eq!(wheel_amount(0.5), (WHEEL_DELTA / 2) as i32);
@@ -328,6 +326,6 @@ mod tests {
     #[test]
     fn negative_wheel_amount_reinterprets_as_u32() {
         // -120 as u32 is the two's-complement value the OS reads back as signed.
-        assert_eq!(wheel_amount(-1.0) as u32, (-(WHEEL_DELTA as i32)) as u32);
+        assert_eq!(crate::wheel::WheelAccumulator::default().push(0.0, -1.0)[1] as u32, (-(WHEEL_DELTA as i32)) as u32);
     }
 }

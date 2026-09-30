@@ -907,54 +907,11 @@ fn forward_input(
     let keyboard_ok = viewer.keyboard_allowed()
         && (response.has_focus() || (response.hovered() && !ui.ctx().wants_keyboard_input()));
 
-    // Datos crudos de este fotograma (copias, sin préstamos sobre `ui`).
-    struct FrameInput {
-        buttons: Vec<(MouseButton, bool)>,
-        scroll: egui::Vec2,
-        keys: Vec<(u32, bool)>,
-        modifiers: egui::Modifiers,
-        clipboard_events: Vec<egui::Event>,
-    }
-
+    // Conservamos el orden de la rueda, los botones y las teclas de cada frame.
     let hovered = response.hovered();
-    let input = ui.input(|i| {
-        let mut buttons = Vec::new();
-        let mut keys = Vec::new();
-        let mut clipboard_events = Vec::new();
-        for ev in &i.events {
-            match ev {
-                egui::Event::PointerButton {
-                    button, pressed, ..
-                } if mouse_ok && hovered => {
-                    if let Some(mapped) = map_pointer_button(*button) {
-                        buttons.push((mapped, *pressed));
-                    }
-                }
-                // SendInput does not generate auto-repeat: forward every local key-down.
-                egui::Event::Key { .. } if keyboard_ok => {
-                    if let Some(key) = remote_key_event(ev) {
-                        keys.push(key);
-                    }
-                }
-                egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) if keyboard_ok => {
-                    clipboard_events.push(ev.clone());
-                }
-                _ => {}
-            }
-        }
-        FrameInput {
-            buttons,
-            scroll: if mouse_ok && hovered {
-                i.raw_scroll_delta
-            } else {
-                egui::Vec2::ZERO
-            },
-            keys,
-            modifiers: i.modifiers,
-            clipboard_events,
-        }
-    });
-
+    let (events, modifiers) = ui.input(|i| (
+        remote_input_events(&i.events, mouse_ok && hovered, keyboard_ok), i.modifiers,
+    ));
     // --- Ratón ---
     if mouse_ok {
         // Movimiento: coordenadas normalizadas 0..=1 sobre la imagen mostrada.
@@ -975,51 +932,48 @@ fn forward_input(
             }
         }
 
-        for (button, pressed) in input.buttons {
-            viewer
-                .session
-                .send_input(InputEvent::MouseButton { button, pressed });
-        }
-
-        if input.scroll != egui::Vec2::ZERO {
-            // egui entrega el scroll en puntos; ~50 puntos ≈ una muesca de rueda.
-            viewer.session.send_input(InputEvent::MouseScroll {
-                delta_x: input.scroll.x / 50.0,
-                delta_y: input.scroll.y / 50.0,
-            });
-        }
     }
 
-    // --- Teclado ---
-    if keyboard_ok {
-        // Sincronizamos modificadores emitiendo solo los cambios respecto al
-        // estado ya comunicado al host.
-        sync_modifiers(viewer, input.modifiers);
-
-        for (vk, pressed) in input.keys {
-            if pressed {
-                viewer.held_keys.insert(vk);
-            } else {
-                viewer.held_keys.remove(&vk);
-            }
-            viewer
-                .session
-                .send_input(InputEvent::Key { code: vk, pressed });
-        }
-        for event in input.clipboard_events {
-            if let egui::Event::Paste(text) = &event {
-                if viewer.clipboard_sync
-                    && viewer.granted.contains(Permissions::CLIPBOARD)
-                    && viewer.session.supports_clipboard_paste()
-                {
-                    viewer.session.paste_clipboard(text.clone());
-                    continue;
+    for event in events {
+        match &event {
+            egui::Event::PointerButton { button, pressed, modifiers, .. } => {
+                if keyboard_ok { sync_modifiers(viewer, *modifiers); }
+                if let Some(button) = map_pointer_button(*button) {
+                    viewer.session.send_input(InputEvent::MouseButton { button, pressed: *pressed });
                 }
             }
-            for event in clipboard_shortcut(&event, viewer.modifiers) {
-                viewer.session.send_input(event);
+            egui::Event::MouseWheel { modifiers, .. } => {
+                if keyboard_ok { sync_modifiers(viewer, *modifiers); }
+                if let Some(scroll) = remote_scroll_event(&event, rect.height()) {
+                    viewer.session.send_input(scroll);
+                }
             }
+            egui::Event::Key { modifiers, .. } => {
+                sync_modifiers(viewer, *modifiers);
+                if let Some((code, pressed)) = remote_key_event(&event) {
+                    if pressed { viewer.held_keys.insert(code); }
+                    else { viewer.held_keys.remove(&code); }
+                    viewer.session.send_input(InputEvent::Key { code, pressed });
+                }
+            }
+            egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) => {
+                sync_modifiers(viewer, modifiers);
+                if let egui::Event::Paste(text) = &event {
+                    if viewer.clipboard_sync && viewer.granted.contains(Permissions::CLIPBOARD)
+                        && viewer.session.supports_clipboard_paste() {
+                        viewer.session.paste_clipboard(text.clone());
+                        continue;
+                    }
+                }
+                for event in clipboard_shortcut(&event, viewer.modifiers) {
+                    viewer.session.send_input(event);
+                }
+            }
+            _ => {}
         }
+    }
+    if keyboard_ok {
+        sync_modifiers(viewer, modifiers);
     } else {
         for code in viewer.held_keys.drain() {
             viewer.session.send_input(InputEvent::Key {
@@ -1030,6 +984,28 @@ fn forward_input(
         // El foco salió de la imagen con modificadores pulsados: suéltalos.
         sync_modifiers(viewer, egui::Modifiers::NONE);
     }
+}
+
+fn remote_input_events(events: &[egui::Event], mouse_ok: bool, keyboard_ok: bool) -> Vec<egui::Event> {
+    events.iter().filter(|event| match event {
+        egui::Event::PointerButton { .. } | egui::Event::MouseWheel { .. } => mouse_ok,
+        egui::Event::Key { .. } | egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) => keyboard_ok,
+        _ => false,
+    }).cloned().collect()
+}
+
+/// Native line deltas are notches; egui's aggregate also applies UI modifiers
+/// and scroll speed. Forward the original event instead. Horizontal egui deltas
+/// are positive left, while Windows wheel input is positive right.
+fn remote_scroll_event(event: &egui::Event, page_height: f32) -> Option<InputEvent> {
+    let egui::Event::MouseWheel { unit, delta, .. } = event else { return None };
+    if !delta.x.is_finite() || !delta.y.is_finite() || *delta == egui::Vec2::ZERO { return None; }
+    let scale = match unit {
+        egui::MouseWheelUnit::Line => 1.0,
+        egui::MouseWheelUnit::Point => 1.0 / 40.0,
+        egui::MouseWheelUnit::Page => page_height / 40.0,
+    };
+    Some(InputEvent::MouseScroll { delta_x: -delta.x * scale, delta_y: delta.y * scale })
 }
 
 /// Preserve key-down repeats and the final key-up for the remote OS.
@@ -1207,6 +1183,31 @@ fn show_chat_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
 
 #[cfg(test)]
 mod clipboard_tests {
+    #[test]
+    fn native_wheel_units_keep_notches_precision_and_horizontal_direction() {
+        let wheel = |unit, delta| egui::Event::MouseWheel { unit, delta, modifiers: egui::Modifiers::CTRL | egui::Modifiers::SHIFT };
+        assert_eq!(super::remote_scroll_event(&wheel(egui::MouseWheelUnit::Line, egui::vec2(0.0, 1.0)), 800.0),
+            Some(rotodesk_proto::message::InputEvent::MouseScroll { delta_x: 0.0, delta_y: 1.0 }));
+        assert_eq!(super::remote_scroll_event(&wheel(egui::MouseWheelUnit::Line, egui::vec2(-0.25, -0.125)), 800.0),
+            Some(rotodesk_proto::message::InputEvent::MouseScroll { delta_x: 0.25, delta_y: -0.125 }));
+        assert_eq!(super::remote_scroll_event(&wheel(egui::MouseWheelUnit::Point, egui::vec2(0.0, 0.25)), 800.0),
+            Some(rotodesk_proto::message::InputEvent::MouseScroll { delta_x: 0.0, delta_y: 0.25 / 40.0 }));
+        assert!(super::remote_scroll_event(&wheel(egui::MouseWheelUnit::Line, egui::vec2(f32::NAN, 1.0)), 800.0).is_none());
+    }
+
+    #[test]
+    fn wheel_and_key_events_remain_sequential_and_permission_gated() {
+        let wheel = |y| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, y), modifiers: egui::Modifiers::NONE };
+        let key = |pressed| egui::Event::Key { key: egui::Key::A, physical_key: None,
+            pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+        let events = vec![key(true), wheel(1.0), wheel(-1.0), key(false)];
+        assert_eq!(super::remote_input_events(&events, true, true), events);
+        assert_eq!(super::remote_input_events(&events, true, false), vec![wheel(1.0), wheel(-1.0)]);
+        assert_eq!(super::remote_input_events(&events, false, true), vec![key(true), key(false)]);
+        assert!(super::remote_input_events(&events, false, false).is_empty());
+    }
+
     #[test]
     fn held_backspace_delete_and_arrows_forward_repeats_and_release() {
         for (key, vk) in [

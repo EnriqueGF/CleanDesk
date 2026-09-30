@@ -94,6 +94,8 @@ pub fn mouse_move_absolute(x: f32, y: f32, monitor: &MonitorInfo, vs: &VirtualSc
 
 #[cfg(windows)]
 mod win;
+#[cfg(any(windows, test))]
+mod wheel;
 #[cfg(windows)]
 pub use win::WinInputInjector;
 
