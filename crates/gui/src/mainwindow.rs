@@ -753,155 +753,171 @@ fn device_card(
         egui::vec2(CARD_W, THUMB_H + 64.0),
     ));
     theme::device_card(hovered).show(ui, |ui| {
-        ui.set_width(CARD_W);
-        ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-        // Miniatura (clic = conectar).
-        let (rect, resp) =
-            ui.allocate_exact_size(egui::vec2(CARD_W, THUMB_H), egui::Sense::click());
-        let radius = egui::CornerRadius {
-            nw: theme::RADIUS,
-            ne: theme::RADIUS,
-            sw: 0,
-            se: 0,
-        };
-        match &thumb {
-            Some(tex) => {
-                ui.painter().add(egui::Shape::image(
-                    tex.id(),
-                    rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                ));
+        ui.vertical(|ui| {
+            ui.set_width(CARD_W);
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+            // Miniatura (clic = conectar).
+            let (rect, resp) =
+                ui.allocate_exact_size(egui::vec2(CARD_W, THUMB_H), egui::Sense::click());
+            let radius = egui::CornerRadius {
+                nw: theme::RADIUS,
+                ne: theme::RADIUS,
+                sw: 0,
+                se: 0,
+            };
+            match &thumb {
+                Some(tex) => {
+                    ui.painter().add(egui::Shape::image(
+                        tex.id(),
+                        rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    ));
+                }
+                None => {
+                    ui.painter().rect_filled(rect, radius, theme::CARD_TINT);
+                    theme::leaf(
+                        ui.painter(),
+                        egui::pos2(rect.right() - 40.0, rect.bottom() - 20.0),
+                        80.0,
+                        40,
+                    );
+                    theme::monitor_icon(ui.painter(), rect.center(), 40.0, theme::ACCENT_LIGHT);
+                }
             }
-            None => {
-                ui.painter().rect_filled(rect, radius, theme::CARD_TINT);
-                theme::leaf(
-                    ui.painter(),
-                    egui::pos2(rect.right() - 40.0, rect.bottom() - 20.0),
-                    80.0,
-                    40,
-                );
-                theme::monitor_icon(ui.painter(), rect.center(), 40.0, theme::ACCENT_LIGHT);
+            ui.painter().rect_stroke(
+                rect,
+                radius,
+                egui::Stroke::new(1.0_f32, theme::BORDER),
+                egui::StrokeKind::Inside,
+            );
+            if resp.clicked() {
+                actions.connect = Some(card.id);
             }
-        }
-        ui.painter().rect_stroke(
-            rect,
-            radius,
-            egui::Stroke::new(1.0_f32, theme::BORDER),
-            egui::StrokeKind::Inside,
-        );
-        if resp.clicked() {
-            actions.connect = Some(card.id);
-        }
-        resp.on_hover_text(tr("Connect"));
+            resp.on_hover_text(tr("Connect"));
 
-        // Punto de estado (arriba-izquierda) y estrella (arriba-derecha).
-        let dot = egui::pos2(rect.left() + 16.0, rect.top() + 16.0);
-        ui.painter().circle_filled(dot, 8.0, egui::Color32::WHITE);
-        ui.painter().circle_filled(
-            dot,
-            5.5,
-            if online {
-                theme::ONLINE
-            } else {
-                theme::OFFLINE
-            },
-        );
-        let star_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - 18.0, rect.top() + 18.0),
-            egui::vec2(24.0, 24.0),
-        );
-        ui.painter().circle_filled(
-            star_rect.center(),
-            12.0,
-            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 210),
-        );
-        let star = ui.put(
-            star_rect,
-            egui::Button::new(
-                egui::RichText::new(if card.favorite { "★" } else { "☆" })
-                    .size(15.0)
-                    .color(if card.favorite {
-                        theme::STAR
-                    } else {
-                        theme::TEXT_DIM
-                    }),
-            )
-            .frame(false),
-        );
-        if star
-            .on_hover_text(tr("Add to / remove from favorites"))
-            .clicked()
-        {
-            actions.toggle_fav = Some((card.id, card.name.clone(), card.favorite));
-        }
-        ui.advance_cursor_after_rect(rect);
+            // Punto de estado (arriba-izquierda) y estrella (arriba-derecha).
+            let dot = egui::pos2(rect.left() + 16.0, rect.top() + 16.0);
+            ui.painter().circle_filled(dot, 8.0, egui::Color32::WHITE);
+            ui.painter().circle_filled(
+                dot,
+                5.5,
+                if online {
+                    theme::ONLINE
+                } else {
+                    theme::OFFLINE
+                },
+            );
+            let star_rect = egui::Rect::from_center_size(
+                egui::pos2(rect.right() - 18.0, rect.top() + 18.0),
+                egui::vec2(24.0, 24.0),
+            );
+            ui.painter().circle_filled(
+                star_rect.center(),
+                12.0,
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 210),
+            );
+            let star = ui.put(
+                star_rect,
+                egui::Button::new(
+                    egui::RichText::new(if card.favorite { "★" } else { "☆" })
+                        .size(15.0)
+                        .color(if card.favorite {
+                            theme::STAR
+                        } else {
+                            theme::TEXT_DIM
+                        }),
+                )
+                .frame(false),
+            );
+            if star
+                .on_hover_text(tr("Add to / remove from favorites"))
+                .clicked()
+            {
+                actions.toggle_fav = Some((card.id, card.name.clone(), card.favorite));
+            }
+            ui.advance_cursor_after_rect(rect);
 
-        // Pie.
-        egui::Frame::new()
-            .inner_margin(egui::Margin::symmetric(12, 10))
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(8.0, 2.0);
-                ui.horizontal_wrapped(|ui| {
-                    let (ir, _) =
-                        ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
-                    theme::monitor_icon(ui.painter(), ir.center(), 18.0, theme::TEXT_DIM);
-                    ui.vertical(|ui| {
-                        ui.set_width(CARD_W - 24.0 - 12.0 - 40.0);
-                        ui.add(
-                            egui::Label::new(egui::RichText::new(&card.name).strong().size(14.0))
+            // Pie.
+            egui::Frame::new()
+                .inner_margin(egui::Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 2.0);
+                    ui.horizontal(|ui| {
+                        let (ir, _) =
+                            ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+                        theme::monitor_icon(ui.painter(), ir.center(), 18.0, theme::TEXT_DIM);
+                        ui.vertical(|ui| {
+                            ui.set_width(CARD_W - 96.0);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&card.name).strong().size(14.0),
+                                )
                                 .truncate(),
-                        );
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(format!(
-                                    "{}{}",
-                                    card.subtitle,
-                                    if card.has_key { "  Key" } else { "" }
-                                ))
-                                .size(11.0)
-                                .color(theme::TEXT_MUTED),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(format!(
+                                        "{}{}",
+                                        card.subtitle,
+                                        if card.has_key { "  Key" } else { "" }
+                                    ))
+                                    .size(11.0)
+                                    .color(theme::TEXT_MUTED),
+                                )
+                                .truncate(),
                             )
-                            .truncate(),
-                        )
-                        .on_hover_text(card.id.to_string());
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.menu_button(egui::RichText::new("⋮").size(18.0), |ui| {
-                            ui.set_min_width(180.0);
-                            if ui.button(tr("Connect")).clicked() {
-                                actions.connect = Some(card.id);
-                                ui.close();
+                            .on_hover_text(card.id.to_string());
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let response = ui
+                                .add(egui::Button::new("").min_size(egui::vec2(26.0, 26.0)))
+                                .on_hover_text(tr("Actions"));
+                            // Paint the menu dots directly: the default font has no vertical ellipsis.
+                            for offset in [-5.0, 0.0, 5.0] {
+                                ui.painter().circle_filled(
+                                    response.rect.center() + egui::vec2(0.0, offset),
+                                    1.6,
+                                    theme::TEXT_DIM,
+                                );
                             }
-                            if ui.button(tr("Copy ID")).clicked() {
-                                ui.ctx().copy_text(card.id.to_string());
-                                ui.close();
-                            }
-                            let fav_label = if card.favorite {
-                                tr("Remove from favorites")
-                            } else {
-                                tr("Add to favorites")
-                            };
-                            if ui.button(fav_label).clicked() {
-                                actions.toggle_fav =
-                                    Some((card.id, card.name.clone(), card.favorite));
-                                ui.close();
-                            }
-                            if let Some(mac) = &card.mac {
-                                if ui.button(tr("Wake up (Wake-on-LAN)")).clicked() {
-                                    actions.wake = Some(mac.clone());
+                            egui::Popup::menu(&response).show(|ui| {
+                                ui.set_min_width(180.0);
+                                if ui.button(tr("Connect")).clicked() {
+                                    actions.connect = Some(card.id);
                                     ui.close();
                                 }
-                            }
-                            if card.has_key && ui.button(tr("Forget remembered password")).clicked()
-                            {
-                                actions.forget_key = Some(card.id);
-                                ui.close();
-                            }
+                                if ui.button(tr("Copy ID")).clicked() {
+                                    ui.ctx().copy_text(card.id.to_string());
+                                    ui.close();
+                                }
+                                let fav_label = if card.favorite {
+                                    tr("Remove from favorites")
+                                } else {
+                                    tr("Add to favorites")
+                                };
+                                if ui.button(fav_label).clicked() {
+                                    actions.toggle_fav =
+                                        Some((card.id, card.name.clone(), card.favorite));
+                                    ui.close();
+                                }
+                                if let Some(mac) = &card.mac {
+                                    if ui.button(tr("Wake up (Wake-on-LAN)")).clicked() {
+                                        actions.wake = Some(mac.clone());
+                                        ui.close();
+                                    }
+                                }
+                                if card.has_key
+                                    && ui.button(tr("Forget remembered password")).clicked()
+                                {
+                                    actions.forget_key = Some(card.id);
+                                    ui.close();
+                                }
+                            });
                         });
                     });
                 });
-            });
+        });
     });
 }
 
