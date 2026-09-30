@@ -1,0 +1,3 @@
+CleanDesk brand generated with built-in image_gen on 2026-09-30.
+Prompt: Use case: logo-brand. Create a polished square app brand mark for CleanDesk, a native remote desktop app. A bold geometric emerald green rounded monitor outline combined with two interlocking directional links, suggesting secure remote connection. Simple distinctive silhouette readable at 16px, generous padding, centered, flat vector-like raster artwork, emerald #009B72 and deep teal #006B50 with a small mint accent. No letters, no text, no watermark, no mockup, no shadows outside the mark. Transparent background. This single brand symbol will be used as logo and app icon.
+Original: logo.png. icon-32.png, icon-256.png and installer/cleandesk.ico are resized derivatives preserving transparency.

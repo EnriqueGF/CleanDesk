@@ -71,6 +71,10 @@ Write-Host "== light" -ForegroundColor Cyan
     -sice:ICE61 -out $msi $obj
 if ($LASTEXITCODE -ne 0) { throw "light failed" }
 
+# Portable application and server binaries, matching the installer build.
+$zip = Join-Path $out "CleanDesk-$Version-x64-binaries.zip"
+Compress-Archive -Path (Join-Path $release "cleandesk.exe"), (Join-Path $release "cleandesk-signal-server.exe"), (Join-Path $release "cleandesk-relay-server.exe") -DestinationPath $zip -Force
+
 # Checksums the in-app updater verifies against (one line per release file).
 $sums = Join-Path $out "SHA256SUMS"
 $lines = @()

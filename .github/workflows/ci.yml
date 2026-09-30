@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # The repo's .cargo/config.toml points target-dir at a local F: drive;
+  # override it on CI runners.
+  CARGO_TARGET_DIR: target
+
+jobs:
+  check:
+    name: check · clippy · test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # WebRTC loopback / e2e tests open UDP sockets on 127.0.0.1; fine on hosted runners.
+      - run: cargo test --workspace

@@ -11,19 +11,17 @@ use egui::{Color32, CornerRadius, Margin, Stroke, Style, Visuals};
 pub const BG: Color32 = Color32::from_rgb(246, 248, 247); // fondo de página
 pub const PANEL: Color32 = Color32::from_rgb(255, 255, 255); // cabecera, pie, ventanas
 pub const CARD: Color32 = Color32::from_rgb(255, 255, 255);
-pub const CARD_TINT: Color32 = Color32::from_rgb(236, 246, 239); // tarjetas verdosas
-pub const HERO_A: Color32 = Color32::from_rgb(232, 244, 236); // degradado banner (izq.)
-pub const HERO_B: Color32 = Color32::from_rgb(214, 238, 222); // degradado banner (der.)
+pub const CARD_TINT: Color32 = Color32::from_rgb(232, 248, 242); // tarjetas verdosas
 pub const WIDGET: Color32 = Color32::from_rgb(243, 245, 244);
 pub const BORDER: Color32 = Color32::from_rgb(226, 232, 228);
 pub const BORDER_SOFT: Color32 = Color32::from_rgb(203, 213, 206);
 pub const TEXT: Color32 = Color32::from_rgb(23, 33, 28);
 pub const TEXT_DIM: Color32 = Color32::from_rgb(86, 100, 92);
 pub const TEXT_MUTED: Color32 = Color32::from_rgb(140, 152, 145);
-pub const ACCENT: Color32 = Color32::from_rgb(31, 138, 74); // verde principal
-pub const ACCENT_STRONG: Color32 = Color32::from_rgb(24, 122, 64);
-pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(52, 190, 106);
-pub const ACCENT_DIM: Color32 = Color32::from_rgb(222, 240, 228); // fondos suaves verdes
+pub const ACCENT: Color32 = Color32::from_rgb(0, 155, 114); // verde principal
+pub const ACCENT_STRONG: Color32 = Color32::from_rgb(0, 107, 80);
+pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(22, 190, 143);
+pub const ACCENT_DIM: Color32 = Color32::from_rgb(218, 245, 235); // fondos suaves verdes
 pub const WARN: Color32 = Color32::from_rgb(217, 119, 6);
 pub const DANGER: Color32 = Color32::from_rgb(220, 38, 38);
 pub const STAR: Color32 = Color32::from_rgb(245, 158, 11);
@@ -171,19 +169,6 @@ pub fn pill_button(text: &str) -> egui::Button<'static> {
         .corner_radius(CornerRadius::same(20))
 }
 
-/// Botón cuadrado de icono con borde (copiar, candado…).
-pub fn icon_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(
-        egui::RichText::new(text.to_owned())
-            .size(16.0)
-            .color(TEXT_DIM),
-    )
-    .fill(Color32::WHITE)
-    .stroke(Stroke::new(1.0_f32, BORDER_SOFT))
-    .corner_radius(CornerRadius::same(RADIUS_SM))
-    .min_size(egui::vec2(40.0, 40.0))
-}
-
 /// Botón peligroso (rojo) para desconectar/finalizar.
 pub fn danger_button(text: &str) -> egui::Button<'static> {
     egui::Button::new(
@@ -209,48 +194,6 @@ pub fn status_dot(ui: &mut egui::Ui, color: Color32, text: &str) {
 pub fn big_id(ui: &mut egui::Ui, id: cleandesk_proto::CleanDeskId) {
     let s = id.to_string();
     ui.label(egui::RichText::new(s).size(38.0).strong().color(ACCENT));
-}
-
-/// Rectángulo con degradado horizontal (banner) pintado con dos triángulos
-/// de la malla de egui.
-pub fn gradient_rect(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    left: Color32,
-    right: Color32,
-    radius: f32,
-) {
-    use egui::epaint::{Mesh, Vertex, WHITE_UV};
-    // Fondo redondeado uniforme por debajo y degradado por encima con una
-    // malla rectangular; el pequeño recorte en las esquinas se disimula con
-    // el color del borde.
-    painter.rect_filled(rect, radius, left);
-    let inset = rect.shrink2(egui::vec2(radius * 0.5, 0.0));
-    let mut mesh = Mesh::default();
-    let c = |color: Color32| color;
-    mesh.vertices.push(Vertex {
-        pos: inset.left_top(),
-        uv: WHITE_UV,
-        color: c(left),
-    });
-    mesh.vertices.push(Vertex {
-        pos: inset.right_top(),
-        uv: WHITE_UV,
-        color: c(right),
-    });
-    mesh.vertices.push(Vertex {
-        pos: inset.right_bottom(),
-        uv: WHITE_UV,
-        color: c(right),
-    });
-    mesh.vertices.push(Vertex {
-        pos: inset.left_bottom(),
-        uv: WHITE_UV,
-        color: c(left),
-    });
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
-    painter.add(egui::Shape::mesh(mesh));
 }
 
 /// Hoja decorativa (dos arcos rellenos) en verde translúcido.
@@ -301,4 +244,52 @@ pub fn monitor_icon(painter: &egui::Painter, center: egui::Pos2, size: f32, colo
         ],
         Stroke::new((size * 0.08).max(1.5), color),
     );
+}
+
+/// Generated brand asset shared by the header, window and installer.
+pub fn brand(ui: &mut egui::Ui, size: f32) {
+    let id = egui::Id::new("cleandesk-brand-texture");
+    let texture = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<egui::TextureHandle>(id));
+    let texture = texture.unwrap_or_else(|| {
+        let img = image::load_from_memory(include_bytes!("../assets/icon-256.png"))
+            .expect("embedded brand PNG")
+            .to_rgba8();
+        let color = egui::ColorImage::from_rgba_unmultiplied(
+            [img.width() as usize, img.height() as usize],
+            img.as_raw(),
+        );
+        let texture = ui
+            .ctx()
+            .load_texture("cleandesk-brand", color, egui::TextureOptions::LINEAR);
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(id, texture.clone()));
+        texture
+    });
+    ui.image((texture.id(), egui::vec2(size, size)));
+}
+
+/// Small action symbols painted with geometry, independent of installed fonts.
+pub fn action_icon(painter: &egui::Painter, center: egui::Pos2, kind: &str) {
+    let stroke = Stroke::new(2.0_f32, ACCENT);
+    if kind == "discover" {
+        painter.circle_stroke(center, 9.0, stroke);
+        painter.circle_stroke(center, 4.0, stroke);
+        painter.circle_filled(center, 1.5, ACCENT);
+    } else if kind == "contacts" {
+        painter.circle_stroke(center + egui::vec2(0.0, -5.0), 4.0, stroke);
+        painter.rect_stroke(
+            egui::Rect::from_center_size(center + egui::vec2(0.0, 6.0), egui::vec2(16.0, 9.0)),
+            4.0,
+            stroke,
+            egui::StrokeKind::Inside,
+        );
+    } else if kind == "access" {
+        monitor_icon(painter, center, 22.0, ACCENT);
+    } else {
+        for offset in [egui::vec2(0.0, 9.0), egui::vec2(9.0, 0.0)] {
+            painter.line_segment([center - offset, center + offset], stroke);
+        }
+    }
 }

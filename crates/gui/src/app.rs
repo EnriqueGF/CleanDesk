@@ -48,6 +48,7 @@ enum ConnectPhase {
     Connecting {
         target: CleanDeskId,
         rx: oneshot::Receiver<anyhow::Result<ClientSession>>,
+        task: tokio::task::AbortHandle,
     },
     /// Sesión establecida: mostramos el visor.
     Active(Box<ViewerState>),
@@ -138,6 +139,9 @@ pub struct CleanDeskApp {
     pub last_scan: Option<std::time::Instant>,
     /// Ventana de ajustes visible.
     pub show_settings: bool,
+    pub settings_section: usize,
+    #[cfg(debug_assertions)]
+    capture_requested: bool,
     /// Ventana de seguridad (huella) visible.
     pub show_security: bool,
     /// Formulario "Añadir dispositivo" visible.
@@ -291,7 +295,10 @@ impl CleanDeskApp {
             show_nearby: false,
             last_scan: None,
             // `CLEANDESK_OPEN_SETTINGS=1` abre Ajustes al arrancar (capturas, soporte).
-            show_settings: std::env::var_os("CLEANDESK_OPEN_SETTINGS").is_some(),
+            settings_section: std::env::var("CLEANDESK_SETTINGS_SECTION").ok().and_then(|v| v.parse().ok()).unwrap_or(0),
+            #[cfg(debug_assertions)]
+            capture_requested: false,
+            show_settings: std::env::var("CLEANDESK_OPEN_SETTINGS").is_ok_and(|v| v == "1"),
             show_security: false,
             show_add_device: false,
             add_device_id: String::new(),
@@ -409,7 +416,7 @@ impl CleanDeskApp {
         config.expected_host_key = pinned.clone();
         let (tx, rx) = oneshot::channel();
         let ctx = ctx.clone();
-        self.rt.spawn(async move {
+        let task = self.rt.spawn(async move {
             let result = if mode.is_community() {
                 cleandesk_client::connect_community(config, pinned).await
             } else {
@@ -420,7 +427,15 @@ impl CleanDeskApp {
         });
 
         info!(%target, "iniciando conexión saliente");
-        self.connect = ConnectPhase::Connecting { target, rx };
+        self.connect = ConnectPhase::Connecting { target, rx, task: task.abort_handle() };
+    }
+
+    pub fn cancel_connection(&mut self) {
+        if let ConnectPhase::Connecting { task, .. } = &self.connect {
+            task.abort();
+            self.connect = ConnectPhase::Idle;
+            self.pending_remember = None;
+        }
     }
 
     /// Modo de red efectivo: `--signal-url` manda; si no, los ajustes.
@@ -516,7 +531,7 @@ impl CleanDeskApp {
 
     /// Sondea el resultado de una conexión saliente en curso.
     fn poll_connecting(&mut self, ctx: &egui::Context) {
-        let ConnectPhase::Connecting { rx, target } = &mut self.connect else {
+        let ConnectPhase::Connecting { rx, target, .. } = &mut self.connect else {
             return;
         };
         match rx.try_recv() {
@@ -670,6 +685,8 @@ impl eframe::App for CleanDeskApp {
                 mainwindow::show(self, ctx);
             }
         }
+        #[cfg(debug_assertions)]
+        self.capture_preview(ctx);
     }
 }
 
@@ -1154,5 +1171,31 @@ impl CleanDeskApp {
             "Connect to my desktop with CleanDesk.\nMy CleanDesk ID: {id}\nFingerprint: {fp}\nDownload: https://github.com/EnriqueGF/CleanDesk/releases",
             &[("id", &self.id.to_string()), ("fp", &self.state.identity.fingerprint())],
         )
+    }
+}
+
+#[cfg(debug_assertions)]
+impl CleanDeskApp {
+    /// Capture only our framebuffer for UI review, regardless of overlapping windows.
+    fn capture_preview(&mut self, ctx: &egui::Context) {
+        let Ok(path) = std::env::var("CLEANDESK_SCREENSHOT") else { return };
+        if !self.capture_requested && std::env::var("CLEANDESK_PREVIEW_MAXIMIZED").is_ok_and(|v| v == "1") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+        }
+        if !self.capture_requested && ctx.input(|i| i.time) > 2.0 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+            self.capture_requested = true;
+        }
+        let capture = ctx.input(|i| i.events.iter().find_map(|e| {
+            if let egui::Event::Screenshot { image, .. } = e { Some(image.clone()) } else { None }
+        }));
+        if let Some(capture) = capture {
+            let rgba: Vec<u8> = capture.pixels.iter().flat_map(|p| p.to_array()).collect();
+            let result = image::save_buffer(path, &rgba, capture.size[0] as u32, capture.size[1] as u32, image::ColorType::Rgba8);
+            if let Err(err) = result { warn!(%err, "preview capture failed"); }
+            self.quitting = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 }

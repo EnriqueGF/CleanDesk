@@ -99,11 +99,23 @@ pub fn run(
             .build()?,
     );
 
+    #[allow(unused_mut)]
+    let mut initial_size = [960.0, 620.0];
+    let maximized = cfg!(debug_assertions) && std::env::var("CLEANDESK_PREVIEW_MAXIMIZED").is_ok_and(|v| v == "1");
+    #[cfg(debug_assertions)]
+    {
+        if let Ok(size) = std::env::var("CLEANDESK_PREVIEW_SIZE") {
+            let values: Vec<f32> = size.split(',').filter_map(|v| v.parse().ok()).collect();
+            if values.len() == 2 { initial_size = [values[0], values[1]]; }
+        }
+
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("CleanDesk")
             .with_icon(std::sync::Arc::new(tray::window_icon()))
-            .with_inner_size([960.0, 620.0])
+            .with_inner_size(initial_size)
+            .with_maximized(maximized)
             .with_min_inner_size([720.0, 480.0]),
         ..Default::default()
     };

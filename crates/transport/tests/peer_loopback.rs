@@ -94,7 +94,10 @@ async fn loopback_offer_answer_trickle_and_send() -> anyhow::Result<()> {
     assert_eq!(ch, Channel::Control);
     assert_eq!(&data[..], &payload[..]);
 
+    assert!(tokio::time::timeout(Duration::from_millis(50), a.wait_closed()).await.is_err(), "live peer must not be reported closed");
     a.close().await?;
+    tokio::time::timeout(Duration::from_secs(2), a.wait_closed()).await
+        .expect("close notification must arrive even with the incoming receiver still held");
     b.close().await?;
     Ok(())
 }

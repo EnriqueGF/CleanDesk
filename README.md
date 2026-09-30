@@ -49,6 +49,7 @@ files and provide support — using **P2P connections** whenever possible and a
   tray and the host keeps serving; quit from the tray menu (configurable).
   Launching it again just brings the existing window back (single instance per
   data directory).
+- **Sessions recover cleanly.** A closed connection ends the viewer immediately; a silent peer times out after 20 seconds. Held keys repeat on the remote desktop, including Backspace and Delete.
 - **Everything you expect in a session.** Two-way text clipboard sync, file
   transfer (drag a file onto the remote screen; incoming files are offered and
   confirmed), remote actions (Ctrl+Alt+Del substitute, Task Manager, lock the
@@ -64,7 +65,7 @@ files and provide support — using **P2P connections** whenever possible and a
   saved devices can be woken from the address book with one click.
 
 <p align="center">
-  <img src="docs/screenshots/settings.png" alt="Settings: network mode, unattended access, service" width="520">
+  <img src="docs/screenshots/settings.png" alt="Settings with General, Network, Unattended Access, Quality, System and Updates sections" width="520">
 </p>
 
 ## Status

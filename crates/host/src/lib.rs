@@ -593,9 +593,12 @@ async fn run_session_inner(
     // undone on every exit path.
     let mut local_input_blocked = false;
 
+    let mut idle_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     let reason = loop {
         let next = tokio::select! {
             biased;
+            _ = peer.wait_closed() => break "connection closed".to_string(),
+            _ = tokio::time::sleep_until(idle_deadline) => break "remote timed out after 20 seconds".to_string(),
             _ = tokio::time::sleep_until(auth_deadline.into()), if !authed => {
                 warn!("unattended auth timed out");
                 send_ctrl(&peer, &SessionMessage::Disconnect { reason: "auth timeout".into() }).await;
@@ -608,6 +611,7 @@ async fn run_session_inner(
             next = incoming.recv() => next,
         };
         let Some((ch, bytes)) = next else { break "connection closed".to_string() };
+        idle_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
         match ch {
             Channel::Input => {
                 if !authed {

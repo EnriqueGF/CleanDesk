@@ -794,7 +794,19 @@ async fn dispatch_incoming(
         }
     };
 
-    while let Some((ch, bytes)) = incoming.recv().await {
+    let mut deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let next = tokio::select! {
+            biased;
+            _ = peer.wait_closed() => None,
+            _ = tokio::time::sleep_until(deadline) => {
+                let _ = cev_tx.send(ClientEvent::Disconnected("remote timed out after 20 seconds".into())).await;
+                break;
+            }
+            next = incoming.recv() => next,
+        };
+        let Some((ch, bytes)) = next else { break };
+        deadline = tokio::time::Instant::now() + Duration::from_secs(20);
         match ch {
             Channel::Video => {
                 let Ok(chunk) = frame::decode_payload::<FrameChunk>(&bytes) else { continue };
@@ -993,5 +1005,46 @@ mod tests {
         let t = Instant::now();
         assert_eq!(g.on_frame(u64::MAX, true, t), GateAction::Decode);
         assert_eq!(g.on_frame(0, false, t), GateAction::Decode);
+    }
+}
+
+#[cfg(test)]
+mod session_lifecycle_tests {
+    use super::*;
+
+    async fn silent_session() -> (Arc<PeerConnection>, mpsc::Sender<(Channel, Bytes)>, mpsc::Receiver<ClientEvent>, tokio::task::JoinHandle<()>) {
+        let peer = Arc::new(PeerConnection::new(IceConfig::default(), false).await.unwrap());
+        let (incoming_tx, incoming) = mpsc::channel(8);
+        let (frames_tx, _frames) = mpsc::channel(8);
+        let (events_tx, events) = mpsc::channel(8);
+        let (control_tx, _control) = mpsc::unbounded_channel();
+        let (files_tx, _files) = mpsc::unbounded_channel();
+        let task = tokio::spawn(dispatch_incoming(peer.clone(), incoming, frames_tx, events_tx, control_tx, None,
+            CleanDeskId::parse("123456789").unwrap(), Dispatch {
+                files_tx, granted: Arc::new(AtomicU32::new(0)),
+                clipboard: Arc::new(Mutex::new(None)), host_protocol_minor: Arc::new(AtomicU32::new(0)),
+            }));
+        (peer, incoming_tx, events, task)
+    }
+
+    #[tokio::test]
+    async fn silent_remote_ends_session_after_twenty_seconds_with_sender_alive() {
+        let (_peer, _sender, mut events, task) = silent_session().await;
+        let start = Instant::now();
+        let event = tokio::time::timeout(Duration::from_secs(23), events.recv()).await.unwrap().unwrap();
+        assert!(matches!(event, ClientEvent::Disconnected(reason) if reason.contains("20 seconds")));
+        assert!(start.elapsed() >= Duration::from_secs(20));
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn inbound_heartbeat_refreshes_timeout_and_transport_close_ends_session() {
+        let (peer, sender, mut events, task) = silent_session().await;
+        tokio::time::sleep(Duration::from_secs(12)).await;
+        sender.send((Channel::Control, frame::encode_payload(&SessionMessage::Ping { nonce: 1 }).unwrap().into())).await.unwrap();
+        assert!(tokio::time::timeout(Duration::from_secs(10), events.recv()).await.is_err(), "heartbeat must extend the original 20 second deadline");
+        peer.close().await.unwrap();
+        assert!(matches!(tokio::time::timeout(Duration::from_secs(2), events.recv()).await.unwrap().unwrap(), ClientEvent::Disconnected(_)));
+        task.await.unwrap();
     }
 }

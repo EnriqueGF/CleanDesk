@@ -350,6 +350,7 @@ pub struct PeerConnection {
     ice_rx: Mutex<Option<mpsc::Receiver<SignalPayload>>>,
     incoming_rx: Option<mpsc::Receiver<(Channel, Bytes)>>,
     state_rx: watch::Receiver<RTCPeerConnectionState>,
+    state_tx: watch::Sender<RTCPeerConnectionState>,
     open_rx: watch::Receiver<HashSet<Channel>>,
 }
 
@@ -368,7 +369,7 @@ impl PeerConnection {
         let handler = Arc::new(Handler {
             ice_tx,
             incoming_tx: incoming_tx.clone(),
-            state_tx,
+            state_tx: state_tx.clone(),
             channels: channels.clone(),
             open_gate: open_gate.clone(),
         });
@@ -411,6 +412,7 @@ impl PeerConnection {
             ice_rx: Mutex::new(Some(ice_rx)),
             incoming_rx: Some(incoming_rx),
             state_rx,
+            state_tx,
             open_rx,
         })
     }
@@ -582,6 +584,17 @@ impl PeerConnection {
         }
     }
 
+    /// Wait for a terminal transport state even when reader senders remain alive.
+    pub async fn wait_closed(&self) {
+        let mut rx = self.state_rx.clone();
+        loop {
+            if matches!(*rx.borrow_and_update(), RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed) {
+                return;
+            }
+            if rx.changed().await.is_err() { return; }
+        }
+    }
+
     /// The DTLS certificate fingerprints of this connection as
     /// `(local, remote)`, each in the canonical form `"sha-256 aa:bb:..."`
     /// (lowercase). Only meaningful once [`Self::wait_connected`] resolved.
@@ -631,6 +644,8 @@ impl PeerConnection {
     /// Close the peer connection and stop its background driver.
     pub async fn close(&self) -> Result<()> {
         self.pc.close().await.context("closing peer connection")?;
+        // Some backends omit the state callback when closing a not-yet-connected peer.
+        self.state_tx.send_replace(RTCPeerConnectionState::Closed);
         Ok(())
     }
 }

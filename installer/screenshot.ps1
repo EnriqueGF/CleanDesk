@@ -1,48 +1,44 @@
 <#
 .SYNOPSIS
-  Launch cleandesk.exe with a scratch data dir and capture its main window to a PNG.
-  Used to refresh docs/screenshots/*.png.
+  Capture CleanDesk's own framebuffer using a debug build, without capturing other windows.
 #>
 param(
-    [string]$Exe = "D:\cleandesk-target\release\cleandesk.exe",
+    [string]$Exe = "D:\cleandesk-target\debug\cleandesk.exe",
     [string]$Out = "docs\screenshots\main-window.png",
     [string]$DataDir = "$env:TEMP\cleandesk-shot",
-    [int]$WaitSeconds = 12
+    [int]$WaitSeconds = 15,
+    [int]$Width = 960,
+    [int]$Height = 740,
+    [switch]$Maximized,
+    [switch]$Settings,
+    [int]$Section = 0,
+    [string]$Connect = ""
 )
 $ErrorActionPreference = "Stop"
-Add-Type -AssemblyName System.Drawing
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class Win {
-  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
-  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
-  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
-  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
+$folder = [IO.Path]::GetFullPath((Split-Path $Out))
+New-Item -ItemType Directory -Force $folder | Out-Null
+$destination = Join-Path $folder (Split-Path $Out -Leaf)
+$vars = @{
+    CLEANDESK_SCREENSHOT = $destination
+    CLEANDESK_PREVIEW_SIZE = "$Width,$Height"
+    CLEANDESK_PREVIEW_MAXIMIZED = $(if ($Maximized) { "1" } else { $null })
+    CLEANDESK_OPEN_SETTINGS = $(if ($Settings) { "1" } else { $null })
+    CLEANDESK_SETTINGS_SECTION = "$Section"
 }
-"@
-$p = Start-Process -FilePath $Exe -ArgumentList "--data-dir", $DataDir -PassThru
+$previous = @{}
+$p = $null
 try {
-    Start-Sleep -Seconds $WaitSeconds
-    $p.Refresh()
-    $h = $p.MainWindowHandle
-    if ($h -eq [IntPtr]::Zero) { throw "no main window" }
-    [Win]::ShowWindow($h, 9) | Out-Null
-    [Win]::SetForegroundWindow($h) | Out-Null
-    Start-Sleep -Milliseconds 800
-    $r = New-Object Win+RECT
-    # DWMWA_EXTENDED_FRAME_BOUNDS = 9: excludes the invisible resize borders.
-    if ([Win]::DwmGetWindowAttribute($h, 9, [ref]$r, 16) -ne 0) { [Win]::GetWindowRect($h, [ref]$r) | Out-Null }
-    $w = $r.R - $r.L; $hgt = $r.B - $r.T
-    $bmp = New-Object System.Drawing.Bitmap($w, $hgt)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen($r.L, $r.T, 0, 0, (New-Object System.Drawing.Size($w, $hgt)))
-    $g.Dispose()
-    New-Item -ItemType Directory -Force (Split-Path $Out) | Out-Null
-    $bmp.Save((Resolve-Path (Split-Path $Out)).Path + "\" + (Split-Path $Out -Leaf), [System.Drawing.Imaging.ImageFormat]::Png)
-    $bmp.Dispose()
-    Write-Host "saved $Out ($w x $hgt)"
+    foreach ($key in $vars.Keys) {
+        $previous[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
+        [Environment]::SetEnvironmentVariable($key, $vars[$key], "Process")
+    }
+    $arguments = @("--data-dir", $DataDir)
+    if ($Connect) { $arguments += @("--connect", $Connect) }
+    $p = Start-Process -FilePath $Exe -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    if (-not $p.WaitForExit($WaitSeconds * 1000)) { throw "framebuffer capture timed out (use a debug build)" }
+    if ($p.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $destination)) { throw "capture failed" }
+    Write-Host "saved $destination"
 } finally {
-    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+    if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+    foreach ($key in $previous.Keys) { [Environment]::SetEnvironmentVariable($key, $previous[$key], "Process") }
 }

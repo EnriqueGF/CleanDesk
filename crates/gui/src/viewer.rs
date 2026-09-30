@@ -85,6 +85,7 @@ pub struct ViewerState {
 
     /// Estado de modificadores ya enviado al host.
     modifiers: ModifierState,
+    held_keys: std::collections::HashSet<u32>,
     /// Últimas coordenadas normalizadas enviadas, para no repetir moves idénticos.
     last_move: Option<(f32, f32)>,
 
@@ -146,6 +147,7 @@ impl ViewerState {
             fit_to_window: true,
             fullscreen: false,
             modifiers: ModifierState::default(),
+            held_keys: std::collections::HashSet::new(),
             last_move: None,
             clipboard_sync: true,
             local_input_locked: false,
@@ -176,6 +178,12 @@ impl ViewerState {
 
     /// Suelta los modificadores que seguimos teniendo "pulsados" en el host.
     fn release_modifiers(&self) {
+        for &code in &self.held_keys {
+            self.session.send_input(InputEvent::Key {
+                code,
+                pressed: false,
+            });
+        }
         for (held, code) in [
             (self.modifiers.shift, VK_SHIFT),
             (self.modifiers.ctrl, VK_CONTROL),
@@ -298,7 +306,7 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(viewer.fullscreen));
                                 }
                                 if ui
-                                    .button("⟳")
+                                    .button(tr("Refresh"))
                                     .on_hover_text(tr("Refresh image (request a keyframe)"))
                                     .clicked()
                                 {
@@ -397,6 +405,21 @@ pub fn show(viewer: &mut ViewerState, ctx: &egui::Context) -> ViewerOutcome {
             render_video_and_input(viewer, ui);
         });
 
+    if viewer.texture.is_none() {
+        egui::Modal::new(egui::Id::new("remote-screen-progress")).show(ctx, |ui| {
+            ui.set_max_width(360.0);
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.heading(tr("Waiting for the remote screen…"));
+            });
+            if ui.add(theme::danger_button(tr("Disconnect"))).clicked() {
+                disconnect_requested = true;
+            }
+        });
+        if disconnect_requested {
+            return ViewerOutcome::Disconnected(None);
+        }
+    }
     ViewerOutcome::Continue
 }
 
@@ -879,9 +902,6 @@ fn forward_input(
     let mouse_ok = viewer.mouse_allowed();
     let keyboard_ok = viewer.keyboard_allowed()
         && (response.has_focus() || (response.hovered() && !ui.ctx().wants_keyboard_input()));
-    if !mouse_ok && !keyboard_ok {
-        return;
-    }
 
     // Datos crudos de este fotograma (copias, sin préstamos sobre `ui`).
     struct FrameInput {
@@ -906,15 +926,10 @@ fn forward_input(
                         buttons.push((mapped, *pressed));
                     }
                 }
-                // Ignoramos los `repeat`: el host gestiona su propio auto-repeat.
-                egui::Event::Key {
-                    key,
-                    pressed,
-                    repeat,
-                    ..
-                } if keyboard_ok && !*repeat => {
-                    if let Some(vk) = key_to_vk(*key) {
-                        keys.push((vk, *pressed));
+                // SendInput does not generate auto-repeat: forward every local key-down.
+                egui::Event::Key { .. } if keyboard_ok => {
+                    if let Some(key) = remote_key_event(ev) {
+                        keys.push(key);
                     }
                 }
                 egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) if keyboard_ok => {
@@ -978,6 +993,11 @@ fn forward_input(
         sync_modifiers(viewer, input.modifiers);
 
         for (vk, pressed) in input.keys {
+            if pressed {
+                viewer.held_keys.insert(vk);
+            } else {
+                viewer.held_keys.remove(&vk);
+            }
             viewer
                 .session
                 .send_input(InputEvent::Key { code: vk, pressed });
@@ -996,9 +1016,24 @@ fn forward_input(
                 viewer.session.send_input(event);
             }
         }
-    } else if viewer.modifiers.shift || viewer.modifiers.ctrl || viewer.modifiers.alt {
+    } else {
+        for code in viewer.held_keys.drain() {
+            viewer.session.send_input(InputEvent::Key {
+                code,
+                pressed: false,
+            });
+        }
         // El foco salió de la imagen con modificadores pulsados: suéltalos.
         sync_modifiers(viewer, egui::Modifiers::NONE);
+    }
+}
+
+/// Preserve key-down repeats and the final key-up for the remote OS.
+fn remote_key_event(event: &egui::Event) -> Option<(u32, bool)> {
+    if let egui::Event::Key { key, pressed, .. } = event {
+        key_to_vk(*key).map(|vk| (vk, *pressed))
+    } else {
+        None
     }
 }
 
@@ -1014,55 +1049,43 @@ fn clipboard_shortcut(event: &egui::Event, modifiers: ModifierState) -> Vec<Inpu
     let mut keys = Vec::new();
     for (code, held) in [(VK_SHIFT, modifiers.shift), (VK_MENU, modifiers.alt)] {
         if held {
-            keys.push(InputEvent::Key { code, pressed: false });
+            keys.push(InputEvent::Key {
+                code,
+                pressed: false,
+            });
         }
     }
     if !modifiers.ctrl {
-        keys.push(InputEvent::Key { code: VK_CONTROL, pressed: true });
+        keys.push(InputEvent::Key {
+            code: VK_CONTROL,
+            pressed: true,
+        });
     }
-    keys.push(InputEvent::Key { code, pressed: true });
-    keys.push(InputEvent::Key { code, pressed: false });
+    keys.push(InputEvent::Key {
+        code,
+        pressed: true,
+    });
+    keys.push(InputEvent::Key {
+        code,
+        pressed: false,
+    });
     if !modifiers.ctrl {
-        keys.push(InputEvent::Key { code: VK_CONTROL, pressed: false });
+        keys.push(InputEvent::Key {
+            code: VK_CONTROL,
+            pressed: false,
+        });
     }
     for (code, held) in [(VK_SHIFT, modifiers.shift), (VK_MENU, modifiers.alt)] {
         if held {
-            keys.push(InputEvent::Key { code, pressed: true });
+            keys.push(InputEvent::Key {
+                code,
+                pressed: true,
+            });
         }
     }
     keys
 }
 
-#[cfg(test)]
-mod clipboard_tests {
-    use super::*;
-
-    #[test]
-    fn copy_and_cut_restore_the_consumed_key_down() {
-        let modifiers = ModifierState { ctrl: true, ..Default::default() };
-        for (event, code) in [(egui::Event::Copy, 0x43), (egui::Event::Cut, 0x58)] {
-            assert_eq!(clipboard_shortcut(&event, modifiers), vec![
-                InputEvent::Key { code, pressed: true },
-                InputEvent::Key { code, pressed: false },
-            ]);
-        }
-    }
-
-    #[test]
-    fn shift_insert_paste_restores_shift_without_leaving_control_down() {
-        let modifiers = ModifierState { shift: true, ..Default::default() };
-        assert_eq!(clipboard_shortcut(&egui::Event::Paste("texto".into()), modifiers), vec![
-            InputEvent::Key { code: VK_SHIFT, pressed: false },
-            InputEvent::Key { code: VK_CONTROL, pressed: true },
-            InputEvent::Key { code: 0x56, pressed: true },
-            InputEvent::Key { code: 0x56, pressed: false },
-            InputEvent::Key { code: VK_CONTROL, pressed: false },
-            InputEvent::Key { code: VK_SHIFT, pressed: true },
-        ]);
-    }
-}
-
-/// Emite eventos de pulsar/soltar para Shift/Ctrl/Alt cuando su estado cambia.
 fn sync_modifiers(viewer: &mut ViewerState, mods: egui::Modifiers) {
     let mut state = viewer.modifiers;
 
@@ -1163,7 +1186,8 @@ fn show_chat_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
                 let send_clicked = ui.add(theme::primary_button(tr("Send"))).clicked();
                 let resp = ui.add_sized(
                     [ui.available_width(), 24.0],
-                    egui::TextEdit::singleline(&mut viewer.chat_input).hint_text(tr("Type a message…")),
+                    egui::TextEdit::singleline(&mut viewer.chat_input)
+                        .hint_text(tr("Type a message…")),
                 );
                 let send = send_clicked
                     || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
@@ -1175,4 +1199,89 @@ fn show_chat_panel(viewer: &mut ViewerState, ctx: &egui::Context) {
                 }
             });
         });
+}
+
+#[cfg(test)]
+mod clipboard_tests {
+    #[test]
+    fn held_backspace_delete_and_arrows_forward_repeats_and_release() {
+        for (key, vk) in [
+            (egui::Key::Backspace, 0x08),
+            (egui::Key::Delete, 0x2E),
+            (egui::Key::ArrowLeft, 0x25),
+        ] {
+            for (pressed, repeat) in [(true, false), (true, true), (true, true), (false, false)] {
+                let event = egui::Event::Key {
+                    key,
+                    physical_key: Some(key),
+                    pressed,
+                    repeat,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                assert_eq!(super::remote_key_event(&event), Some((vk, pressed)));
+            }
+        }
+    }
+
+    use super::*;
+
+    #[test]
+    fn copy_and_cut_restore_the_consumed_key_down() {
+        let modifiers = ModifierState {
+            ctrl: true,
+            ..Default::default()
+        };
+        for (event, code) in [(egui::Event::Copy, 0x43), (egui::Event::Cut, 0x58)] {
+            assert_eq!(
+                clipboard_shortcut(&event, modifiers),
+                vec![
+                    InputEvent::Key {
+                        code,
+                        pressed: true
+                    },
+                    InputEvent::Key {
+                        code,
+                        pressed: false
+                    },
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn shift_insert_paste_restores_shift_without_leaving_control_down() {
+        let modifiers = ModifierState {
+            shift: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            clipboard_shortcut(&egui::Event::Paste("texto".into()), modifiers),
+            vec![
+                InputEvent::Key {
+                    code: VK_SHIFT,
+                    pressed: false
+                },
+                InputEvent::Key {
+                    code: VK_CONTROL,
+                    pressed: true
+                },
+                InputEvent::Key {
+                    code: 0x56,
+                    pressed: true
+                },
+                InputEvent::Key {
+                    code: 0x56,
+                    pressed: false
+                },
+                InputEvent::Key {
+                    code: VK_CONTROL,
+                    pressed: false
+                },
+                InputEvent::Key {
+                    code: VK_SHIFT,
+                    pressed: true
+                },
+            ]
+        );
+    }
 }

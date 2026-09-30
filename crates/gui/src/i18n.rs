@@ -284,6 +284,13 @@ fn spanish(en: &str) -> Option<&'static str> {
         "Show in folder" => "Mostrar en la carpeta",
         "Failed: {reason}" => "Error: {reason}",
         // --- Diseño nuevo: navegación, banner, tarjetas, páginas ---
+        "General" => "General",
+        "Network" => "Red",
+        "System" => "Sistema",
+        "Refresh" => "Actualizar",
+        "Connecting" => "Conectando",
+        "Waiting for the remote device to accept and establish a secure connection." => "Esperando a que el equipo remoto acepte y establezca una conexión segura.",
+        "Waiting for the remote screen…" => "Esperando la pantalla remota…",
         "Home" => "Inicio",
         "Sessions" => "Sesiones",
         "Contacts" => "Contactos",
@@ -375,7 +382,6 @@ Descarga: https://github.com/EnriqueGF/CleanDesk/releases",
         "Unattended access enabled." => "Acceso desatendido activado.",
         "Could not enable it: {err}" => "No se pudo activar: {err}",
         "Unattended access disabled." => "Acceso desatendido desactivado.",
-        "System" => "Sistema",
         "Start with Windows (at sign-in)" => "Iniciar con Windows (al iniciar sesión)",
         "CleanDesk will open when you sign in." => "CleanDesk se abrirá al iniciar sesión.",
         "CleanDesk will no longer open when you sign in." => "CleanDesk ya no se abrirá al iniciar sesión.",
@@ -400,7 +406,6 @@ Descarga: https://github.com/EnriqueGF/CleanDesk/releases",
             "Operación cancelada: se necesitan permisos de administrador."
         }
         "Could not change the service: {err}" => "No se pudo cambiar el servicio: {err}",
-        "Network" => "Red",
         "Forced by --signal-url: {url}" => "Forzado por --signal-url: {url}",
         "Community (no server): LAN, BitTorrent DHT and Nostr relays" => {
             "Comunitario (sin servidor): LAN, DHT de BitTorrent y relés Nostr"
