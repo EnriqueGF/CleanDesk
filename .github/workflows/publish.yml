@@ -44,7 +44,6 @@ jobs:
         shell: pwsh
         run: |
           .\installer\build-msi.ps1 -Version $env:CLEANDESK_VERSION
-          Compress-Archive -Path target\release\cleandesk.exe, target\release\cleandesk-signal-server.exe, target\release\cleandesk-relay-server.exe -DestinationPath "target\msi\CleanDesk-$env:CLEANDESK_VERSION-x64-binaries.zip"
           $sums = Get-ChildItem target\msi -File | Where-Object { $_.Extension -in ".msi", ".zip" } | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
             "$hash *$($_.Name)"
@@ -58,7 +57,12 @@ jobs:
           $tag = "v$env:CLEANDESK_VERSION"
           $notes = "docs/releases/$env:CLEANDESK_VERSION.md"
           if (-not (Test-Path -LiteralPath $notes)) { throw "Missing release notes: $notes" }
-          gh release create $tag "target/msi/CleanDesk-$env:CLEANDESK_VERSION-x64.msi" "target/msi/CleanDesk-$env:CLEANDESK_VERSION-x64-binaries.zip" target/msi/SHA256SUMS --draft --title "CleanDesk $env:CLEANDESK_VERSION" --notes-file $notes --target $env:GITHUB_SHA
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag "target/msi/CleanDesk-$env:CLEANDESK_VERSION-x64.msi" "target/msi/CleanDesk-$env:CLEANDESK_VERSION-x64-binaries.zip" target/msi/SHA256SUMS --clobber
+          } else {
+            gh release create $tag "target/msi/CleanDesk-$env:CLEANDESK_VERSION-x64.msi" "target/msi/CleanDesk-$env:CLEANDESK_VERSION-x64-binaries.zip" target/msi/SHA256SUMS --draft --title "CleanDesk $env:CLEANDESK_VERSION" --notes-file $notes --target $env:GITHUB_SHA
+          }
           if ($LASTEXITCODE -ne 0) { throw "Release upload failed" }
-          gh release edit $tag --draft=false --latest
+          gh release edit $tag --draft=false --latest --notes-file $notes
           if ($LASTEXITCODE -ne 0) { throw "Release publication failed" }
